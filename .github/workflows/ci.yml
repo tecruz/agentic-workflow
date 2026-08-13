@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
 
 jobs:
@@ -18,7 +18,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
 
       - name: Install bats
         run: |
@@ -39,7 +39,7 @@ jobs:
       - name: Install Pester for PowerShell 7
         shell: pwsh
         run: |
-          Install-Module Pester -RequiredVersion 3.4.0 -Scope CurrentUser -Force -SkipPublisherCheck
+          Install-Module Pester -RequiredVersion 5.6.0 -Scope CurrentUser -Force -SkipPublisherCheck
 
       - name: Run the framework's own checks
         run: bash .agentic/scripts/verify.sh
@@ -58,7 +58,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
 
       - name: Install bats-core
         shell: pwsh
@@ -73,7 +73,7 @@ jobs:
       - name: Install Pester and PSScriptAnalyzer
         shell: pwsh
         run: |
-          Install-Module Pester -RequiredVersion 3.4.0 -Scope CurrentUser -Force -SkipPublisherCheck
+          Install-Module Pester -RequiredVersion 5.6.0 -Scope CurrentUser -Force -SkipPublisherCheck
           Install-Module PSScriptAnalyzer -Scope CurrentUser -Force -SkipPublisherCheck
 
       - name: Run the framework's own checks
@@ -83,7 +83,7 @@ jobs:
       - name: Run Pester test suites
         shell: pwsh
         run: |
-          Import-Module Pester
+          Import-Module Pester -MinimumVersion 5.0
           $r = Invoke-Pester -Script tests/pester -PassThru
           if ($r.FailedCount -gt 0) { exit 1 }
 
