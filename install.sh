@@ -258,8 +258,8 @@ install_merge() {
         printf '%s\t%s\t%s\n' "$rel" merge "$(cksum_file "$dst")" >> "$MANIFEST_TMP"
         return
     fi
-    start_count="$(grep -F -- "$START_MARKER" "$dst" 2>/dev/null | wc -l || echo 0)"
-    end_count="$(grep -F -- "$END_MARKER" "$dst" 2>/dev/null | wc -l || echo 0)"
+    start_count="$(grep -c -F -- "$START_MARKER" "$dst" 2>/dev/null || true)"
+    end_count="$(grep -c -F -- "$END_MARKER" "$dst" 2>/dev/null || true)"
     if [ "$start_count" -gt 1 ] || [ "$end_count" -gt 1 ] || { { [ "$start_count" -eq 1 ] && [ "$end_count" -eq 0 ]; } || { [ "$start_count" -eq 0 ] && [ "$end_count" -eq 1 ]; }; }; then
         [ "$PLAN" -eq 1 ] && { echo "  conflict $rel (malformed merge markers; candidate: $rel.new)"; return; }
         cp "$src" "${dst}.new"
@@ -273,7 +273,11 @@ install_merge() {
         [ "$PLAN" -eq 1 ] && { echo "  merge  $rel (update managed block, preserve custom content)"; return; }
         [ "$BACKUP" -eq 1 ] && backup_file "$rel"
         tmp="${dst}.agentic-tmp"
-        ( head -n "$((start_line - 1))" "$dst"; cat "$src"; tail -n +"$((end_line + 1))" "$dst" ) > "$tmp"
+        (
+            if [ "$start_line" -gt 1 ]; then head -n "$((start_line - 1))" "$dst"; fi
+            cat "$src"
+            tail -n +"$((end_line + 1))" "$dst"
+        ) > "$tmp"
         mv "$tmp" "$dst"
         echo "  merge  $rel (managed block updated, custom content preserved)"
         printf '%s\t%s\t%s\n' "$rel" merge "$(cksum_file "$dst")" >> "$MANIFEST_TMP"

@@ -9,5 +9,5 @@ required	sh-syntax-install	.	bash	-n	install.sh
 required	sh-syntax-verify	.	bash	-n	.agentic/scripts/verify.sh
 required	ps-syntax	.	pwsh	-NoProfile	-Command	$err = $false; foreach ($f in @('install.ps1', '.agentic/scripts/verify.ps1')) { try { [scriptblock]::Create((Get-Content -Raw -LiteralPath $f)) | Out-Null } catch { Write-Error $_.Exception.Message; $err = $true } }; if ($err) { exit 1 }
 required	bats	.	bats	tests/bats
-required	pester	.	pwsh	-NoProfile	-Command	Import-Module Pester; $r = Invoke-Pester -Script 'tests/pester' -PassThru; if ($r.FailedCount -gt 0) { exit 1 }
+required	pester	.	pwsh	-NoProfile	-Command	Import-Module Pester -MinimumVersion 5.0; $r = Invoke-Pester -Script 'tests/pester' -PassThru; if ($r.FailedCount -gt 0) { exit 1 }
 optional	shellcheck	.	shellcheck	install.sh	.agentic/scripts/verify.sh

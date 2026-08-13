@@ -200,7 +200,7 @@ validate_checks_tsv() {
     local file="$1"
     local line_num=0
     local line
-    declare -A seen_ids=()
+    local seen_ids=""
     local root_dir
     root_dir="$(pwd)"
 
@@ -234,18 +234,25 @@ validate_checks_tsv() {
             exit 1
         fi
 
-        if [ -n "${seen_ids[$id]:-}" ]; then
-            echo "ERROR: .agentic/checks.tsv line $line_num has duplicate check ID '$id'." >&2
-            exit 1
-        fi
-        seen_ids["$id"]=1
+        case " $seen_ids " in
+            *" $id "*)
+                echo "ERROR: .agentic/checks.tsv line $line_num has duplicate check ID '$id'." >&2
+                exit 1 ;;
+        esac
+        seen_ids="$seen_ids $id"
 
         local resolved_cwd
         resolved_cwd="$(cd "$cwd" 2>/dev/null && pwd || true)"
-        if [ -z "$resolved_cwd" ] || [[ "$resolved_cwd" != "$root_dir"* ]]; then
-            echo "ERROR: .agentic/checks.tsv line $line_num working directory '$cwd' escapes project root." >&2
+        if [ -z "$resolved_cwd" ]; then
+            echo "ERROR: .agentic/checks.tsv line $line_num working directory '$cwd' does not exist." >&2
             exit 1
         fi
+        case "$resolved_cwd" in
+            "$root_dir" | "$root_dir/"*) : ;;
+            *)
+                echo "ERROR: .agentic/checks.tsv line $line_num working directory '$cwd' escapes project root." >&2
+                exit 1 ;;
+        esac
     done < "$file"
 }
 
