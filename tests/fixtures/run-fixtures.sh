@@ -4,9 +4,10 @@
 #   --emit-checks detection assertions for the stack fixtures.
 # usage: run-fixtures.sh <verify.sh>
 set -u
-VERIFY="$1"
+VERIFY="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 FIX="$ROOT/tests/fixtures"
+FAILURES=0
 
 has() { command -v "$1" >/dev/null 2>&1; }
 
@@ -21,7 +22,14 @@ expect_code() {  # expect_code <fixture> <expected>
     local name="$1" expected="$2" code
     ( cd "$FIX/$name" && bash "$VERIFY" >/dev/null 2>&1 )
     code=$?
-    printf '%-24s expected=%-3s actual=%s  %s\n' "$name" "$expected" "$code" "$( [ "$code" = "$expected" ] && echo OK || echo MISMATCH )"
+    local status
+    if [ "$code" = "$expected" ]; then
+        status="OK"
+    else
+        status="MISMATCH"
+        FAILURES=$((FAILURES + 1))
+    fi
+    printf '%-24s expected=%-3s actual=%s  %s\n' "$name" "$expected" "$code" "$status"
 }
 
 expect_detect() {  # expect_detect <fixture> <tool1> [tool2...]
@@ -35,7 +43,14 @@ expect_detect() {  # expect_detect <fixture> <tool1> [tool2...]
             printf '%s' "$out" | grep -q "$t" || { echo "  $name: did not emit $t"; missing=1; }
         done
     fi
-    printf '%-24s emit-checks       %s\n' "$name" "$( [ "$missing" -eq 0 ] && echo OK || echo MISMATCH )"
+    local status
+    if [ "$missing" -eq 0 ]; then
+        status="OK"
+    else
+        status="MISMATCH"
+        FAILURES=$((FAILURES + 1))
+    fi
+    printf '%-24s emit-checks       %s\n' "$name" "$status"
 }
 
 # State-model exit codes (executable availability makes them environment-aware).
@@ -53,5 +68,14 @@ expect_detect python-uv           uv
 expect_detect python-poetry       poetry
 expect_detect dotnet-sln-only     dotnet
 expect_detect dotnet-csproj-only  dotnet
+expect_detect rust-cargo          cargo
+expect_detect go-mod              go
+expect_detect java-maven          mvn
 expect_detect monorepo            pnpm go
 expect_detect unsupported         __none__
+
+if [ "$FAILURES" -ne 0 ]; then
+    echo "$FAILURES fixture assertion(s) failed" >&2
+    exit 1
+fi
+exit 0

@@ -130,4 +130,37 @@ Describe 'install.ps1' {
         }
         finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
     }
+
+    It '-ReplaceManaged never touches checks.tsv' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp *> $null
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value 'custom checks content'
+            & $install -Target $tmp -ReplaceManaged *> $null
+            (Get-Content -Raw (Join-Path $tmp '.agentic\checks.tsv')) -match 'custom checks content' | Should Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-RegenerateChecks overwrites checks.tsv when -GenerateChecks is passed' {
+        $tmp = New-TestDir
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'package.json') -Value '{"name":"x","scripts":{"test":"true"}}'
+            & $install -Target $tmp -GenerateChecks *> $null
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value 'custom checks content'
+            & $install -Target $tmp -GenerateChecks -RegenerateChecks *> $null
+            (Get-Content -Raw (Join-Path $tmp '.agentic\checks.tsv')) -match 'custom checks content' | Should Be $false
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'malformed merge markers produce a conflict candidate' {
+        $tmp = New-TestDir
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'AGENTS.md') -Value "<!-- @@AGENTIC-PROTOCOL-START@@ -->`nsome content"
+            & $install -Target $tmp *> $null
+            Test-Path (Join-Path $tmp 'AGENTS.md.new') | Should Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
 }

@@ -167,7 +167,7 @@ function Get-DetectedChecks {
             $lines += "required`ttest`t.`tpoetry`trun`tpytest"
             $lines += "required`tlint`t.`tpoetry`trun`truff`tcheck`t."
         }
-        elseif ((Test-Path -LiteralPath uv.lock) -or ((Test-Path -LiteralPath pyproject.toml) -and (Test-Command uv))) {
+        elseif (Test-Path -LiteralPath uv.lock) {
             $lines += "required`ttest`t.`tuv`trun`tpytest"
             $lines += "required`tlint`t.`tuv`trun`truff`tcheck`t."
         }
@@ -216,6 +216,52 @@ function Get-DetectedChecks {
     return $lines
 }
 
+function Test-ChecksTsvValidation {
+    param([string] $FilePath)
+    $lines = Get-Content -LiteralPath $FilePath
+    $lineNum = 0
+    $seenIds = @{}
+    $rootPath = (Get-Location).Path
+
+    foreach ($rawLine in $lines) {
+        $lineNum++
+        if ([string]::IsNullOrWhiteSpace($rawLine) -or $rawLine.TrimStart().StartsWith('#')) {
+            continue
+        }
+        $fields = $rawLine -split "`t"
+        if ($fields.Count -lt 4) {
+            Write-Host "ERROR: .agentic/checks.tsv line $lineNum has fewer than 4 fields."
+            exit 1
+        }
+        $requirement = $fields[0]
+        $id = $fields[1]
+        $cwd = $fields[2]
+        $exe = $fields[3]
+
+        if ($requirement -ne 'required' -and $requirement -ne 'optional') {
+            Write-Host "ERROR: .agentic/checks.tsv line $lineNum has invalid requirement '$requirement' (expected 'required' or 'optional')."
+            exit 1
+        }
+        if ([string]::IsNullOrWhiteSpace($id) -or [string]::IsNullOrWhiteSpace($cwd) -or [string]::IsNullOrWhiteSpace($exe)) {
+            Write-Host "ERROR: .agentic/checks.tsv line $lineNum has empty check ID, working directory, or executable."
+            exit 1
+        }
+        if ($seenIds.ContainsKey($id)) {
+            Write-Host "ERROR: .agentic/checks.tsv line $lineNum has duplicate check ID '$id'."
+            exit 1
+        }
+        $seenIds[$id] = $true
+
+        $targetCwd = Join-Path $rootPath $cwd
+        $resolvedCwd = [System.IO.Path]::GetFullPath($targetCwd)
+        $resolvedRoot = [System.IO.Path]::GetFullPath($rootPath)
+        if (-not $resolvedCwd.StartsWith($resolvedRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+            Write-Host "ERROR: .agentic/checks.tsv line $lineNum working directory '$cwd' escapes project root."
+            exit 1
+        }
+    }
+}
+
 $checksPath = ".agentic/checks.tsv"
 $checksDefined = $false
 if (Test-Path -LiteralPath $checksPath) {
@@ -228,6 +274,7 @@ if ($EmitChecks) {
 }
 
 if ($checksDefined) {
+    Test-ChecksTsvValidation -FilePath $checksPath
     Write-Host "Using project checks: $checksPath"
     $script:Detected = $true
     Get-Content -LiteralPath $checksPath | ForEach-Object {

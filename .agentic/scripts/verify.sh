@@ -141,7 +141,7 @@ detect() {
         if [ -f poetry.lock ]; then
             echo "required	test	.	poetry	run	pytest"
             echo "required	lint	.	poetry	run	ruff	check	."
-        elif [ -f uv.lock ] || { [ -f pyproject.toml ] && have uv; }; then
+        elif [ -f uv.lock ]; then
             echo "required	test	.	uv	run	pytest"
             echo "required	lint	.	uv	run	ruff	check	."
         else
@@ -196,6 +196,59 @@ checks_defined() {
     [ -f "$f" ] && grep -Ev '^[[:space:]]*(#|$)' "$f" | grep -q .
 }
 
+validate_checks_tsv() {
+    local file="$1"
+    local line_num=0
+    local line
+    declare -A seen_ids=()
+    local root_dir
+    root_dir="$(pwd)"
+
+    while IFS= read -r line || [ -n "$line" ]; do
+        line_num=$((line_num + 1))
+        case "$line" in
+            '' | \#*) continue ;;
+        esac
+
+        local requirement id cwd exe rest
+        local -a fields=()
+        IFS=$'\t' read -r -a fields <<< "$line"
+
+        if [ "${#fields[@]}" -lt 4 ]; then
+            echo "ERROR: .agentic/checks.tsv line $line_num has fewer than 4 fields." >&2
+            exit 1
+        fi
+
+        requirement="${fields[0]}"
+        id="${fields[1]}"
+        cwd="${fields[2]}"
+        exe="${fields[3]}"
+
+        if [ "$requirement" != "required" ] && [ "$requirement" != "optional" ]; then
+            echo "ERROR: .agentic/checks.tsv line $line_num has invalid requirement '$requirement' (expected 'required' or 'optional')." >&2
+            exit 1
+        fi
+
+        if [ -z "$id" ] || [ -z "$cwd" ] || [ -z "$exe" ]; then
+            echo "ERROR: .agentic/checks.tsv line $line_num has empty check ID, working directory, or executable." >&2
+            exit 1
+        fi
+
+        if [ -n "${seen_ids[$id]:-}" ]; then
+            echo "ERROR: .agentic/checks.tsv line $line_num has duplicate check ID '$id'." >&2
+            exit 1
+        fi
+        seen_ids["$id"]=1
+
+        local resolved_cwd
+        resolved_cwd="$(cd "$cwd" 2>/dev/null && pwd || true)"
+        if [ -z "$resolved_cwd" ] || [[ "$resolved_cwd" != "$root_dir"* ]]; then
+            echo "ERROR: .agentic/checks.tsv line $line_num working directory '$cwd' escapes project root." >&2
+            exit 1
+        fi
+    done < "$file"
+}
+
 emit_checks() {
     detect
     exit 0
@@ -206,6 +259,7 @@ if [ "${1:-}" = "--emit-checks" ]; then
 fi
 
 if checks_defined; then
+    validate_checks_tsv "$(checks_file)"
     echo "Using project checks: .agentic/checks.tsv"
     DETECTED=1
     while IFS= read -r line; do

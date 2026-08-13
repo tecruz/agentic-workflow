@@ -52,4 +52,16 @@ Describe 'verify.ps1 state model' {
         $code | Should Be 0
         $out | Where-Object { $_ -match "`tuv`t" } | Should Not Be $null
     }
+
+    It 'invalid checks.tsv (invalid requirement / missing fields / path traversal) exits nonzero' {
+        $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vtest-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic') -Force | Out-Null
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value "requiredd`ttest`t.`tnpm`ttest"
+            Push-Location $tmp
+            try { & $verify *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
+            $code | Should Not Be 0
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
 }

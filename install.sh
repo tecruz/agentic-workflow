@@ -25,6 +25,7 @@
 #                        Default: claude,gemini,aider. AGENTS.md is always
 #                        installed; other tools read AGENTS.md natively.
 #   --generate-checks    Write .agentic/checks.tsv from the detected stack.
+#   --replace-checks     Overwrite existing .agentic/checks.tsv when generating checks.
 #   --replace-managed    Replace framework-managed files even when the adopter
 #                        modified them. Never touches project-owned files.
 #   --force              Deprecated alias for --replace-managed.
@@ -48,6 +49,7 @@ Options:
                        Default: claude,gemini,aider. AGENTS.md is always
                        installed; other tools read AGENTS.md natively.
   --generate-checks    Write .agentic/checks.tsv from the detected stack.
+  --replace-checks     Overwrite existing .agentic/checks.tsv when generating checks.
   --replace-managed    Replace framework-managed files even when the adopter
                        modified them. Never touches project-owned files.
   --force              Deprecated alias for --replace-managed.
@@ -61,6 +63,7 @@ TARGET_DIR="."
 PLAN=0
 BACKUP=0
 REPLACE_MANAGED=0
+REPLACE_CHECKS=0
 GENERATE_CHECKS=0
 UPDATE=0
 TOOLS_RAW="claude,gemini,aider"
@@ -74,6 +77,7 @@ while [ $# -gt 0 ]; do
         --update) UPDATE=1 ;;
         --backup) BACKUP=1 ;;
         --replace-managed|--force) REPLACE_MANAGED=1 ;;
+        --replace-checks) REPLACE_CHECKS=1 ;;
         --generate-checks) GENERATE_CHECKS=1 ;;
         --tools) TOOLS_RAW="$2"; shift ;;
         --tools=*) TOOLS_RAW="${1#*=}" ;;
@@ -245,13 +249,22 @@ install_seed_checks() {
 
 install_merge() {
     local src="$1" rel="$2"
-    local dst="$TARGET_DIR/$rel" start_line end_line tmp
+    local dst="$TARGET_DIR/$rel" start_line end_line tmp start_count end_count
     if [ ! -e "$dst" ]; then
         [ "$PLAN" -eq 1 ] && { echo "  merge  $rel (create)"; return; }
         mkdir -p "$(dirname "$dst")"
         cp "$src" "$dst"
         echo "  merge  $rel (create)"
         printf '%s\t%s\t%s\n' "$rel" merge "$(cksum_file "$dst")" >> "$MANIFEST_TMP"
+        return
+    fi
+    start_count="$(grep -F -- "$START_MARKER" "$dst" 2>/dev/null | wc -l || echo 0)"
+    end_count="$(grep -F -- "$END_MARKER" "$dst" 2>/dev/null | wc -l || echo 0)"
+    if [ "$start_count" -gt 1 ] || [ "$end_count" -gt 1 ] || { { [ "$start_count" -eq 1 ] && [ "$end_count" -eq 0 ]; } || { [ "$start_count" -eq 0 ] && [ "$end_count" -eq 1 ]; }; }; then
+        [ "$PLAN" -eq 1 ] && { echo "  conflict $rel (malformed merge markers; candidate: $rel.new)"; return; }
+        cp "$src" "${dst}.new"
+        echo "  conflict $rel (malformed merge markers detected; wrote $rel.new)"
+        printf '%s\t%s\t%s\n' "$rel" merge "$(cksum_file "$src")" >> "$MANIFEST_TMP"
         return
     fi
     start_line="$(grep -n -F -- "$START_MARKER" "$dst" 2>/dev/null | head -n1 | cut -d: -f1 || true)"
@@ -283,8 +296,8 @@ install_merge() {
 generate_checks() {
     local dst checks tmp
     dst="$TARGET_DIR/.agentic/checks.tsv"
-    if [ -e "$dst" ] && [ "$REPLACE_MANAGED" -eq 0 ]; then
-        echo "  skip   .agentic/checks.tsv (already exists; use --replace-managed to overwrite)"
+    if [ -e "$dst" ] && [ "$REPLACE_CHECKS" -eq 0 ]; then
+        echo "  skip   .agentic/checks.tsv (already exists; use --replace-checks to overwrite)"
         return
     fi
     [ "$PLAN" -eq 1 ] && { echo "  gen    .agentic/checks.tsv (from detected stack)"; return; }

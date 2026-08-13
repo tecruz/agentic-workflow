@@ -58,6 +58,7 @@ param(
     [switch] $Backup,
     [string] $Tools = "claude,gemini,aider",
     [switch] $GenerateChecks,
+    [switch] $RegenerateChecks,
     [switch] $ReplaceManaged,
     [switch] $Force
 )
@@ -279,8 +280,18 @@ function Install-Merge {
     }
 
     $existing = Get-Content -Raw -LiteralPath $dst
+    $startCount = ([regex]::Matches($existing, [regex]::Escape($StartMarker))).Count
+    $endCount = ([regex]::Matches($existing, [regex]::Escape($EndMarker))).Count
     $startIdx = $existing.IndexOf($StartMarker)
     $endIdx = if ($startIdx -ge 0) { $existing.IndexOf($EndMarker, $startIdx) } else { -1 }
+
+    if ($startCount -gt 1 -or $endCount -gt 1 -or (($startCount -eq 1 -and $endCount -eq 0) -or ($startCount -eq 0 -and $endCount -eq 1) -or ($startCount -eq 1 -and $endCount -eq 1 -and $endIdx -le $startIdx))) {
+        if ($script:Plan) { Write-Host "  conflict $RelativePath (malformed merge markers)"; return }
+        Copy-Item -LiteralPath $src -Destination "$dst.new" -Force
+        Write-Host "  conflict $RelativePath (malformed merge markers detected; wrote $RelativePath.new)"
+        Add-ManifestEntry $RelativePath "merge" (Get-FileChecksum $src)
+        return
+    }
 
     if ($startIdx -ge 0 -and $endIdx -gt $startIdx) {
         if ($script:Plan) { Write-Host "  merge  $RelativePath (update managed block, preserve custom content)"; return }
@@ -308,8 +319,8 @@ function Install-Merge {
 
 function New-Checks {
     $dst = Join-Path $TargetDir ".agentic\checks.tsv"
-    if ((Test-Path -LiteralPath $dst) -and (-not $script:ReplaceManaged)) {
-        Write-Host "  skip   .agentic/checks.tsv (already exists; use -ReplaceManaged to overwrite)"
+    if ((Test-Path -LiteralPath $dst) -and (-not $RegenerateChecks)) {
+        Write-Host "  skip   .agentic/checks.tsv (already exists; use -RegenerateChecks to overwrite)"
         return
     }
     if ($script:Plan) { Write-Host "  gen    .agentic/checks.tsv (from detected stack)"; return }
