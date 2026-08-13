@@ -62,9 +62,21 @@ function Invoke-Check {
         [string[]] $ArgsList
     )
 
-    if (-not (Test-Path -LiteralPath $Cwd)) {
+    # A working directory must resolve to an existing directory, or the check
+    # is BLOCKED (never PASS). Test-Path alone is unreliable for broken symbolic
+    # links on some platforms, so confirm the physically resolved path exists.
+    # The cwd is relative to the project root (PowerShell's current location),
+    # not the .NET process working directory that GetFullPath would otherwise use.
+    $cwdAbsolute = Join-Path (Get-Location).Path $Cwd
+    try {
+        $resolvedCwdPath = Resolve-PhysicalPath $cwdAbsolute
+    }
+    catch {
+        $resolvedCwdPath = $null
+    }
+    if (-not $resolvedCwdPath -or -not [System.IO.Directory]::Exists($resolvedCwdPath)) {
         if ($Requirement -eq 'required') { $script:Blocked = $true }
-        Write-Host "  BLOCKED: working directory '$Cwd' does not exist"
+        Write-Host "  BLOCKED: working directory '$Cwd' does not exist or cannot be used"
         return
     }
 

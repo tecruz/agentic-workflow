@@ -1,6 +1,12 @@
 # verify.ps1 — state-model tests (Pester 5, dash assertions).
 # Helpers and paths live in BeforeEach: Pester 5 does not expose file-scope
 # functions/variables inside Describe/It blocks.
+#
+# These tests run on every CI platform (Windows, Linux, macOS) because the
+# framework's own checks invoke the Pester suite via verify.sh/verify.ps1.
+# They must therefore be cross-platform: the no-op passing check uses pwsh
+# (installed on all runners), and link/junction constructs are created only
+# where the platform supports them.
 Describe 'verify.ps1 state model' {
 
     BeforeEach {
@@ -13,6 +19,12 @@ Describe 'verify.ps1 state model' {
             try { & $verify *> $null }
             finally { Pop-Location }
             return $LASTEXITCODE
+        }
+
+        # A check that runs and exits 0 on every platform. pwsh is present on all
+        # CI runners, so it is the cross-platform stand-in for `cmd /c exit 0`.
+        function New-PassingCheck([string]$cwd = '.', [string]$id = 'ok') {
+            "required`t$id`t$cwd`tpwsh`t-NoProfile`t-Command`texit`t0"
         }
     }
 
@@ -73,7 +85,7 @@ Describe 'verify.ps1 state model' {
         $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vtest-' + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic') -Force | Out-Null
         try {
-            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value "required`tok`t.`tcmd`t/c`texit`t0"
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value (New-PassingCheck '.')
             Push-Location $tmp
             try { & $verify *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
             $code | Should -Be 0
@@ -86,7 +98,7 @@ Describe 'verify.ps1 state model' {
         New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic') -Force | Out-Null
         New-Item -ItemType Directory -Path (Join-Path $tmp 'nested') -Force | Out-Null
         try {
-            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value "required`tok`tnested`tcmd`t/c`texit`t0"
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value (New-PassingCheck 'nested')
             Push-Location $tmp
             try { & $verify *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
             $code | Should -Be 0
@@ -102,7 +114,7 @@ Describe 'verify.ps1 state model' {
         New-Item -ItemType Directory -Path $sibling -Force | Out-Null
         try {
             $escape = Join-Path '..' (Split-Path -Leaf $sibling)
-            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value "required`tok`t$escape`tcmd`t/c`texit`t0"
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value (New-PassingCheck $escape)
             Push-Location $tmp
             try { & $verify *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
             $code | Should -Be 1
@@ -113,14 +125,23 @@ Describe 'verify.ps1 state model' {
         }
     }
 
-    It 'checks.tsv working dir through a junction escape is rejected' {
+    It 'checks.tsv working dir through a link escape is rejected' {
         $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vtest-' + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic') -Force | Out-Null
         $outside = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vout-' + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $outside -Force | Out-Null
         try {
-            New-Item -ItemType Junction -Path (Join-Path $tmp 'escape') -Target $outside -Force | Out-Null
-            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value "required`tok`tescape`tcmd`t/c`texit`t0"
+            # Junctions are Windows-only; use a symbolic link elsewhere.
+            try {
+                if ($env:OS -eq 'Windows_NT') {
+                    New-Item -ItemType Junction -Path (Join-Path $tmp 'escape') -Target $outside -Force -ErrorAction Stop | Out-Null
+                }
+                else {
+                    New-Item -ItemType SymbolicLink -Path (Join-Path $tmp 'escape') -Target $outside -Force -ErrorAction Stop | Out-Null
+                }
+            }
+            catch { return }  # links unavailable (privilege / platform): skip
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value (New-PassingCheck 'escape')
             Push-Location $tmp
             try { & $verify *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
             $code | Should -Be 1
@@ -141,7 +162,7 @@ Describe 'verify.ps1 state model' {
         $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vtest-' + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic') -Force | Out-Null
         try {
-            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value "required`tok`tmissing-dir`tcmd`t/c`texit`t0"
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value (New-PassingCheck 'missing-dir')
             Push-Location $tmp
             try { & $verify *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
             $code | Should -Be 2
@@ -158,7 +179,7 @@ Describe 'verify.ps1 state model' {
         try {
             Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value "required`tlint`t.`t./tools/lint"
             $oldPath = $env:PATH
-            $env:PATH = $fakeBin + ';' + $oldPath
+            $env:PATH = $fakeBin + [System.IO.Path]::PathSeparator + $oldPath
             try {
                 Push-Location $tmp
                 try { & $verify *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
@@ -190,7 +211,7 @@ Describe 'verify.ps1 state model' {
         $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vtest-' + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic') -Force | Out-Null
         try {
-            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value @('  # indented comment', "required`tok`t.`tcmd`t/c`texit`t0")
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value @('  # indented comment', (New-PassingCheck '.'))
             Push-Location $tmp
             try { & $verify *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
             $code | Should -Be 0
@@ -207,7 +228,7 @@ Describe 'verify.ps1 state model' {
                 New-Item -ItemType SymbolicLink -Path (Join-Path $tmp 'rel-inside') -Target '.\nested' -Force -ErrorAction Stop | Out-Null
             }
             catch { return }  # symlinks unavailable (privilege / platform): skip
-            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value "required`tok`trel-inside`tcmd`t/c`texit`t0"
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value (New-PassingCheck 'rel-inside')
             Push-Location $tmp
             try { & $verify *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
             $code | Should -Be 0
@@ -226,7 +247,7 @@ Describe 'verify.ps1 state model' {
                 New-Item -ItemType SymbolicLink -Path (Join-Path $tmp 'rel-outside') -Target $relTarget -Force -ErrorAction Stop | Out-Null
             }
             catch { return }  # symlinks unavailable: skip
-            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value "required`tok`trel-outside`tcmd`t/c`texit`t0"
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value (New-PassingCheck 'rel-outside')
             Push-Location $tmp
             try { & $verify *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
             $code | Should -Be 1
@@ -247,7 +268,7 @@ Describe 'verify.ps1 state model' {
                 New-Item -ItemType SymbolicLink -Path (Join-Path $tmp 'hop2') -Target '.\hop1' -Force -ErrorAction Stop | Out-Null
             }
             catch { return }  # symlinks unavailable: skip
-            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value "required`tok`thop2`tcmd`t/c`texit`t0"
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value (New-PassingCheck 'hop2')
             Push-Location $tmp
             try { & $verify *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
             $code | Should -Be 0
@@ -263,7 +284,7 @@ Describe 'verify.ps1 state model' {
                 New-Item -ItemType SymbolicLink -Path (Join-Path $tmp 'broken-link') -Target '.\missing-dir' -Force -ErrorAction Stop | Out-Null
             }
             catch { return }  # symlinks unavailable: skip
-            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value "required`tok`tbroken-link`tcmd`t/c`texit`t0"
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value (New-PassingCheck 'broken-link')
             Push-Location $tmp
             try { & $verify *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
             $code | Should -Be 2
@@ -280,7 +301,7 @@ Describe 'verify.ps1 state model' {
                 New-Item -ItemType SymbolicLink -Path (Join-Path $tmp 'cycB') -Target '.\cycA' -Force -ErrorAction Stop | Out-Null
             }
             catch { return }  # symlinks unavailable: skip
-            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value "required`tok`tcycA`tcmd`t/c`texit`t0"
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value (New-PassingCheck 'cycA')
             Push-Location $tmp
             try { & $verify *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
             # The cycle is an unresolvable working directory: configuration
