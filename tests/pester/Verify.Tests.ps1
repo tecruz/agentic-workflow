@@ -225,7 +225,7 @@ Describe 'verify.ps1 state model' {
         New-Item -ItemType Directory -Path (Join-Path $tmp 'nested') -Force | Out-Null
         try {
             try {
-                New-Item -ItemType SymbolicLink -Path (Join-Path $tmp 'rel-inside') -Target '.\nested' -Force -ErrorAction Stop | Out-Null
+                New-Item -ItemType SymbolicLink -Path (Join-Path $tmp 'rel-inside') -Target (Join-Path '.' 'nested') -Force -ErrorAction Stop | Out-Null
             }
             catch { return }  # symlinks unavailable (privilege / platform): skip
             Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value (New-PassingCheck 'rel-inside')
@@ -242,7 +242,7 @@ Describe 'verify.ps1 state model' {
         $outside = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vout-' + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $outside -Force | Out-Null
         try {
-            $relTarget = '..\' + (Split-Path -Leaf $outside)
+            $relTarget = Join-Path '..' (Split-Path -Leaf $outside)
             try {
                 New-Item -ItemType SymbolicLink -Path (Join-Path $tmp 'rel-outside') -Target $relTarget -Force -ErrorAction Stop | Out-Null
             }
@@ -264,8 +264,8 @@ Describe 'verify.ps1 state model' {
         New-Item -ItemType Directory -Path (Join-Path $tmp 'nested') -Force | Out-Null
         try {
             try {
-                New-Item -ItemType SymbolicLink -Path (Join-Path $tmp 'hop1') -Target '.\nested' -Force -ErrorAction Stop | Out-Null
-                New-Item -ItemType SymbolicLink -Path (Join-Path $tmp 'hop2') -Target '.\hop1' -Force -ErrorAction Stop | Out-Null
+                New-Item -ItemType SymbolicLink -Path (Join-Path $tmp 'hop1') -Target (Join-Path '.' 'nested') -Force -ErrorAction Stop | Out-Null
+                New-Item -ItemType SymbolicLink -Path (Join-Path $tmp 'hop2') -Target (Join-Path '.' 'hop1') -Force -ErrorAction Stop | Out-Null
             }
             catch { return }  # symlinks unavailable: skip
             Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value (New-PassingCheck 'hop2')
@@ -281,7 +281,7 @@ Describe 'verify.ps1 state model' {
         New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic') -Force | Out-Null
         try {
             try {
-                New-Item -ItemType SymbolicLink -Path (Join-Path $tmp 'broken-link') -Target '.\missing-dir' -Force -ErrorAction Stop | Out-Null
+                New-Item -ItemType SymbolicLink -Path (Join-Path $tmp 'broken-link') -Target (Join-Path '.' 'missing-dir') -Force -ErrorAction Stop | Out-Null
             }
             catch { return }  # symlinks unavailable: skip
             Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value (New-PassingCheck 'broken-link')
@@ -297,8 +297,8 @@ Describe 'verify.ps1 state model' {
         New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic') -Force | Out-Null
         try {
             try {
-                New-Item -ItemType SymbolicLink -Path (Join-Path $tmp 'cycA') -Target '.\cycB' -Force -ErrorAction Stop | Out-Null
-                New-Item -ItemType SymbolicLink -Path (Join-Path $tmp 'cycB') -Target '.\cycA' -Force -ErrorAction Stop | Out-Null
+                New-Item -ItemType SymbolicLink -Path (Join-Path $tmp 'cycA') -Target (Join-Path '.' 'cycB') -Force -ErrorAction Stop | Out-Null
+                New-Item -ItemType SymbolicLink -Path (Join-Path $tmp 'cycB') -Target (Join-Path '.' 'cycA') -Force -ErrorAction Stop | Out-Null
             }
             catch { return }  # symlinks unavailable: skip
             Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value (New-PassingCheck 'cycA')
