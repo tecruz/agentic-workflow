@@ -175,7 +175,13 @@ Describe 'verify.ps1 state model' {
         New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic') -Force | Out-Null
         $fakeBin = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-fakebin-' + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $fakeBin -Force | Out-Null
-        Set-Content -LiteralPath (Join-Path $fakeBin 'lint.cmd') -Value '@exit 0'
+        if ($env:OS -eq 'Windows_NT') {
+            Set-Content -LiteralPath (Join-Path $fakeBin 'lint.cmd') -Value '@exit 0'
+        }
+        else {
+            Set-Content -LiteralPath (Join-Path $fakeBin 'lint') -Value "#!/usr/bin/env sh`nexit 0"
+            & chmod +x (Join-Path $fakeBin 'lint')
+        }
         try {
             Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value "required`tlint`t.`t./tools/lint"
             $oldPath = $env:PATH
