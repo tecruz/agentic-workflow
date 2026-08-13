@@ -14,11 +14,21 @@ Describe 'verify.ps1 state model' {
         $verify = Join-Path $repoRoot '.agentic\scripts\verify.ps1'
         $fix = Join-Path $repoRoot 'tests\fixtures'
 
+        function Invoke-Verify {
+            $out = & $verify 2>&1
+            $code = $LASTEXITCODE
+            if ($code -ne 0) {
+                Write-Host "--- VERIFY FAILED (exit $code) ---"
+                $out | ForEach-Object { Write-Host $_ }
+                Write-Host "----------------------------------"
+            }
+            return $code
+        }
+
         function Invoke-Fixture([string]$name) {
             Push-Location (Join-Path $fix $name)
-            try { & $verify *> $null }
+            try { return Invoke-Verify }
             finally { Pop-Location }
-            return $LASTEXITCODE
         }
 
         # A check that runs and exits 0 on every platform. pwsh is present on all
@@ -75,7 +85,7 @@ Describe 'verify.ps1 state model' {
         try {
             Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value "requiredd`ttest`t.`tnpm`ttest"
             Push-Location $tmp
-            try { & $verify *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
+            try { $code = Invoke-Verify } finally { Pop-Location }
             $code | Should -Not -Be 0
         }
         finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
@@ -188,7 +198,7 @@ Describe 'verify.ps1 state model' {
             $env:PATH = $fakeBin + [System.IO.Path]::PathSeparator + $oldPath
             try {
                 Push-Location $tmp
-                try { & $verify *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
+                try { $code = Invoke-Verify } finally { Pop-Location }
             }
             finally { $env:PATH = $oldPath }
             # A missing configured path must be BLOCKED (2), never resolved to
@@ -309,7 +319,7 @@ Describe 'verify.ps1 state model' {
             catch { return }  # symlinks unavailable: skip
             Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value (New-PassingCheck 'cycA')
             Push-Location $tmp
-            try { & $verify *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
+            try { $code = Invoke-Verify } finally { Pop-Location }
             # The cycle is an unresolvable working directory: configuration
             # failure (1) or BLOCKED (2), never a hang and never PASS.
             $code | Should -BeIn 1, 2
