@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  bash-verifier:
+    name: verify.sh (Linux / macOS)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install bats
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update && sudo apt-get install -y bats
+          else
+            brew install bats-core
+          fi
+
+      - name: Install shellcheck
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update && sudo apt-get install -y shellcheck
+          else
+            brew install shellcheck
+          fi
+
+      - name: Install Pester for PowerShell 7
+        shell: pwsh
+        run: |
+          Install-Module Pester -RequiredVersion 3.4.0 -Scope CurrentUser -Force -SkipPublisherCheck
+
+      - name: Run the framework's own checks
+        run: bash .agentic/scripts/verify.sh
+
+      - name: Run Bats test suites
+        run: bats tests/bats
+
+      - name: Run fixture smoke harness
+        run: bash tests/fixtures/run-fixtures.sh .agentic/scripts/verify.sh
+
+  powershell-verifier:
+    name: verify.ps1 (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install bats-core
+        shell: pwsh
+        run: |
+          $tmp = Join-Path $env:RUNNER_TEMP 'bats'
+          New-Item -ItemType Directory -Force $tmp | Out-Null
+          Invoke-WebRequest -Uri 'https://github.com/bats-core/bats-core/archive/refs/tags/v1.11.1.tar.gz' -OutFile (Join-Path $tmp 'bats.tar.gz')
+          tar -xzf (Join-Path $tmp 'bats.tar.gz') -C $tmp
+          $dir = (Get-ChildItem -LiteralPath $tmp -Directory | Select-Object -First 1).FullName
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value (Join-Path $dir 'bin')
+
+      - name: Install Pester and PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Install-Module Pester -RequiredVersion 3.4.0 -Scope CurrentUser -Force -SkipPublisherCheck
+          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force -SkipPublisherCheck
+
+      - name: Run the framework's own checks
+        shell: pwsh
+        run: pwsh -NoProfile -File .agentic/scripts/verify.ps1
+
+      - name: Run Pester test suites
+        shell: pwsh
+        run: |
+          Import-Module Pester
+          $r = Invoke-Pester -Script tests/pester -PassThru
+          if ($r.FailedCount -gt 0) { exit 1 }
+
+      - name: PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          $results = @()
+          foreach ($f in @('install.ps1', '.agentic/scripts/verify.ps1')) {
+            $results += Invoke-ScriptAnalyzer -Path $f -Severity Error
+          }
+          $results | Format-Table -AutoSize
+          if ($results) { exit 1 }
+
+      - name: Run fixture smoke harness
+        shell: pwsh
+        run: pwsh -NoProfile -File tests/fixtures/run-fixtures.ps1 .agentic/scripts/verify.ps1

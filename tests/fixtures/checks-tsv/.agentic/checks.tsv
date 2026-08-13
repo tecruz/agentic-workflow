@@ -1,0 +1,2 @@
+required	pass	.	sh	-c	exit 0
+required	blocked	.	definitely-not-a-real-tool	--version

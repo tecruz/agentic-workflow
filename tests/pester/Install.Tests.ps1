@@ -1,0 +1,133 @@
+# install.ps1 — ownership, merge, and manifest tests (Pester 3 / Pester 5).
+# Each test is self-contained: it creates its own temp project directory so
+# tests never share state or depend on scope inheritance.
+$repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$install = Join-Path $repoRoot 'install.ps1'
+
+function New-TestDir {
+    $d = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-ptest-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $d -Force | Out-Null
+    return $d
+}
+
+Describe 'install.ps1' {
+
+    It 'fresh install creates the core file set and manifest' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp *> $null
+            Test-Path (Join-Path $tmp 'AGENTS.md') | Should Be $true
+            Test-Path (Join-Path $tmp 'CLAUDE.md') | Should Be $true
+            Test-Path (Join-Path $tmp 'GEMINI.md') | Should Be $true
+            Test-Path (Join-Path $tmp '.aider.conf.yml') | Should Be $true
+            Test-Path (Join-Path $tmp '.agentic\VERSION') | Should Be $true
+            Test-Path (Join-Path $tmp '.agentic\checks.tsv') | Should Be $true
+            Test-Path (Join-Path $tmp '.agentic\ARCHITECTURE.md') | Should Be $true
+            Test-Path (Join-Path $tmp '.agentic\install-manifest.tsv') | Should Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'second run is idempotent and produces no conflicts' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp *> $null
+            & $install -Target $tmp *> $null
+            Test-Path (Join-Path $tmp '.agentic\VERSION.new') | Should Be $false
+            Test-Path (Join-Path $tmp 'AGENTS.md.new') | Should Be $false
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'seed files are never overwritten' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp *> $null
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value 'my custom checks'
+            & $install -Target $tmp *> $null
+            (Get-Content -Raw (Join-Path $tmp '.agentic\checks.tsv')) -match 'my custom checks' | Should Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'a modified managed file produces a conflict candidate and is not clobbered' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp *> $null
+            Add-Content -LiteralPath (Join-Path $tmp '.agentic\WORKFLOW.md') -Value "`n# custom"
+            & $install -Target $tmp *> $null
+            Test-Path (Join-Path $tmp '.agentic\WORKFLOW.md.new') | Should Be $true
+            (Get-Content -Raw (Join-Path $tmp '.agentic\WORKFLOW.md')) -match '# custom' | Should Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-ReplaceManaged overwrites a modified managed file' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp *> $null
+            Add-Content -LiteralPath (Join-Path $tmp '.agentic\WORKFLOW.md') -Value "`n# custom"
+            & $install -Target $tmp -ReplaceManaged *> $null
+            Test-Path (Join-Path $tmp '.agentic\WORKFLOW.md.new') | Should Be $false
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'merge preserves custom content and the managed block stays on top' {
+        $tmp = New-TestDir
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'AGENTS.md') -Value 'TOP CUSTOM CONTENT'
+            & $install -Target $tmp *> $null
+            $ag = Join-Path $tmp 'AGENTS.md'
+            (Get-Content -Raw $ag) -match 'TOP CUSTOM CONTENT' | Should Be $true
+            (Get-Content -Raw $ag) -match 'AGENTIC-PROTOCOL-START' | Should Be $true
+            $startLine = (Select-String -LiteralPath $ag -Pattern 'AGENTIC-PROTOCOL-START').LineNumber
+            $customLine = (Select-String -LiteralPath $ag -Pattern 'TOP CUSTOM CONTENT').LineNumber
+            $startLine | Should BeLessThan $customLine
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'update preserves content appended below the managed block' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp *> $null
+            Add-Content -LiteralPath (Join-Path $tmp 'AGENTS.md') -Value "`n## Team notes`nkeep this"
+            & $install -Target $tmp *> $null
+            (Get-Content -Raw (Join-Path $tmp 'AGENTS.md')) -match 'keep this' | Should Be $true
+            Test-Path (Join-Path $tmp 'AGENTS.md.new') | Should Be $false
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-Plan makes no changes' {
+        $tmp = New-TestDir
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'AGENTS.md') -Value 'keep me'
+            & $install -Target $tmp -Plan *> $null
+            (Get-Content -Raw (Join-Path $tmp 'AGENTS.md')) -match 'keep me' | Should Be $true
+            Test-Path (Join-Path $tmp '.agentic\install-manifest.tsv') | Should Be $false
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-GenerateChecks writes stack-detected checks for a Node project' {
+        $tmp = New-TestDir
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'package.json') -Value '{"name":"x","scripts":{"test":"true"}}'
+            & $install -Target $tmp -GenerateChecks *> $null
+            (Get-Content -Raw (Join-Path $tmp '.agentic\checks.tsv')) -match "`tnpm`t" | Should Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'checks.tsv is seeded from the template, not the framework checks' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp *> $null
+            # the framework's own checks.tsv contains 'ps-syntax'; adopters must not get it
+            (Get-Content -Raw (Join-Path $tmp '.agentic\checks.tsv')) -match 'ps-syntax' | Should Be $false
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+}

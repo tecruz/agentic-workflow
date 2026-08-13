@@ -1,0 +1,5 @@
+# Aider configuration for the Universal Agentic Development Protocol.
+# Loads the canonical protocol into every aider session as read-only context.
+read:
+  - AGENTS.md
+  - .agentic/WORKFLOW.md

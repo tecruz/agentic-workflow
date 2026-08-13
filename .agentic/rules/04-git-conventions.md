@@ -20,6 +20,7 @@ Follow the **Conventional Commits** specification:
 - `chore`: Maintenance, build tasks, dependency updates
 
 ### Guidelines
-1. **Atomic Commits**: Stage only intended files. Never commit temporary debug files, node_modules, or binaries.
-2. **Imperative Mood**: Use "add feature" rather than "added feature".
-3. **No Secrets**: Verify `git status` and `git diff` before committing to ensure no secrets or local environment files are committed.
+1. **Permission First**: Create commits only when explicitly requested or permitted by documented project policy. Otherwise leave a working-tree diff for review.
+2. **Atomic Commits**: Stage only intended files. Never commit temporary debug files, node_modules, or binaries.
+3. **Imperative Mood**: Use "add feature" rather than "added feature".
+4. **No Secrets**: Verify `git status` and `git diff` before committing to ensure no secrets or local environment files are committed.

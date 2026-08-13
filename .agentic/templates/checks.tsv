@@ -1,0 +1,29 @@
+# .agentic/checks.tsv — project-owned verification checks (authoritative).
+#
+# When this file defines at least one check line, ./.agentic/scripts/verify.sh
+# and verify.ps1 use ONLY these checks; auto-detection is a bootstrap fallback
+# used when this file is absent or defines no checks.
+#
+# Format (TAB-separated). Lines starting with `#` are comments. Blank lines are
+# ignored. Arguments may contain spaces but NOT tabs.
+#
+#   requirement<TAB>check-id<TAB>working-dir<TAB>executable<TAB>args...
+#
+#   requirement: `required` (must run; failure fails the run) or `optional`
+#                (runs if tooling is available; failure is a warning only).
+#   check-id:    short human-readable label shown in output.
+#   working-dir: directory (relative to the repository root) to run in; use `.`
+#                for the repository root.
+#   executable:  command name on PATH, or a path such as ./gradlew.
+#   args...:     remaining fields, passed to the executable verbatim.
+#
+# Example for a Node.js / pnpm monorepo with an API service:
+#
+#   required	test	.	pnpm	test
+#   required	lint	.	pnpm	lint
+#   required	typecheck	.	pnpm	typecheck
+#   required	api-test	services/api	go	test	./...
+#   optional	format	.	pnpm	format:check
+#
+# Tip: run the installer with --generate-checks to create this file from the
+# detected stack, then edit it to match your project's real definition of done.
