@@ -70,16 +70,17 @@ function Invoke-Check {
 
     $resolvedExe = $null
     if ($Exe -match '[/\\]') {
+        # A path-qualified executable is resolved ONLY against the configured
+        # path. Never fall back to a same-named command on PATH when the
+        # configured path is missing: that could run an unrelated executable
+        # and falsely report PASS. A missing configured path is BLOCKED below.
         $candidate = Join-Path $Cwd $Exe
         if (Test-Path -LiteralPath $candidate) {
             $resolvedExe = (Resolve-Path -LiteralPath $candidate).Path
         }
-        else {
-            $found = Get-Command (Split-Path -Leaf $Exe) -ErrorAction SilentlyContinue
-            if ($found) { $resolvedExe = $found.Source }
-        }
     }
     else {
+        # Bare executable names may be resolved from PATH.
         $found = Get-Command $Exe -ErrorAction SilentlyContinue
         if ($found) { $resolvedExe = $found.Source }
     }
@@ -220,15 +221,37 @@ function Resolve-PhysicalPath {
     param([string] $Path)
     # Follows every path segment so a symlink/junction inside the project that
     # points outside resolves to its physical target, not its lexical path.
+    # A relative link target is resolved against the link's parent directory,
+    # and a per-chain visited set plus a hop cap make link cycles fail
+    # deterministically instead of looping forever.
     $full = [System.IO.Path]::GetFullPath($Path)
     $root = [System.IO.Path]::GetPathRoot($full)
     $current = $root
     $parts = $full.Substring($root.Length) -split '[/\\]' | Where-Object { $_ -ne '' }
+    $maxHops = 32
     foreach ($part in $parts) {
         $current = Join-Path $current $part
-        $item = Get-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
-        if ($item -and $item.Target) {
-            $current = $item.Target
+        $seen = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
+        $hops = 0
+        while ($true) {
+            $key = [System.IO.Path]::GetFullPath($current)
+            if (-not $seen.Add($key)) {
+                throw "symbolic-link cycle detected while resolving '$Path'"
+            }
+            if ($hops -gt $maxHops) {
+                throw "symbolic-link chain exceeds $maxHops hops while resolving '$Path'"
+            }
+            $item = Get-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
+            if (-not $item -or [string]::IsNullOrEmpty($item.Target)) { break }
+            $hops++
+            if ([System.IO.Path]::IsPathRooted($item.Target)) {
+                $current = $item.Target
+            }
+            else {
+                # Resolve a relative target against the link's parent directory,
+                # not the process working directory.
+                $current = Join-Path (Split-Path -Parent $current) $item.Target
+            }
         }
     }
     return [System.IO.Path]::GetFullPath($current)
@@ -271,8 +294,14 @@ function Test-ChecksTsvValidation {
         $seenIds[$id] = $true
 
         $targetCwd = Join-Path $rootPath $cwd
-        $resolvedCwd = Resolve-PhysicalPath $targetCwd
-        $resolvedRoot = Resolve-PhysicalPath $rootPath
+        try {
+            $resolvedCwd = Resolve-PhysicalPath $targetCwd
+            $resolvedRoot = Resolve-PhysicalPath $rootPath
+        }
+        catch {
+            Write-Host "ERROR: .agentic/checks.tsv line $lineNum working directory '$cwd' cannot be resolved ($($_.Exception.Message))."
+            exit 1
+        }
         # Confinement requires an exact match or root followed by the directory
         # separator; a sibling path sharing the root's name prefix must not pass.
         $resolvedRootTrimmed = $resolvedRoot.TrimEnd(

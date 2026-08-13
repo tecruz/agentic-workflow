@@ -191,3 +191,14 @@ teardown() {
     grep -q "PRECIOUS CANDIDATE" .agentic/WORKFLOW.md.new
     grep -q "# custom" .agentic/WORKFLOW.md
 }
+
+@test "a failed fresh install removes directories it created that are now empty" {
+    mkdir -p .agentic
+    printf 'blocker\n' > .agentic/templates
+    run bash "$INSTALL" .
+    [ "$status" -ne 0 ]
+    [ ! -d .agentic/rules ]
+    [ ! -d .agentic/scripts ]
+    [ -f .agentic/templates ]
+    [ "$(cat .agentic/templates)" = "blocker" ]
+}

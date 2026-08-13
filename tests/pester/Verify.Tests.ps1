@@ -130,4 +130,163 @@ Describe 'verify.ps1 state model' {
             Remove-Item -Recurse -Force $outside -ErrorAction SilentlyContinue
         }
     }
+
+    # -----------------------------------------------------------------------
+    # Review regression tests: missing directories report BLOCKED, missing
+    # path-qualified executables never fall back to PATH, and relative
+    # symbolic-link targets resolve against the link's parent directory.
+    # -----------------------------------------------------------------------
+
+    It 'a missing inside-project working directory reports BLOCKED (2)' {
+        $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vtest-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic') -Force | Out-Null
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value "required`tok`tmissing-dir`tcmd`t/c`texit`t0"
+            Push-Location $tmp
+            try { & $verify *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
+            $code | Should -Be 2
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'a missing path-qualified executable is BLOCKED (2) even when a same-name command is on PATH' {
+        $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vtest-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic') -Force | Out-Null
+        $fakeBin = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-fakebin-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $fakeBin -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $fakeBin 'lint.cmd') -Value '@exit 0'
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value "required`tlint`t.`t./tools/lint"
+            $oldPath = $env:PATH
+            $env:PATH = $fakeBin + ';' + $oldPath
+            try {
+                Push-Location $tmp
+                try { & $verify *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
+            }
+            finally { $env:PATH = $oldPath }
+            # A missing configured path must be BLOCKED (2), never resolved to
+            # the unrelated global `lint` command which would falsely PASS (0).
+            $code | Should -Be 2
+        }
+        finally {
+            Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force $fakeBin -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'an empty executable in checks.tsv is a configuration failure' {
+        $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vtest-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic') -Force | Out-Null
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value "required`tunit`t.`t`ttrue"
+            Push-Location $tmp
+            try { & $verify *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
+            $code | Should -Be 1
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'indented comment lines in checks.tsv are ignored' {
+        $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vtest-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic') -Force | Out-Null
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value @('  # indented comment', "required`tok`t.`tcmd`t/c`texit`t0")
+            Push-Location $tmp
+            try { & $verify *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
+            $code | Should -Be 0
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'a relative symbolic link inside the project is accepted' {
+        $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vtest-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic') -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $tmp 'nested') -Force | Out-Null
+        try {
+            try {
+                New-Item -ItemType SymbolicLink -Path (Join-Path $tmp 'rel-inside') -Target '.\nested' -Force -ErrorAction Stop | Out-Null
+            }
+            catch { return }  # symlinks unavailable (privilege / platform): skip
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value "required`tok`trel-inside`tcmd`t/c`texit`t0"
+            Push-Location $tmp
+            try { & $verify *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
+            $code | Should -Be 0
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'a relative symbolic link pointing outside the project is rejected' {
+        $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vtest-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic') -Force | Out-Null
+        $outside = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vout-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $outside -Force | Out-Null
+        try {
+            $relTarget = '..\' + (Split-Path -Leaf $outside)
+            try {
+                New-Item -ItemType SymbolicLink -Path (Join-Path $tmp 'rel-outside') -Target $relTarget -Force -ErrorAction Stop | Out-Null
+            }
+            catch { return }  # symlinks unavailable: skip
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value "required`tok`trel-outside`tcmd`t/c`texit`t0"
+            Push-Location $tmp
+            try { & $verify *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
+            $code | Should -Be 1
+        }
+        finally {
+            Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force $outside -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'multi-hop relative symbolic links resolve to the final target' {
+        $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vtest-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic') -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $tmp 'nested') -Force | Out-Null
+        try {
+            try {
+                New-Item -ItemType SymbolicLink -Path (Join-Path $tmp 'hop1') -Target '.\nested' -Force -ErrorAction Stop | Out-Null
+                New-Item -ItemType SymbolicLink -Path (Join-Path $tmp 'hop2') -Target '.\hop1' -Force -ErrorAction Stop | Out-Null
+            }
+            catch { return }  # symlinks unavailable: skip
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value "required`tok`thop2`tcmd`t/c`texit`t0"
+            Push-Location $tmp
+            try { & $verify *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
+            $code | Should -Be 0
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'a broken relative symbolic link reports BLOCKED (2)' {
+        $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vtest-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic') -Force | Out-Null
+        try {
+            try {
+                New-Item -ItemType SymbolicLink -Path (Join-Path $tmp 'broken-link') -Target '.\missing-dir' -Force -ErrorAction Stop | Out-Null
+            }
+            catch { return }  # symlinks unavailable: skip
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value "required`tok`tbroken-link`tcmd`t/c`texit`t0"
+            Push-Location $tmp
+            try { & $verify *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
+            $code | Should -Be 2
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'a symbolic-link cycle fails deterministically' {
+        $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vtest-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic') -Force | Out-Null
+        try {
+            try {
+                New-Item -ItemType SymbolicLink -Path (Join-Path $tmp 'cycA') -Target '.\cycB' -Force -ErrorAction Stop | Out-Null
+                New-Item -ItemType SymbolicLink -Path (Join-Path $tmp 'cycB') -Target '.\cycA' -Force -ErrorAction Stop | Out-Null
+            }
+            catch { return }  # symlinks unavailable: skip
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value "required`tok`tcycA`tcmd`t/c`texit`t0"
+            Push-Location $tmp
+            try { & $verify *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
+            # The cycle is an unresolvable working directory: configuration
+            # failure (1) or BLOCKED (2), never a hang and never PASS.
+            $code | Should -BeIn 1, 2
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
 }

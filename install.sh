@@ -173,7 +173,7 @@ snapshot_file() {
 }
 
 rollback() {
-    local rel dst snap
+    local rel dst snap dir
     echo "ERROR: installation failed; restoring '$TARGET_DIR' to its prior state." >&2
     for rel in "${CHANGED_RELS[@]}"; do
         dst="$TARGET_DIR/$rel"
@@ -184,6 +184,17 @@ rollback() {
             rm -f "$dst" 2>/dev/null || true
         fi
         rm -f "${dst}.agentic-tmp" 2>/dev/null || true
+    done
+    # A failed fresh install can leave behind directories that did not exist
+    # before (e.g. .agentic/). Remove any directory that became empty only
+    # because of this transaction, walking up toward the project root.
+    for rel in "${CHANGED_RELS[@]}"; do
+        dir="$(dirname "$TARGET_DIR/$rel")"
+        while [ "$dir" != "$TARGET_DIR" ] && [ "$dir" != "/" ]; do
+            [ "$dir" = "$BACKUP_DIR" ] && [ "$BACKUP_DIR_EXISTED" -eq 1 ] && break
+            rmdir "$dir" 2>/dev/null || break
+            dir="$(dirname "$dir")"
+        done
     done
     if [ "$BACKUP_DIR_EXISTED" -eq 0 ] && [ -n "$BACKUP_DIR" ]; then
         rm -rf "$BACKUP_DIR" 2>/dev/null || true
@@ -196,6 +207,7 @@ cleanup() {
         rollback
     fi
     rm -rf "$SNAP_DIR" 2>/dev/null || true
+    rm -f "$MANIFEST_TMP" 2>/dev/null || true
     exit "$rc"
 }
 trap cleanup EXIT

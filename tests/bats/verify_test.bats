@@ -94,31 +94,109 @@ run_fixture() {  # run_fixture <fixture>
 }
 
 @test "checks.tsv working dir escaping the project root is rejected" {
-    mkdir -p .agentic
-    printf 'required\ttest\t..\tsh\t-c\ttrue\n' > .agentic/checks.tsv
-    run bash "$VERIFY"
+    run_checks_in_tmp 'required	test	..	sh	-c	true'
     [ "$status" -eq 1 ]
 }
 
 @test "checks.tsv working dir through a symlink escape is rejected" {
-    mkdir -p .agentic
+    TMPD="$(mktemp -d)"
+    mkdir -p "$TMPD/.agentic"
     outside="$(mktemp -d)"
-    ln -s "$outside" link
-    printf 'required\ttest\tlink\tsh\t-c\ttrue\n' > .agentic/checks.tsv
-    run bash "$VERIFY"
+    ln -s "$outside" "$TMPD/link"
+    printf 'required\ttest\tlink\tsh\t-c\ttrue\n' > "$TMPD/.agentic/checks.tsv"
+    run bash -c "cd '$TMPD' && bash '$VERIFY' >/dev/null 2>&1"
+    rm -rf "$TMPD" "$outside"
     [ "$status" -eq 1 ]
 }
 
 @test "checks.tsv working dir equal to the project root is accepted" {
-    mkdir -p .agentic
-    printf 'required\tok\t.\tsh\t-c\ttrue\n' > .agentic/checks.tsv
-    run bash "$VERIFY"
+    run_checks_in_tmp 'required	ok	.	sh	-c	true'
     [ "$status" -eq 0 ]
 }
 
 @test "checks.tsv working dir inside the project is accepted" {
-    mkdir -p .agentic nested
-    printf 'required\tok\tnested\tsh\t-c\ttrue\n' > .agentic/checks.tsv
-    run bash "$VERIFY"
+    TMPD="$(mktemp -d)"
+    mkdir -p "$TMPD/.agentic" "$TMPD/nested"
+    printf 'required\tok\tnested\tsh\t-c\ttrue\n' > "$TMPD/.agentic/checks.tsv"
+    run bash -c "cd '$TMPD' && bash '$VERIFY' >/dev/null 2>&1"
+    rm -rf "$TMPD"
     [ "$status" -eq 0 ]
+}
+
+# ---------------------------------------------------------------------------
+# Review regression tests: empty-field TSV parsing, BLOCKED semantics, and
+# path-qualified executables. Each test runs in an isolated temp project so it
+# never touches the framework's own .agentic/checks.tsv.
+# ---------------------------------------------------------------------------
+
+run_checks_in_tmp() {  # run_checks_in_tmp <line>...
+    TMPD="$(mktemp -d)"
+    mkdir -p "$TMPD/.agentic"
+    printf '%s\n' "$@" > "$TMPD/.agentic/checks.tsv"
+    run bash -c "cd '$TMPD' && bash '$VERIFY' >/dev/null 2>&1"
+    rm -rf "$TMPD"
+}
+
+@test "malformed checks.tsv with an empty executable is a configuration failure" {
+    run_checks_in_tmp 'required	unit	.		true'
+    [ "$status" -eq 1 ]
+}
+
+@test "malformed checks.tsv with an empty requirement is a configuration failure" {
+    run_checks_in_tmp '	unit	.	sh	-c	true'
+    [ "$status" -eq 1 ]
+}
+
+@test "malformed checks.tsv with an empty check ID is a configuration failure" {
+    run_checks_in_tmp 'required		.	sh	-c	true'
+    [ "$status" -eq 1 ]
+}
+
+@test "malformed checks.tsv with an empty working directory is a configuration failure" {
+    run_checks_in_tmp 'required	unit		sh	-c	true'
+    [ "$status" -eq 1 ]
+}
+
+@test "an empty executable never runs a shifted command from the next column" {
+    # The empty executable must be rejected as a configuration failure, never
+    # resolved to `true` from the argument column (which would falsely PASS).
+    run_checks_in_tmp 'required	unit	.		true'
+    [ "$status" -eq 1 ]
+}
+
+@test "leading and indented comment lines are ignored" {
+    run_checks_in_tmp '# leading comment' '  # indented comment' '	# tab-indented' 'required	ok	.	sh	-c	true'
+    [ "$status" -eq 0 ]
+}
+
+@test "a missing inside-project working directory reports BLOCKED (2)" {
+    run_checks_in_tmp 'required	ok	missing-dir	sh	-c	true'
+    [ "$status" -eq 2 ]
+}
+
+@test "a missing path-qualified executable reports BLOCKED (2), never a PATH fallback" {
+    run_checks_in_tmp 'required	lint	.	./tools/lint'
+    [ "$status" -eq 2 ]
+}
+
+@test "an empty interior argument is preserved and passed to the command" {
+    # sh -c <script> a '' x -> $0=a, $1='' (empty preserved), $2=x, $#=2
+    run_checks_in_tmp 'required	ok	.	sh	-c	[ $# -eq 2 ] && [ "$1" = "" ] && [ "$2" = x ]	a		x'
+    [ "$status" -eq 0 ]
+}
+
+@test "a check that consumes stdin does not starve subsequent checks" {
+    # A check that drains its stdin (e.g. `cat`) must not consume the checks.tsv
+    # stream and silently skip the checks that follow it; that would be a false
+    # PASS. The probe check after the consumer must still run.
+    TMPD="$(mktemp -d)"
+    mkdir -p "$TMPD/.agentic"
+    printf '%s\n' \
+        'required	consumer	.	sh	-c	cat >/dev/null' \
+        'required	probe	.	sh	-c	touch ran' \
+        > "$TMPD/.agentic/checks.tsv"
+    run bash -c "cd '$TMPD' && bash '$VERIFY' >/dev/null 2>&1"
+    [ "$status" -eq 0 ]
+    [ -f "$TMPD/ran" ]
+    rm -rf "$TMPD"
 }

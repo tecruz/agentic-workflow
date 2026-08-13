@@ -49,7 +49,9 @@ run_check() {
     local -a args=("$@")
 
     echo ""
-    echo "==> [$id] $exe ${args[*]}"
+    # `:-` guards the display-only expansion because bash 3.2 (macOS) treats
+    # expanding an empty array under `set -u` as an unbound variable.
+    echo "==> [$id] $exe ${args[*]:-}"
 
     if [ ! -d "$cwd" ]; then
         if [ "$requirement" = "required" ]; then
@@ -84,9 +86,15 @@ run_check() {
         RAN_REQUIRED=1
     fi
 
-    if (cd "$cwd" && "$exe" "${args[@]}"); then
-        :
+    # bash 3.2 (macOS) treats expanding an empty array under `set -u` as an
+    # unbound variable, so branch on whether the check takes arguments.
+    local check_ok=0
+    if [ "${#args[@]}" -gt 0 ]; then
+        (cd "$cwd" && "$exe" "${args[@]}") && check_ok=1
     else
+        (cd "$cwd" && "$exe") && check_ok=1
+    fi
+    if [ "$check_ok" -eq 0 ]; then
         if [ "$requirement" = "required" ]; then
             FAILED=1
         else
@@ -95,15 +103,31 @@ run_check() {
     fi
 }
 
+# Split a checks.tsv line into fields while preserving empty columns. Tabs are
+# translated to a non-whitespace IFS character first because tab is IFS
+# whitespace, which collapses consecutive tabs into one field and silently
+# shifts an empty executable into the next column.
 run_check_line() {
     local line="$1"
-    local requirement id cwd exe rest
+    local -a fields=()
     local -a args=()
-    IFS=$'\t' read -r requirement id cwd exe rest <<< "$line"
-    if [ -n "$rest" ]; then
-        IFS=$'\t' read -r -a args <<< "$rest"
+    local requirement id cwd exe
+    local safe="${line//$'\t'/$'\x1f'}"
+    IFS=$'\x1f' read -r -a fields <<< "$safe"
+    requirement="${fields[0]:-}"
+    id="${fields[1]:-}"
+    cwd="${fields[2]:-}"
+    exe="${fields[3]:-}"
+    if [ "${#fields[@]}" -gt 4 ]; then
+        args=("${fields[@]:4}")
     fi
-    run_check "$requirement" "$id" "$cwd" "$exe" "${args[@]}"
+    # Expanding an empty array under `set -u` fails on bash 3.2 (macOS), so
+    # only expand the arguments array when it actually contains fields.
+    if [ "${#args[@]}" -gt 0 ]; then
+        run_check "$requirement" "$id" "$cwd" "$exe" "${args[@]}"
+    else
+        run_check "$requirement" "$id" "$cwd" "$exe"
+    fi
 }
 
 detect() {
@@ -196,6 +220,35 @@ checks_defined() {
     [ -f "$f" ] && grep -Ev '^[[:space:]]*(#|$)' "$f" | grep -q .
 }
 
+# Returns 0 when the relative path $1 stays at or beneath the project root when
+# resolved textually; 1 when its `..` components pop above the root. This is a
+# lexical check only: it does not require the directory to exist and does not
+# follow symlinks (physical resolution happens in validate_checks_tsv for
+# existing directories).
+lexically_within_root() {
+    local path="$1"
+    local -a segs=()
+    local -i top=0
+    local seg
+    while [ -n "$path" ]; do
+        case "$path" in
+            */*) seg="${path%%/*}"; path="${path#*/}" ;;
+            *) seg="$path"; path="" ;;
+        esac
+        case "$seg" in
+            '' | '.') ;;
+            '..')
+                if [ "$top" -gt 0 ]; then
+                    top=$((top - 1))
+                else
+                    return 1
+                fi ;;
+            *) segs[$top]="$seg"; top=$((top + 1)) ;;
+        esac
+    done
+    return 0
+}
+
 validate_checks_tsv() {
     local file="$1"
     local line_num=0
@@ -206,13 +259,17 @@ validate_checks_tsv() {
 
     while IFS= read -r line || [ -n "$line" ]; do
         line_num=$((line_num + 1))
-        case "$line" in
-            '' | \#*) continue ;;
-        esac
+        # Skip blank and comment lines, including indented comments. The regex
+        # is stored in a variable so bash 3.2 (macOS) parses it at runtime.
+        comment_re='^[[:space:]]*(#|$)'
+        if [[ "$line" =~ $comment_re ]]; then
+            continue
+        fi
 
-        local requirement id cwd exe rest
+        local requirement id cwd exe
         local -a fields=()
-        IFS=$'\t' read -r -a fields <<< "$line"
+        local safe="${line//$'\t'/$'\x1f'}"
+        IFS=$'\x1f' read -r -a fields <<< "$safe"
 
         if [ "${#fields[@]}" -lt 4 ]; then
             echo "ERROR: .agentic/checks.tsv line $line_num has fewer than 4 fields." >&2
@@ -241,26 +298,60 @@ validate_checks_tsv() {
         esac
         seen_ids="$seen_ids $id"
 
-        local resolved_cwd
-        # Resolve physically: a logical path through a symlink can point outside
-        # the project even when its lexical path looks like a subdirectory.
-        resolved_cwd="$(cd "$cwd" 2>/dev/null && pwd -P || true)"
-        if [ -z "$resolved_cwd" ]; then
-            echo "ERROR: .agentic/checks.tsv line $line_num working directory '$cwd' does not exist." >&2
+        # Lexical confinement: reject a working directory whose `..` components
+        # pop above the project root without requiring the directory to exist.
+        if ! lexically_within_root "$cwd"; then
+            echo "ERROR: .agentic/checks.tsv line $line_num working directory '$cwd' escapes project root." >&2
             exit 1
         fi
-        case "$resolved_cwd" in
-            "$root_dir" | "$root_dir/"*) : ;;
-            *)
-                echo "ERROR: .agentic/checks.tsv line $line_num working directory '$cwd' escapes project root." >&2
-                exit 1 ;;
-        esac
+        # Physical confinement for existing directories: a symlink inside the
+        # project can point outside even when its lexical path looks like a
+        # subdirectory. A missing directory is not a configuration error here;
+        # run_check reports it as BLOCKED (exit 2).
+        if [ -e "$cwd" ]; then
+            local resolved_cwd
+            resolved_cwd="$(cd "$cwd" 2>/dev/null && pwd -P || true)"
+            if [ -z "$resolved_cwd" ]; then
+                echo "ERROR: .agentic/checks.tsv line $line_num working directory '$cwd' cannot be resolved." >&2
+                exit 1
+            fi
+            case "$resolved_cwd" in
+                "$root_dir" | "$root_dir/"*) : ;;
+                *)
+                    echo "ERROR: .agentic/checks.tsv line $line_num working directory '$cwd' escapes project root." >&2
+                    exit 1 ;;
+            esac
+        fi
     done < "$file"
 }
 
 emit_checks() {
     detect
     exit 0
+}
+
+# Reads every check line from $1 into memory before running any check. A check
+# that consumes stdin (e.g. a Windows executable launched via WSL interop) must
+# not be able to starve the remaining checks of the checks.tsv input stream,
+# which would silently skip them and produce a false PASS.
+run_checks_from_file() {
+    local -a checks=()
+    local line
+    local comment_re='^[[:space:]]*(#|$)'
+    while IFS= read -r line || [ -n "$line" ]; do
+        checks+=("$line")
+    done < "$1"
+    # Guard the loop against bash 3.2's unbound-variable error when expanding an
+    # empty array under `set -u`.
+    if [ "${#checks[@]}" -eq 0 ]; then
+        return
+    fi
+    for line in "${checks[@]}"; do
+        if [[ "$line" =~ $comment_re ]]; then
+            continue
+        fi
+        run_check_line "$line"
+    done
 }
 
 if [ "${1:-}" = "--emit-checks" ]; then
@@ -271,12 +362,7 @@ if checks_defined; then
     validate_checks_tsv "$(checks_file)"
     echo "Using project checks: .agentic/checks.tsv"
     DETECTED=1
-    while IFS= read -r line; do
-        case "$line" in
-            '' | \#*) continue ;;
-        esac
-        run_check_line "$line"
-    done < "$(checks_file)"
+    run_checks_from_file "$(checks_file)"
 else
     if [ -f "$(checks_file)" ]; then
         echo "Note: .agentic/checks.tsv defines no checks; falling back to auto-detection."
@@ -285,10 +371,7 @@ else
     local_lines="$(detect)"
     if [ -n "$local_lines" ]; then
         DETECTED=1
-        while IFS= read -r line; do
-            [ -z "$line" ] && continue
-            run_check_line "$line"
-        done <<< "$local_lines"
+        run_checks_from_file <(printf '%s\n' "$local_lines")
     fi
 fi
 

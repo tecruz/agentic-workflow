@@ -213,6 +213,20 @@ function Restore-PreviousState {
         }
         Remove-Item -LiteralPath "$dst.agentic-tmp" -Force -ErrorAction SilentlyContinue
     }
+    # A failed fresh install can leave behind directories that did not exist
+    # before (e.g. .agentic/). Remove any directory that became empty only
+    # because of this transaction, walking up toward the project root.
+    foreach ($rel in $script:Changed) {
+        $dir = Split-Path -Parent (Join-Path $TargetDir $rel)
+        while ($dir -and -not $dir.Equals($TargetDir, [System.StringComparison]::OrdinalIgnoreCase)) {
+            if ($script:BackupDir -and $script:BackupExisted -and $dir.Equals($script:BackupDir, [System.StringComparison]::OrdinalIgnoreCase)) { break }
+            try { [System.IO.Directory]::Delete($dir, $false) }
+            catch { break }
+            $parent = Split-Path -Parent $dir
+            if (-not $parent -or $parent.Equals($dir, [System.StringComparison]::OrdinalIgnoreCase)) { break }
+            $dir = $parent
+        }
+    }
     if ($script:BackupDir -and -not $script:BackupExisted) {
         Remove-Item -Recurse -Force $script:BackupDir -ErrorAction SilentlyContinue
     }
@@ -479,4 +493,5 @@ catch {
 }
 finally {
     Remove-Item -Recurse -Force $script:SnapDir -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $script:ManifestTmp -Force -ErrorAction SilentlyContinue
 }

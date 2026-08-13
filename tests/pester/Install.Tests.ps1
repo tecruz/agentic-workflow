@@ -229,4 +229,22 @@ Describe 'install.ps1' {
         }
         finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
     }
+
+    It 'a failed fresh install removes directories it created that are now empty' {
+        $tmp = New-TestDir
+        try {
+            $agentic = Join-Path $tmp '.agentic'
+            New-Item -ItemType Directory -Path $agentic -Force | Out-Null
+            # a file where a managed-file parent directory is expected makes the
+            # install fail partway through; empty dirs created by the install
+            # must be removed during rollback
+            Set-Content -LiteralPath (Join-Path $agentic 'templates') -Value 'blocker'
+            & $install -Target $tmp *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            Test-Path (Join-Path $agentic 'rules') | Should -Be $false
+            Test-Path (Join-Path $agentic 'scripts') | Should -Be $false
+            (Get-Content -Raw (Join-Path $agentic 'templates')) -match 'blocker' | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
 }
