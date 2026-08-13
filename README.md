@@ -1,12 +1,14 @@
 # Universal Agentic Development Protocol
 
-A technology-agnostic, tool-agnostic agentic workflow you can drop into **any**
+A technology-agnostic, tool-agnostic agentic workflow you can drop into your
 project. It gives every AI coding agent the same operating instructions, the
 same 5-phase execution loop, and the same definition of "done" — regardless of
 language, framework, or which agent tool you use.
 
-- **Technology-independent**: Node, Rust, Python, Go, JVM, .NET — the protocol
-  auto-detects how to verify your project.
+- **Technology-independent**: the verifier auto-detects the project stack
+  (Node.js, Rust, Python, Go, JVM, .NET — see the
+  [supported stacks table](#supported-stacks)) and runs the checks that
+  project defines.
 - **Agent-tool-independent**: OpenCode, Claude Code, Gemini CLI, Cursor,
   Windsurf, Roo Code / Cline, GitHub Copilot, and Aider all read the same
   canonical instructions from `AGENTS.md`.
@@ -117,6 +119,35 @@ least one required check actually ran:
 | 3 | **UNSUPPORTED** | No supported project or check configuration found |
 
 `optional` checks run when their tooling is available but never fail a run.
+
+---
+
+## Supported Stacks
+
+The verifier auto-detects the following stacks and emits the checks shown. The
+signal listed for each stack is checked **before** any tool is required to be
+installed, so project type detection never depends on the local machine.
+
+| Stack | Detection signal | Checks emitted | Fixture |
+| :--- | :--- | :--- | :--- |
+| Node.js (npm) | `package.json` (no lockfile) | `npm test`, `npm run lint --if-present` | `node-npm`, `node-npm-fail` |
+| Node.js (pnpm) | `pnpm-lock.yaml` | `pnpm test`, `pnpm lint` | `node-pnpm`, `monorepo` |
+| Node.js (yarn) | `yarn.lock` | `yarn test`, `yarn lint` | — |
+| Node.js (bun) | `bun.lockb` | `bun test`, `bun run lint` | — |
+| Rust | `Cargo.toml` | `cargo test`, `cargo clippy -- -D warnings` | `rust-cargo` |
+| Python | `pyproject.toml` / `requirements.txt` | `pytest`, `ruff check .` | `python-poetry`, `python-uv` |
+| Python (poetry) | `poetry.lock` | `poetry run pytest`, `poetry run ruff check .` | `python-poetry` |
+| Python (uv) | `uv.lock` | `uv run pytest`, `uv run ruff check .` | `python-uv` |
+| Go | `go.mod` | `go test ./...`, `go vet ./...` | `go-mod` |
+| Java (Maven) | `pom.xml` | `mvn test`, `mvn checkstyle:check` | `java-maven` |
+| Java (Gradle) | `build.gradle` / `build.gradle.kts` | `gradle test`, `gradle check` | — |
+| .NET | `*.sln` / `*.csproj` | `dotnet test`, `dotnet format --verify-no-changes` | `dotnet-sln-only`, `dotnet-csproj-only` |
+| Monorepo | multiple lockfiles / manifests | merged detection per sub-stack | `monorepo` |
+
+Every fixture is exercised by the Bats suite (`verify.sh`) and the Pester suite
+(`verify.ps1`), and the fixture smoke harnesses
+(`tests/fixtures/run-fixtures.sh` and `run-fixtures.ps1`) fail CI on any
+mismatch. The Bats and Pester suites run on Linux, macOS, and Windows in CI.
 
 ---
 

@@ -132,6 +132,10 @@ foreach ($t in $ToolsList) {
 
 $script:BackupDir = $null
 $script:ManifestTmp = [System.IO.Path]::GetTempFileName()
+$script:SnapDir = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-snap-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $script:SnapDir -Force | Out-Null
+$script:Changed = New-Object System.Collections.Generic.List[string]
+$script:BackupExisted = Test-Path -LiteralPath (Join-Path $TargetDir ".agentic-backup")
 
 function ConvertTo-PortablePath {
     param([string] $Path)
@@ -173,6 +177,42 @@ function Backup-File {
     Write-Host "  backup $RelativePath -> .agentic-backup/$flat"
 }
 
+# Transactional safety: every file about to be modified is snapshotted first;
+# if the install fails partway through, Restore-PreviousState returns the
+# target to its prior state instead of leaving a partial installation behind.
+function Snapshot-File {
+    param([string] $RelativePath)
+    $dst = Join-Path $TargetDir $RelativePath
+    $snap = Join-Path $script:SnapDir ((ConvertTo-PortablePath $RelativePath).Replace('/', '_'))
+    if (Test-Path -LiteralPath $dst) {
+        Copy-Item -LiteralPath $dst -Destination $snap -Force
+        [System.IO.File]::WriteAllText("$snap.present", "", [System.Text.UTF8Encoding]::new($false))
+    }
+    else {
+        [System.IO.File]::WriteAllText("$snap.absent", "", [System.Text.UTF8Encoding]::new($false))
+    }
+    $script:Changed.Add($RelativePath)
+}
+
+function Restore-PreviousState {
+    Write-Host "ERROR: installation failed; restoring '$TargetDir' to its prior state."
+    foreach ($rel in $script:Changed) {
+        $dst = Join-Path $TargetDir $rel
+        $snap = Join-Path $script:SnapDir ((ConvertTo-PortablePath $rel).Replace('/', '_'))
+        if (Test-Path -LiteralPath "$snap.present") {
+            Copy-Item -LiteralPath $snap -Destination $dst -Force
+        }
+        else {
+            Remove-Item -LiteralPath $dst -Force -ErrorAction SilentlyContinue
+        }
+        Remove-Item -LiteralPath "$dst.new" -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath "$dst.agentic-tmp" -Force -ErrorAction SilentlyContinue
+    }
+    if ($script:BackupDir -and -not $script:BackupExisted) {
+        Remove-Item -Recurse -Force $script:BackupDir -ErrorAction SilentlyContinue
+    }
+}
+
 function Write-Utf8NoBom {
     param([string] $Path, [string] $Content)
     [System.IO.File]::WriteAllText($Path, $Content, [System.Text.UTF8Encoding]::new($false))
@@ -185,6 +225,7 @@ function Install-Managed {
 
     if (-not (Test-Path -LiteralPath $dst)) {
         if ($script:Plan) { Write-Host "  copy   $RelativePath (create)"; return }
+        Snapshot-File $RelativePath
         $parent = Split-Path -Parent $dst
         if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
         Copy-Item -LiteralPath $src -Destination $dst -Force
@@ -195,6 +236,7 @@ function Install-Managed {
 
     if ($script:ReplaceManaged) {
         if ($script:Plan) { Write-Host "  copy   $RelativePath (replace: -ReplaceManaged)"; return }
+        Snapshot-File $RelativePath
         if ($Backup) { Backup-File $RelativePath }
         Copy-Item -LiteralPath $src -Destination $dst -Force
         Write-Host "  copy   $RelativePath (replaced: -ReplaceManaged)"
@@ -207,12 +249,14 @@ function Install-Managed {
         $cur = Get-FileChecksum $dst
         if ($prev -eq $cur) {
             if ($script:Plan) { Write-Host "  update $RelativePath (unchanged since last install)"; return }
+            Snapshot-File $RelativePath
             Copy-Item -LiteralPath $src -Destination $dst -Force
             Write-Host "  update $RelativePath (unchanged since last install)"
             Add-ManifestEntry $RelativePath "managed" (Get-FileChecksum $dst)
         }
         else {
             if ($script:Plan) { Write-Host "  conflict $RelativePath (modified since install; candidate: $RelativePath.new)"; return }
+            Snapshot-File $RelativePath
             Copy-Item -LiteralPath $src -Destination "$dst.new" -Force
             Write-Host "  conflict $RelativePath (modified since install; wrote $RelativePath.new)"
             Add-ManifestEntry $RelativePath "managed" (Get-FileChecksum $src)
@@ -220,6 +264,7 @@ function Install-Managed {
     }
     else {
         if ($script:Plan) { Write-Host "  conflict $RelativePath (pre-existing; candidate: $RelativePath.new)"; return }
+        Snapshot-File $RelativePath
         Copy-Item -LiteralPath $src -Destination "$dst.new" -Force
         Write-Host "  conflict $RelativePath (pre-existing; wrote $RelativePath.new; use -ReplaceManaged to overwrite)"
         Add-ManifestEntry $RelativePath "managed" (Get-FileChecksum $src)
@@ -241,6 +286,7 @@ function Install-Seed {
         return
     }
     if ($script:Plan) { Write-Host "  seed   $RelativePath (create)"; return }
+    Snapshot-File $RelativePath
     $parent = Split-Path -Parent $dst
     if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
     Copy-Item -LiteralPath $src -Destination $dst -Force
@@ -271,6 +317,7 @@ function Install-Merge {
 
     if (-not (Test-Path -LiteralPath $dst)) {
         if ($script:Plan) { Write-Host "  merge  $RelativePath (create)"; return }
+        Snapshot-File $RelativePath
         $parent = Split-Path -Parent $dst
         if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
         Write-Utf8NoBom $dst $srcContent
@@ -287,6 +334,7 @@ function Install-Merge {
 
     if ($startCount -gt 1 -or $endCount -gt 1 -or (($startCount -eq 1 -and $endCount -eq 0) -or ($startCount -eq 0 -and $endCount -eq 1) -or ($startCount -eq 1 -and $endCount -eq 1 -and $endIdx -le $startIdx))) {
         if ($script:Plan) { Write-Host "  conflict $RelativePath (malformed merge markers)"; return }
+        Snapshot-File $RelativePath
         Copy-Item -LiteralPath $src -Destination "$dst.new" -Force
         Write-Host "  conflict $RelativePath (malformed merge markers detected; wrote $RelativePath.new)"
         Add-ManifestEntry $RelativePath "merge" (Get-FileChecksum $src)
@@ -295,6 +343,7 @@ function Install-Merge {
 
     if ($startIdx -ge 0 -and $endIdx -gt $startIdx) {
         if ($script:Plan) { Write-Host "  merge  $RelativePath (update managed block, preserve custom content)"; return }
+        Snapshot-File $RelativePath
         if ($Backup) { Backup-File $RelativePath }
         $newContent = $existing.Substring(0, $startIdx) + $srcContent + "`n" + $existing.Substring($endIdx + $EndMarker.Length)
         Write-Utf8NoBom $dst $newContent
@@ -303,6 +352,7 @@ function Install-Merge {
     }
     elseif (-not [string]::IsNullOrWhiteSpace($existing)) {
         if ($script:Plan) { Write-Host "  merge  $RelativePath (insert managed block above existing content)"; return }
+        Snapshot-File $RelativePath
         if ($Backup) { Backup-File $RelativePath }
         $newContent = $srcContent + "`n`n---`n`n" + $existing.TrimStart()
         Write-Utf8NoBom $dst $newContent
@@ -311,6 +361,7 @@ function Install-Merge {
     }
     else {
         if ($script:Plan) { Write-Host "  merge  $RelativePath (create)"; return }
+        Snapshot-File $RelativePath
         Write-Utf8NoBom $dst $srcContent
         Write-Host "  merge  $RelativePath (create)"
         Add-ManifestEntry $RelativePath "merge" (Get-FileChecksum $dst)
@@ -338,6 +389,7 @@ function New-Checks {
         Write-Host "  note   no stack detected; .agentic/checks.tsv not generated"
         return
     }
+    Snapshot-File ".agentic/checks.tsv"
     $parent = Split-Path -Parent $dst
     if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
     $header = @(
@@ -350,6 +402,7 @@ function New-Checks {
 
 function Write-Manifest {
     if ($script:Plan) { return }
+    Snapshot-File ".agentic/install-manifest.tsv"
     $mf = Join-Path $TargetDir ".agentic\install-manifest.tsv"
     $parent = Split-Path -Parent $mf
     if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
@@ -380,7 +433,7 @@ function Assert-NotPartial {
                 " (a pre-existing file may have conflicted; review '$rel.new')."
         }
     }
-    if ($missing) { exit 1 }
+    if ($missing) { throw "AGENTS.md was not installed into '$TargetDir'." }
 }
 
 Write-Host "Installing Universal Agentic Development Protocol v$ProtocolVersion"
@@ -391,21 +444,31 @@ if ($Plan) { Write-Host "  mode: plan (dry run, nothing will be modified)" }
 elseif ($Update) { Write-Host "  mode: update" }
 Write-Host ""
 
-foreach ($rel in $ManagedFiles) { Install-Managed $rel }
-if ($GenerateChecks) { New-Checks }
-foreach ($rel in $SeedFiles)    { Install-Seed $rel }
-Install-CheckList
-foreach ($rel in $MergeFiles)   { Install-Merge $rel }
+try {
+    foreach ($rel in $ManagedFiles) { Install-Managed $rel }
+    if ($GenerateChecks) { New-Checks }
+    foreach ($rel in $SeedFiles)    { Install-Seed $rel }
+    Install-CheckList
+    foreach ($rel in $MergeFiles)   { Install-Merge $rel }
 
-Write-Manifest
+    Write-Manifest
 
-if ($Plan) {
+    if ($Plan) {
+        Write-Host ""
+        Write-Host "Plan complete — nothing was modified. Re-run without -Plan to apply."
+        exit 0
+    }
+
     Write-Host ""
-    Write-Host "Plan complete — nothing was modified. Re-run without -Plan to apply."
-    exit 0
+    Assert-NotPartial
+    Write-Host "Done. Review any '.new' conflict candidates, then commit the installed files."
+    Write-Host "Next: fill in .agentic/ARCHITECTURE.md for this project, and run ./.agentic/scripts/verify.ps1."
 }
-
-Write-Host ""
-Assert-NotPartial
-Write-Host "Done. Review any '.new' conflict candidates, then commit the installed files."
-Write-Host "Next: fill in .agentic/ARCHITECTURE.md for this project, and run ./.agentic/scripts/verify.ps1."
+catch {
+    Write-Host "ERROR: installation failed: $($_.Exception.Message)"
+    Restore-PreviousState
+    exit 1
+}
+finally {
+    Remove-Item -Recurse -Force $script:SnapDir -ErrorAction SilentlyContinue
+}

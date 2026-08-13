@@ -167,4 +167,39 @@ Describe 'install.ps1' {
         }
         finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
     }
+
+    It 'a failed install rolls back partial changes' {
+        $tmp = New-TestDir
+        try {
+            $agentic = Join-Path $tmp '.agentic'
+            New-Item -ItemType Directory -Path $agentic -Force | Out-Null
+            # a file where a managed-file parent directory is expected makes the
+            # install fail partway through; files already written must be removed
+            Set-Content -LiteralPath (Join-Path $agentic 'templates') -Value 'blocker'
+            & $install -Target $tmp *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            Test-Path (Join-Path $tmp '.agentic\VERSION') | Should -Be $false
+            Test-Path (Join-Path $tmp '.agentic\rules\01-general-principles.md') | Should -Be $false
+            Test-Path (Join-Path $tmp 'AGENTS.md') | Should -Be $false
+            Test-Path (Join-Path $tmp '.agentic\install-manifest.tsv') | Should -Be $false
+            (Get-Content -Raw (Join-Path $tmp '.agentic\templates')) -match 'blocker' | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'an update that fails after the merge phase restores the merged files' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp *> $null
+            Add-Content -LiteralPath (Join-Path $tmp 'AGENTS.md') -Value "`n## Team notes`nkeep this content"
+            $mf = Join-Path $tmp '.agentic\install-manifest.tsv'
+            Set-ItemProperty -LiteralPath $mf -Name IsReadOnly -Value $true
+            & $install -Target $tmp *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            Set-ItemProperty -LiteralPath $mf -Name IsReadOnly -Value $false
+            (Get-Content -Raw (Join-Path $tmp 'AGENTS.md')) -match 'keep this content' | Should -Be $true
+            (Get-Content -Raw (Join-Path $tmp 'AGENTS.md')) -match 'AGENTIC-PROTOCOL-START' | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
 }

@@ -147,6 +147,53 @@ done
 
 BACKUP_DIR=""
 MANIFEST_TMP="$(mktemp)"
+SNAP_DIR="$(mktemp -d)"
+CHANGED_RELS=()
+BACKUP_DIR_EXISTED=0
+[ -e "$TARGET_DIR/.agentic-backup" ] && BACKUP_DIR_EXISTED=1
+
+# Transactional safety: every file we are about to modify is snapshotted first;
+# if the install fails partway through, rollback() restores the target to its
+# prior state instead of leaving a partial installation behind.
+snapshot_file() {
+    local rel="$1" snap
+    snap="$SNAP_DIR/${rel//\//_}"
+    if [ -e "$TARGET_DIR/$rel" ]; then
+        cp -p "$TARGET_DIR/$rel" "$snap" 2>/dev/null || cp "$TARGET_DIR/$rel" "$snap"
+        : > "$snap.present"
+    else
+        : > "$snap.absent"
+    fi
+    CHANGED_RELS+=("$rel")
+}
+
+rollback() {
+    local rel dst snap
+    echo "ERROR: installation failed; restoring '$TARGET_DIR' to its prior state." >&2
+    for rel in "${CHANGED_RELS[@]}"; do
+        dst="$TARGET_DIR/$rel"
+        snap="$SNAP_DIR/${rel//\//_}"
+        if [ -f "$snap.present" ]; then
+            cp "$snap" "$dst" 2>/dev/null || true
+        else
+            rm -f "$dst" 2>/dev/null || true
+        fi
+        rm -f "${dst}.new" "${dst}.agentic-tmp" 2>/dev/null || true
+    done
+    if [ "$BACKUP_DIR_EXISTED" -eq 0 ] && [ -n "$BACKUP_DIR" ]; then
+        rm -rf "$BACKUP_DIR" 2>/dev/null || true
+    fi
+}
+
+cleanup() {
+    local rc=$?
+    if [ "$rc" -ne 0 ]; then
+        rollback
+    fi
+    rm -rf "$SNAP_DIR" 2>/dev/null || true
+    exit "$rc"
+}
+trap cleanup EXIT
 
 manifest_file() { printf '%s' "$TARGET_DIR/.agentic/install-manifest.tsv"; }
 
@@ -180,6 +227,7 @@ install_managed() {
     local dst="$TARGET_DIR/$rel" prev cur
     if [ ! -e "$dst" ]; then
         [ "$PLAN" -eq 1 ] && { echo "  copy   $rel (create)"; return; }
+        snapshot_file "$rel"
         mkdir -p "$(dirname "$dst")"
         cp "$src" "$dst"
         echo "  copy   $rel (create)"
@@ -188,6 +236,7 @@ install_managed() {
     fi
     if [ "$REPLACE_MANAGED" -eq 1 ]; then
         [ "$PLAN" -eq 1 ] && { echo "  copy   $rel (replace: --replace-managed)"; return; }
+        snapshot_file "$rel"
         [ "$BACKUP" -eq 1 ] && backup_file "$rel"
         cp "$src" "$dst"
         echo "  copy   $rel (replaced: --replace-managed)"
@@ -199,17 +248,20 @@ install_managed() {
         cur="$(cksum_file "$dst")"
         if [ "$prev" = "$cur" ]; then
             [ "$PLAN" -eq 1 ] && { echo "  update $rel (unchanged since last install)"; return; }
+            snapshot_file "$rel"
             cp "$src" "$dst"
             echo "  update $rel (unchanged since last install)"
             printf '%s\t%s\t%s\n' "$rel" managed "$(cksum_file "$dst")" >> "$MANIFEST_TMP"
         else
             [ "$PLAN" -eq 1 ] && { echo "  conflict $rel (modified since install; candidate: $rel.new)"; return; }
+            snapshot_file "$rel"
             cp "$src" "${dst}.new"
             echo "  conflict $rel (modified since install; wrote $rel.new)"
             printf '%s\t%s\t%s\n' "$rel" managed "$(cksum_file "$src")" >> "$MANIFEST_TMP"
         fi
     else
         [ "$PLAN" -eq 1 ] && { echo "  conflict $rel (pre-existing; candidate: $rel.new)"; return; }
+        snapshot_file "$rel"
         cp "$src" "${dst}.new"
         echo "  conflict $rel (pre-existing; wrote $rel.new; use --replace-managed to overwrite)"
         printf '%s\t%s\t%s\n' "$rel" managed "$(cksum_file "$src")" >> "$MANIFEST_TMP"
@@ -226,6 +278,7 @@ install_seed() {
         return
     fi
     [ "$PLAN" -eq 1 ] && { echo "  seed   $rel (create)"; return; }
+    snapshot_file "$rel"
     mkdir -p "$(dirname "$dst")"
     cp "$src" "$dst"
     echo "  seed   $rel (create)"
@@ -252,6 +305,7 @@ install_merge() {
     local dst="$TARGET_DIR/$rel" start_line end_line tmp start_count end_count
     if [ ! -e "$dst" ]; then
         [ "$PLAN" -eq 1 ] && { echo "  merge  $rel (create)"; return; }
+        snapshot_file "$rel"
         mkdir -p "$(dirname "$dst")"
         cp "$src" "$dst"
         echo "  merge  $rel (create)"
@@ -262,6 +316,7 @@ install_merge() {
     end_count="$(grep -c -F -- "$END_MARKER" "$dst" 2>/dev/null || true)"
     if [ "$start_count" -gt 1 ] || [ "$end_count" -gt 1 ] || { { [ "$start_count" -eq 1 ] && [ "$end_count" -eq 0 ]; } || { [ "$start_count" -eq 0 ] && [ "$end_count" -eq 1 ]; }; }; then
         [ "$PLAN" -eq 1 ] && { echo "  conflict $rel (malformed merge markers; candidate: $rel.new)"; return; }
+        snapshot_file "$rel"
         cp "$src" "${dst}.new"
         echo "  conflict $rel (malformed merge markers detected; wrote $rel.new)"
         printf '%s\t%s\t%s\n' "$rel" merge "$(cksum_file "$src")" >> "$MANIFEST_TMP"
@@ -271,26 +326,37 @@ install_merge() {
     end_line="$(grep -n -F -- "$END_MARKER" "$dst" 2>/dev/null | head -n1 | cut -d: -f1 || true)"
     if [ -n "$start_line" ] && [ -n "$end_line" ] && [ "$start_line" -lt "$end_line" ]; then
         [ "$PLAN" -eq 1 ] && { echo "  merge  $rel (update managed block, preserve custom content)"; return; }
+        snapshot_file "$rel"
         [ "$BACKUP" -eq 1 ] && backup_file "$rel"
         tmp="${dst}.agentic-tmp"
-        (
+        if ! (
             if [ "$start_line" -gt 1 ]; then head -n "$((start_line - 1))" "$dst"; fi
             cat "$src"
             tail -n +"$((end_line + 1))" "$dst"
-        ) > "$tmp"
+        ) > "$tmp"; then
+            echo "ERROR: failed to rewrite '$rel'." >&2
+            rm -f "$tmp" 2>/dev/null || true
+            exit 1
+        fi
         mv "$tmp" "$dst"
         echo "  merge  $rel (managed block updated, custom content preserved)"
         printf '%s\t%s\t%s\n' "$rel" merge "$(cksum_file "$dst")" >> "$MANIFEST_TMP"
     elif [ -s "$dst" ]; then
         [ "$PLAN" -eq 1 ] && { echo "  merge  $rel (insert managed block above existing content)"; return; }
+        snapshot_file "$rel"
         [ "$BACKUP" -eq 1 ] && backup_file "$rel"
         tmp="${dst}.agentic-tmp"
-        ( cat "$src"; printf '\n\n---\n\n'; cat "$dst" ) > "$tmp"
+        if ! ( cat "$src"; printf '\n\n---\n\n'; cat "$dst" ) > "$tmp"; then
+            echo "ERROR: failed to rewrite '$rel'." >&2
+            rm -f "$tmp" 2>/dev/null || true
+            exit 1
+        fi
         mv "$tmp" "$dst"
         echo "  merge  $rel (managed block inserted, existing content preserved)"
         printf '%s\t%s\t%s\n' "$rel" merge "$(cksum_file "$dst")" >> "$MANIFEST_TMP"
     else
         [ "$PLAN" -eq 1 ] && { echo "  merge  $rel (create)"; return; }
+        snapshot_file "$rel"
         cp "$src" "$dst"
         echo "  merge  $rel (create)"
         printf '%s\t%s\t%s\n' "$rel" merge "$(cksum_file "$dst")" >> "$MANIFEST_TMP"
@@ -311,6 +377,7 @@ generate_checks() {
         echo "  note   no stack detected; .agentic/checks.tsv not generated"
         return
     fi
+    snapshot_file "$rel"
     tmp="${dst}.agentic-tmp"
     {
         echo "# .agentic/checks.tsv — project-owned verification checks (authoritative)."
@@ -325,6 +392,7 @@ write_manifest() {
     local mf
     [ "$PLAN" -eq 1 ] && return
     mf="$(manifest_file)"
+    snapshot_file ".agentic/install-manifest.tsv"
     mkdir -p "$(dirname "$mf")"
     {
         echo "# agentic-workflow install manifest (auto-generated)"

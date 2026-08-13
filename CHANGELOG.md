@@ -21,12 +21,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `PASS` is impossible unless at least one required check actually ran. A
   blocked required check always reports `BLOCKED`, never `PASS`.
 - `.agentic/checks.tsv` is the authoritative, project-owned check list;
-  stack auto-detection is now only a bootstrap fallback.
-- Installers are non-destructive and checksum-aware (ADR-0003). They classify
-  files as `managed`, `seed`, or `merge`, record SHA-256 in
-  `.agentic/install-manifest.tsv`, write `.new` conflict candidates instead of
-  clobbering modifications, and preserve adopter content around the marker-
-  delimited protocol block in `AGENTS.md`/`CLAUDE.md`/`GEMINI.md`.
+  stack auto-detection is now only a bootstrap fallback. Every populated row is
+  validated before any command runs (requirement value, field count, non-empty
+  IDs, uniqueness, and working-directory confinement to the project root).
+- Installers are non-destructive, checksum-aware, and transactional
+  (ADR-0003). They classify files as `managed`, `seed`, or `merge`, record
+  SHA-256 in `.agentic/install-manifest.tsv`, write `.new` conflict candidates
+  instead of clobbering modifications, and preserve adopter content around the
+  marker-delimited protocol block in `AGENTS.md`/`CLAUDE.md`/`GEMINI.md`. If an
+  install fails partway through, a snapshot/rollback trap restores the target
+  to its prior state instead of leaving a partial installation behind.
+- Generating checks is decoupled from `--replace-managed`; overwriting an
+  existing `.agentic/checks.tsv` requires the explicit `--replace-checks`
+  (`-RegenerateChecks`) option.
 - Lifecycle now ends in **HANDOFF**, not commit (ADR-0004); self-healing is
   bounded to three evidence-based repair cycles; tests are never weakened to
   go green.

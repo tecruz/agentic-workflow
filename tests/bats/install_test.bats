@@ -126,3 +126,35 @@ teardown() {
     [ -d .agentic-backup ]
     [ -f .agentic-backup/AGENTS.md ]
 }
+
+@test "malformed merge markers produce a conflict candidate and are not clobbered" {
+    printf '%s\n' '<!-- @@AGENTIC-PROTOCOL-START@@ -->' 'broken' '<!-- @@AGENTIC-PROTOCOL-START@@ -->' > AGENTS.md
+    bash "$INSTALL" . >/dev/null 2>&1
+    [ -f AGENTS.md.new ]
+    grep -q "broken" AGENTS.md
+    [ "$(grep -c -F 'AGENTIC-PROTOCOL-START' AGENTS.md)" -eq 2 ]
+}
+
+@test "a failed install rolls back partial changes" {
+    mkdir -p .agentic
+    printf 'blocker\n' > .agentic/tasks
+    run bash "$INSTALL" .
+    [ "$status" -ne 0 ]
+    [ ! -f .agentic/VERSION ]
+    [ ! -f .agentic/rules/01-general-principles.md ]
+    [ ! -f AGENTS.md ]
+    [ ! -f .agentic/install-manifest.tsv ]
+    [ -f .agentic/tasks ]
+    [ "$(cat .agentic/tasks)" = "blocker" ]
+}
+
+@test "an update that fails after the merge phase restores the merged files" {
+    bash "$INSTALL" . >/dev/null 2>&1
+    printf '\n## Team notes\nkeep this content\n' >> AGENTS.md
+    chmod 444 .agentic/install-manifest.tsv
+    run bash "$INSTALL" .
+    chmod 644 .agentic/install-manifest.tsv
+    [ "$status" -ne 0 ]
+    grep -q "keep this content" AGENTS.md
+    grep -q "AGENTIC-PROTOCOL-START" AGENTS.md
+}
