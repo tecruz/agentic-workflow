@@ -92,3 +92,33 @@ run_fixture() {  # run_fixture <fixture>
     [ "$status" -eq 0 ]
     printf '%s' "$output" | grep -q $'\tuv\t'
 }
+
+@test "checks.tsv working dir escaping the project root is rejected" {
+    mkdir -p .agentic
+    printf 'required\ttest\t..\tsh\t-c\ttrue\n' > .agentic/checks.tsv
+    run bash "$VERIFY"
+    [ "$status" -eq 1 ]
+}
+
+@test "checks.tsv working dir through a symlink escape is rejected" {
+    mkdir -p .agentic
+    outside="$(mktemp -d)"
+    ln -s "$outside" link
+    printf 'required\ttest\tlink\tsh\t-c\ttrue\n' > .agentic/checks.tsv
+    run bash "$VERIFY"
+    [ "$status" -eq 1 ]
+}
+
+@test "checks.tsv working dir equal to the project root is accepted" {
+    mkdir -p .agentic
+    printf 'required\tok\t.\tsh\t-c\ttrue\n' > .agentic/checks.tsv
+    run bash "$VERIFY"
+    [ "$status" -eq 0 ]
+}
+
+@test "checks.tsv working dir inside the project is accepted" {
+    mkdir -p .agentic nested
+    printf 'required\tok\tnested\tsh\t-c\ttrue\n' > .agentic/checks.tsv
+    run bash "$VERIFY"
+    [ "$status" -eq 0 ]
+}

@@ -144,10 +144,10 @@ installed, so project type detection never depends on the local machine.
 | .NET | `*.sln` / `*.csproj` | `dotnet test`, `dotnet format --verify-no-changes` | `dotnet-sln-only`, `dotnet-csproj-only` |
 | Monorepo | multiple lockfiles / manifests | merged detection per sub-stack | `monorepo` |
 
-Every fixture is exercised by the Bats suite (`verify.sh`) and the Pester suite
-(`verify.ps1`), and the fixture smoke harnesses
-(`tests/fixtures/run-fixtures.sh` and `run-fixtures.ps1`) fail CI on any
-mismatch. The Bats and Pester suites run on Linux, macOS, and Windows in CI.
+The fixture smoke harnesses (`tests/fixtures/run-fixtures.sh` and
+`tests/fixtures/run-fixtures.ps1`) exercise the complete fixture list and fail
+CI on any mismatch. The Bats suites (`verify.sh` + `install.sh`) run on Linux
+and macOS; the Pester suites (`verify.ps1` + `install.ps1`) run on Windows.
 
 ---
 

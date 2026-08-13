@@ -202,4 +202,31 @@ Describe 'install.ps1' {
         }
         finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
     }
+
+    It 'reversed merge markers produce a conflict candidate and are not clobbered' {
+        $tmp = New-TestDir
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'AGENTS.md') -Value "<!-- @@AGENTIC-PROTOCOL-END@@ -->`ncustom content`n<!-- @@AGENTIC-PROTOCOL-START@@ -->"
+            & $install -Target $tmp *> $null
+            Test-Path (Join-Path $tmp 'AGENTS.md.new') | Should -Be $true
+            (Get-Content -Raw (Join-Path $tmp 'AGENTS.md')) -match 'custom content' | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'a pre-existing .new conflict candidate is restored on rollback' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp *> $null
+            Add-Content -LiteralPath (Join-Path $tmp '.agentic\WORKFLOW.md') -Value "`n# custom"
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\WORKFLOW.md.new') -Value 'PRECIOUS CANDIDATE'
+            $mf = Join-Path $tmp '.agentic\install-manifest.tsv'
+            Set-ItemProperty -LiteralPath $mf -Name IsReadOnly -Value $true
+            & $install -Target $tmp *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            Set-ItemProperty -LiteralPath $mf -Name IsReadOnly -Value $false
+            (Get-Content -Raw (Join-Path $tmp '.agentic\WORKFLOW.md.new')) -match 'PRECIOUS CANDIDATE' | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
 }

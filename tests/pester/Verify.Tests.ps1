@@ -68,4 +68,66 @@ Describe 'verify.ps1 state model' {
         }
         finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
     }
+
+    It 'checks.tsv working dir equal to the project root is accepted' {
+        $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vtest-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic') -Force | Out-Null
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value "required`tok`t.`tcmd`t/c`texit`t0"
+            Push-Location $tmp
+            try { & $verify *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
+            $code | Should -Be 0
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'checks.tsv working dir inside the project is accepted' {
+        $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vtest-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic') -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $tmp 'nested') -Force | Out-Null
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value "required`tok`tnested`tcmd`t/c`texit`t0"
+            Push-Location $tmp
+            try { & $verify *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
+            $code | Should -Be 0
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'checks.tsv working dir with a sibling-prefix path is rejected' {
+        $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vtest-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic') -Force | Out-Null
+        $parent = Split-Path -Parent $tmp
+        $sibling = Join-Path $parent ((Split-Path -Leaf $tmp) + '-backup')
+        New-Item -ItemType Directory -Path $sibling -Force | Out-Null
+        try {
+            $escape = Join-Path '..' (Split-Path -Leaf $sibling)
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value "required`tok`t$escape`tcmd`t/c`texit`t0"
+            Push-Location $tmp
+            try { & $verify *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
+            $code | Should -Be 1
+        }
+        finally {
+            Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force $sibling -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'checks.tsv working dir through a junction escape is rejected' {
+        $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vtest-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic') -Force | Out-Null
+        $outside = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vout-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $outside -Force | Out-Null
+        try {
+            New-Item -ItemType Junction -Path (Join-Path $tmp 'escape') -Target $outside -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value "required`tok`tescape`tcmd`t/c`texit`t0"
+            Push-Location $tmp
+            try { & $verify *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
+            $code | Should -Be 1
+        }
+        finally {
+            Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force $outside -ErrorAction SilentlyContinue
+        }
+    }
 }

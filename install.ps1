@@ -173,6 +173,7 @@ function Backup-File {
         New-Item -ItemType Directory -Path $script:BackupDir -Force | Out-Null
     }
     $flat = (ConvertTo-PortablePath $RelativePath).Replace('/', '_')
+    Snapshot-File ".agentic-backup/$flat"
     Copy-Item -LiteralPath $src -Destination (Join-Path $script:BackupDir $flat) -Force
     Write-Host "  backup $RelativePath -> .agentic-backup/$flat"
 }
@@ -184,6 +185,11 @@ function Snapshot-File {
     param([string] $RelativePath)
     $dst = Join-Path $TargetDir $RelativePath
     $snap = Join-Path $script:SnapDir ((ConvertTo-PortablePath $RelativePath).Replace('/', '_'))
+    # First snapshot wins: a path modified more than once in one transaction
+    # must always be rolled back to its state before the transaction began.
+    if ((Test-Path -LiteralPath $snap) -or
+        (Test-Path -LiteralPath "$snap.present") -or
+        (Test-Path -LiteralPath "$snap.absent")) { return }
     if (Test-Path -LiteralPath $dst) {
         Copy-Item -LiteralPath $dst -Destination $snap -Force
         [System.IO.File]::WriteAllText("$snap.present", "", [System.Text.UTF8Encoding]::new($false))
@@ -205,7 +211,6 @@ function Restore-PreviousState {
         else {
             Remove-Item -LiteralPath $dst -Force -ErrorAction SilentlyContinue
         }
-        Remove-Item -LiteralPath "$dst.new" -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath "$dst.agentic-tmp" -Force -ErrorAction SilentlyContinue
     }
     if ($script:BackupDir -and -not $script:BackupExisted) {
@@ -257,6 +262,7 @@ function Install-Managed {
         else {
             if ($script:Plan) { Write-Host "  conflict $RelativePath (modified since install; candidate: $RelativePath.new)"; return }
             Snapshot-File $RelativePath
+            Snapshot-File "$RelativePath.new"
             Copy-Item -LiteralPath $src -Destination "$dst.new" -Force
             Write-Host "  conflict $RelativePath (modified since install; wrote $RelativePath.new)"
             Add-ManifestEntry $RelativePath "managed" (Get-FileChecksum $src)
@@ -265,6 +271,7 @@ function Install-Managed {
     else {
         if ($script:Plan) { Write-Host "  conflict $RelativePath (pre-existing; candidate: $RelativePath.new)"; return }
         Snapshot-File $RelativePath
+        Snapshot-File "$RelativePath.new"
         Copy-Item -LiteralPath $src -Destination "$dst.new" -Force
         Write-Host "  conflict $RelativePath (pre-existing; wrote $RelativePath.new; use -ReplaceManaged to overwrite)"
         Add-ManifestEntry $RelativePath "managed" (Get-FileChecksum $src)
@@ -335,6 +342,7 @@ function Install-Merge {
     if ($startCount -gt 1 -or $endCount -gt 1 -or (($startCount -eq 1 -and $endCount -eq 0) -or ($startCount -eq 0 -and $endCount -eq 1) -or ($startCount -eq 1 -and $endCount -eq 1 -and $endIdx -le $startIdx))) {
         if ($script:Plan) { Write-Host "  conflict $RelativePath (malformed merge markers)"; return }
         Snapshot-File $RelativePath
+        Snapshot-File "$RelativePath.new"
         Copy-Item -LiteralPath $src -Destination "$dst.new" -Force
         Write-Host "  conflict $RelativePath (malformed merge markers detected; wrote $RelativePath.new)"
         Add-ManifestEntry $RelativePath "merge" (Get-FileChecksum $src)

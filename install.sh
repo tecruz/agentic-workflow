@@ -158,6 +158,11 @@ BACKUP_DIR_EXISTED=0
 snapshot_file() {
     local rel="$1" snap
     snap="$SNAP_DIR/${rel//\//_}"
+    # First snapshot wins: a path modified more than once in one transaction
+    # must always be rolled back to its state before the transaction began.
+    if [ -e "$snap" ] || [ -e "$snap.present" ] || [ -e "$snap.absent" ]; then
+        return
+    fi
     if [ -e "$TARGET_DIR/$rel" ]; then
         cp -p "$TARGET_DIR/$rel" "$snap" 2>/dev/null || cp "$TARGET_DIR/$rel" "$snap"
         : > "$snap.present"
@@ -178,7 +183,7 @@ rollback() {
         else
             rm -f "$dst" 2>/dev/null || true
         fi
-        rm -f "${dst}.new" "${dst}.agentic-tmp" 2>/dev/null || true
+        rm -f "${dst}.agentic-tmp" 2>/dev/null || true
     done
     if [ "$BACKUP_DIR_EXISTED" -eq 0 ] && [ -n "$BACKUP_DIR" ]; then
         rm -rf "$BACKUP_DIR" 2>/dev/null || true
@@ -214,12 +219,14 @@ cksum_file() {
 }
 
 backup_file() {
-    local rel="$1" src
+    local rel="$1" src flat
     src="$TARGET_DIR/$rel"
+    flat="${rel//\//_}"
     [ -z "$BACKUP_DIR" ] && BACKUP_DIR="$TARGET_DIR/.agentic-backup"
     mkdir -p "$BACKUP_DIR"
-    cp -p "$src" "$BACKUP_DIR/${rel//\//_}"
-    echo "  backup $rel -> .agentic-backup/${rel//\//_}"
+    snapshot_file ".agentic-backup/$flat"
+    cp -p "$src" "$BACKUP_DIR/$flat"
+    echo "  backup $rel -> .agentic-backup/$flat"
 }
 
 install_managed() {
@@ -255,6 +262,7 @@ install_managed() {
         else
             [ "$PLAN" -eq 1 ] && { echo "  conflict $rel (modified since install; candidate: $rel.new)"; return; }
             snapshot_file "$rel"
+            snapshot_file "$rel.new"
             cp "$src" "${dst}.new"
             echo "  conflict $rel (modified since install; wrote $rel.new)"
             printf '%s\t%s\t%s\n' "$rel" managed "$(cksum_file "$src")" >> "$MANIFEST_TMP"
@@ -262,6 +270,7 @@ install_managed() {
     else
         [ "$PLAN" -eq 1 ] && { echo "  conflict $rel (pre-existing; candidate: $rel.new)"; return; }
         snapshot_file "$rel"
+        snapshot_file "$rel.new"
         cp "$src" "${dst}.new"
         echo "  conflict $rel (pre-existing; wrote $rel.new; use --replace-managed to overwrite)"
         printf '%s\t%s\t%s\n' "$rel" managed "$(cksum_file "$src")" >> "$MANIFEST_TMP"
@@ -314,16 +323,21 @@ install_merge() {
     fi
     start_count="$(grep -c -F -- "$START_MARKER" "$dst" 2>/dev/null || true)"
     end_count="$(grep -c -F -- "$END_MARKER" "$dst" 2>/dev/null || true)"
-    if [ "$start_count" -gt 1 ] || [ "$end_count" -gt 1 ] || { { [ "$start_count" -eq 1 ] && [ "$end_count" -eq 0 ]; } || { [ "$start_count" -eq 0 ] && [ "$end_count" -eq 1 ]; }; }; then
+    start_line="$(grep -n -F -- "$START_MARKER" "$dst" 2>/dev/null | head -n1 | cut -d: -f1 || true)"
+    end_line="$(grep -n -F -- "$END_MARKER" "$dst" 2>/dev/null | head -n1 | cut -d: -f1 || true)"
+    # Malformed marker sets are never rewritten in place: a single start+end
+    # pair where the end marker precedes the start marker is also malformed.
+    if [ "$start_count" -gt 1 ] || [ "$end_count" -gt 1 ] \
+        || { { [ "$start_count" -eq 1 ] && [ "$end_count" -eq 0 ]; } || { [ "$start_count" -eq 0 ] && [ "$end_count" -eq 1 ]; }; } \
+        || { [ "$start_count" -eq 1 ] && [ "$end_count" -eq 1 ] && [ "$end_line" -le "$start_line" ]; }; then
         [ "$PLAN" -eq 1 ] && { echo "  conflict $rel (malformed merge markers; candidate: $rel.new)"; return; }
         snapshot_file "$rel"
+        snapshot_file "$rel.new"
         cp "$src" "${dst}.new"
         echo "  conflict $rel (malformed merge markers detected; wrote $rel.new)"
         printf '%s\t%s\t%s\n' "$rel" merge "$(cksum_file "$src")" >> "$MANIFEST_TMP"
         return
     fi
-    start_line="$(grep -n -F -- "$START_MARKER" "$dst" 2>/dev/null | head -n1 | cut -d: -f1 || true)"
-    end_line="$(grep -n -F -- "$END_MARKER" "$dst" 2>/dev/null | head -n1 | cut -d: -f1 || true)"
     if [ -n "$start_line" ] && [ -n "$end_line" ] && [ "$start_line" -lt "$end_line" ]; then
         [ "$PLAN" -eq 1 ] && { echo "  merge  $rel (update managed block, preserve custom content)"; return; }
         snapshot_file "$rel"
@@ -364,8 +378,9 @@ install_merge() {
 }
 
 generate_checks() {
-    local dst checks tmp
-    dst="$TARGET_DIR/.agentic/checks.tsv"
+    local rel=".agentic/checks.tsv"
+    local dst="$TARGET_DIR/$rel"
+    local checks tmp
     if [ -e "$dst" ] && [ "$REPLACE_CHECKS" -eq 0 ]; then
         echo "  skip   .agentic/checks.tsv (already exists; use --replace-checks to overwrite)"
         return

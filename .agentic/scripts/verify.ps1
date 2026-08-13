@@ -216,6 +216,24 @@ function Get-DetectedChecks {
     return $lines
 }
 
+function Resolve-PhysicalPath {
+    param([string] $Path)
+    # Follows every path segment so a symlink/junction inside the project that
+    # points outside resolves to its physical target, not its lexical path.
+    $full = [System.IO.Path]::GetFullPath($Path)
+    $root = [System.IO.Path]::GetPathRoot($full)
+    $current = $root
+    $parts = $full.Substring($root.Length) -split '[/\\]' | Where-Object { $_ -ne '' }
+    foreach ($part in $parts) {
+        $current = Join-Path $current $part
+        $item = Get-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
+        if ($item -and $item.Target) {
+            $current = $item.Target
+        }
+    }
+    return [System.IO.Path]::GetFullPath($current)
+}
+
 function Test-ChecksTsvValidation {
     param([string] $FilePath)
     $lines = Get-Content -LiteralPath $FilePath
@@ -253,9 +271,19 @@ function Test-ChecksTsvValidation {
         $seenIds[$id] = $true
 
         $targetCwd = Join-Path $rootPath $cwd
-        $resolvedCwd = [System.IO.Path]::GetFullPath($targetCwd)
-        $resolvedRoot = [System.IO.Path]::GetFullPath($rootPath)
-        if (-not $resolvedCwd.StartsWith($resolvedRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        $resolvedCwd = Resolve-PhysicalPath $targetCwd
+        $resolvedRoot = Resolve-PhysicalPath $rootPath
+        # Confinement requires an exact match or root followed by the directory
+        # separator; a sibling path sharing the root's name prefix must not pass.
+        $resolvedRootTrimmed = $resolvedRoot.TrimEnd(
+            [System.IO.Path]::DirectorySeparatorChar,
+            [System.IO.Path]::AltDirectorySeparatorChar
+        )
+        $rootPrefix = $resolvedRootTrimmed + [System.IO.Path]::DirectorySeparatorChar
+        $insideRoot =
+            $resolvedCwd.Equals($resolvedRootTrimmed, [System.StringComparison]::OrdinalIgnoreCase) -or
+            $resolvedCwd.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase)
+        if (-not $insideRoot) {
             Write-Host "ERROR: .agentic/checks.tsv line $lineNum working directory '$cwd' escapes project root."
             exit 1
         }

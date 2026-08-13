@@ -158,3 +158,36 @@ teardown() {
     grep -q "keep this content" AGENTS.md
     grep -q "AGENTIC-PROTOCOL-START" AGENTS.md
 }
+
+@test "reversed merge markers produce a conflict candidate and are not clobbered" {
+    printf '%s\n' '<!-- @@AGENTIC-PROTOCOL-END@@ -->' 'custom content' '<!-- @@AGENTIC-PROTOCOL-START@@ -->' > AGENTS.md
+    bash "$INSTALL" . >/dev/null 2>&1
+    [ -f AGENTS.md.new ]
+    grep -q "custom content" AGENTS.md
+    [ "$(grep -c -F 'AGENTIC-PROTOCOL-START' AGENTS.md)" -eq 1 ]
+    [ "$(grep -c -F 'AGENTIC-PROTOCOL-END' AGENTS.md)" -eq 1 ]
+}
+
+@test "--generate-checks output is rolled back when the install fails" {
+    mkdir -p .agentic
+    printf '{"name":"x","scripts":{"test":"true"}}\n' > package.json
+    mkdir .agentic/install-manifest.tsv
+    run bash "$INSTALL" . --generate-checks
+    [ "$status" -ne 0 ]
+    [ ! -f .agentic/checks.tsv ]
+    [ ! -f .agentic/VERSION ]
+    [ ! -f .agentic/rules/01-general-principles.md ]
+    [ ! -f AGENTS.md ]
+}
+
+@test "a pre-existing .new conflict candidate is restored on rollback" {
+    bash "$INSTALL" . >/dev/null 2>&1
+    printf '\n# custom\n' >> .agentic/WORKFLOW.md
+    printf 'PRECIOUS CANDIDATE\n' > .agentic/WORKFLOW.md.new
+    chmod 444 .agentic/install-manifest.tsv
+    run bash "$INSTALL" .
+    chmod 644 .agentic/install-manifest.tsv
+    [ "$status" -ne 0 ]
+    grep -q "PRECIOUS CANDIDATE" .agentic/WORKFLOW.md.new
+    grep -q "# custom" .agentic/WORKFLOW.md
+}

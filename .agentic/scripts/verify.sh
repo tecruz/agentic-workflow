@@ -202,7 +202,7 @@ validate_checks_tsv() {
     local line
     local seen_ids=""
     local root_dir
-    root_dir="$(pwd)"
+    root_dir="$(pwd -P)"
 
     while IFS= read -r line || [ -n "$line" ]; do
         line_num=$((line_num + 1))
@@ -242,7 +242,9 @@ validate_checks_tsv() {
         seen_ids="$seen_ids $id"
 
         local resolved_cwd
-        resolved_cwd="$(cd "$cwd" 2>/dev/null && pwd || true)"
+        # Resolve physically: a logical path through a symlink can point outside
+        # the project even when its lexical path looks like a subdirectory.
+        resolved_cwd="$(cd "$cwd" 2>/dev/null && pwd -P || true)"
         if [ -z "$resolved_cwd" ]; then
             echo "ERROR: .agentic/checks.tsv line $line_num working directory '$cwd' does not exist." >&2
             exit 1
