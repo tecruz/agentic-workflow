@@ -260,9 +260,11 @@ function Resolve-PhysicalPath {
                 $current = $item.Target
             }
             else {
-                # Resolve a relative target against the link's parent directory,
-                # not the process working directory.
-                $current = Join-Path (Split-Path -Parent $current) $item.Target
+                $parent = [System.IO.Path]::GetDirectoryName($current)
+                if ([string]::IsNullOrEmpty($parent)) {
+                    $parent = [System.IO.Path]::GetPathRoot($current)
+                }
+                $current = Join-Path $parent $item.Target
             }
         }
     }
