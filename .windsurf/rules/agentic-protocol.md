@@ -1,0 +1,9 @@
+# Universal Agentic Development Protocol
+
+This project uses `AGENTS.md` as the canonical source of truth for agent behavior.
+
+- Read `AGENTS.md` before executing modifications.
+- Follow the 5-Phase Agentic Development Loop detailed in `.agentic/WORKFLOW.md`.
+- Adhere strictly to the rules in `.agentic/rules/`.
+- Update project state in `.agentic/Memory/PROJECT_STATE.md`.
+- Never duplicate protocol content into this file; keep it a pointer.

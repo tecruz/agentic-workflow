@@ -1,0 +1,9 @@
+# Cline / Roo Code Rules
+
+This project uses the Universal Agentic Development Protocol.
+Primary guidelines and directives are maintained in `AGENTS.md`.
+
+- Read `AGENTS.md` before executing modifications.
+- Follow the 5-Phase Agentic Development Loop in `.agentic/WORKFLOW.md`.
+- Adhere strictly to rules in `.agentic/rules/`.
+- Update project state in `.agentic/Memory/PROJECT_STATE.md`.

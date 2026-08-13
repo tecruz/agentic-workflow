@@ -1,0 +1,29 @@
+# --- Secrets & environment (see .agentic/rules/05-security-safety.md) ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- OS files ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Editor / IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- Common build outputs & dependencies ---
+node_modules/
+dist/
+build/
+target/
+__pycache__/
+*.pyc
+.venv/
+venv/
+bin/
+obj/
