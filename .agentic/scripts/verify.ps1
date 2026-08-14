@@ -151,79 +151,145 @@ function Get-DetectedChecks {
     if (Test-Path -LiteralPath package.json) {
         Write-Host "Detected: Node.js project (package.json)"
         if (Test-Path -LiteralPath pnpm-lock.yaml) {
-            $lines += "required`ttest`t.`tpnpm`ttest"
-            $lines += "required`tlint`t.`tpnpm`tlint"
+            $lines += "required`tnode-test`t.`tpnpm`ttest"
+            $lines += "required`tnode-lint`t.`tpnpm`tlint"
         }
         elseif (Test-Path -LiteralPath yarn.lock) {
-            $lines += "required`ttest`t.`tyarn`ttest"
-            $lines += "required`tlint`t.`tyarn`tlint"
+            $lines += "required`tnode-test`t.`tyarn`ttest"
+            $lines += "required`tnode-lint`t.`tyarn`tlint"
         }
         elseif (Test-Path -LiteralPath bun.lockb) {
-            $lines += "required`ttest`t.`tbun`ttest"
-            $lines += "required`tlint`t.`tbun`trun`tlint"
+            $lines += "required`tnode-test`t.`tbun`ttest"
+            $lines += "required`tnode-lint`t.`tbun`trun`tlint"
         }
         else {
-            $lines += "required`ttest`t.`tnpm`ttest"
-            $lines += "required`tlint`t.`tnpm`trun`tlint`t--if-present"
+            $lines += "required`tnode-test`t.`tnpm`ttest"
+            $lines += "required`tnode-lint`t.`tnpm`trun`tlint`t--if-present"
         }
     }
 
     if (Test-Path -LiteralPath Cargo.toml) {
         Write-Host "Detected: Rust project (Cargo.toml)"
-        $lines += "required`ttest`t.`tcargo`ttest"
-        $lines += "required`tlint`t.`tcargo`tclippy`t--`t-D`twarnings"
+        $lines += "required`trust-test`t.`tcargo`ttest"
+        $lines += "required`trust-clippy`t.`tcargo`tclippy`t--`t-D`twarnings"
     }
 
     if ((Test-Path -LiteralPath pyproject.toml) -or (Test-Path -LiteralPath requirements.txt)) {
         Write-Host "Detected: Python project (pyproject.toml / requirements.txt)"
         if (Test-Path -LiteralPath poetry.lock) {
-            $lines += "required`ttest`t.`tpoetry`trun`tpytest"
-            $lines += "required`tlint`t.`tpoetry`trun`truff`tcheck`t."
+            $lines += "required`tpython-test`t.`tpoetry`trun`tpytest"
+            $lines += "required`tpython-ruff`t.`tpoetry`trun`truff`tcheck`t."
         }
         elseif (Test-Path -LiteralPath uv.lock) {
-            $lines += "required`ttest`t.`tuv`trun`tpytest"
-            $lines += "required`tlint`t.`tuv`trun`truff`tcheck`t."
+            $lines += "required`tpython-test`t.`tuv`trun`tpytest"
+            $lines += "required`tpython-ruff`t.`tuv`trun`truff`tcheck`t."
         }
         else {
-            $lines += "required`ttest`t.`tpytest"
-            $lines += "required`tlint`t.`truff`tcheck`t."
+            $lines += "required`tpython-test`t.`tpytest"
+            $lines += "required`tpython-ruff`t.`truff`tcheck`t."
         }
     }
 
     if (Test-Path -LiteralPath go.mod) {
         Write-Host "Detected: Go project (go.mod)"
-        $lines += "required`ttest`t.`tgo`ttest`t./..."
-        $lines += "required`tlint`t.`tgo`tvet`t./..."
+        $lines += "required`tgo-test`t.`tgo`ttest`t./..."
+        $lines += "required`tgo-vet`t.`tgo`tvet`t./..."
     }
 
     if (Test-Path -LiteralPath pom.xml) {
         Write-Host "Detected: Maven project (pom.xml)"
         if (Test-Path -LiteralPath ./mvnw) {
-            $lines += "required`ttest`t.`t./mvnw`ttest"
-            $lines += "required`tlint`t.`t./mvnw`tcheckstyle:check"
+            $lines += "required`tmaven-test`t.`t./mvnw`ttest"
+            $lines += "required`tmaven-lint`t.`t./mvnw`tcheckstyle:check"
         }
         else {
-            $lines += "required`ttest`t.`tmvn`ttest"
-            $lines += "required`tlint`t.`tmvn`tcheckstyle:check"
+            $lines += "required`tmaven-test`t.`tmvn`ttest"
+            $lines += "required`tmaven-lint`t.`tmvn`tcheckstyle:check"
         }
     }
     elseif ((Test-Path -LiteralPath build.gradle) -or (Test-Path -LiteralPath build.gradle.kts)) {
-        Write-Host "Detected: Gradle project (build.gradle)"
-        if (Test-Path -LiteralPath ./gradlew) {
-            $lines += "required`ttest`t.`t./gradlew`ttest"
-            $lines += "required`tlint`t.`t./gradlew`tcheck"
+        $isAndroid = $false
+        $gradleText = ''
+        if (Test-Path -LiteralPath build.gradle) { $gradleText += Get-Content -LiteralPath build.gradle -Raw -ErrorAction SilentlyContinue }
+        if (Test-Path -LiteralPath build.gradle.kts) { $gradleText += Get-Content -LiteralPath build.gradle.kts -Raw -ErrorAction SilentlyContinue }
+        if (Test-Path -LiteralPath AndroidManifest.xml) { $isAndroid = $true }
+        if ($gradleText -match 'com\.android|org\.jetbrains\.kotlin\.android') { $isAndroid = $true }
+
+        if ($isAndroid) {
+            Write-Host "Detected: Android / Kotlin Gradle project (build.gradle)"
+            if (Test-Path -LiteralPath ./gradlew) {
+                $lines += "required`tandroid-unit`t.`t./gradlew`ttest"
+                $lines += "required`tandroid-lint`t.`t./gradlew`tlint"
+                $lines += "required`tandroid-build`t.`t./gradlew`tassembleDebug"
+                $lines += "optional`tandroid-device`t.`t./gradlew`tconnectedCheck"
+            }
+            else {
+                $lines += "required`tandroid-unit`t.`tgradle`ttest"
+                $lines += "required`tandroid-lint`t.`tgradle`tlint"
+                $lines += "required`tandroid-build`t.`tgradle`tassembleDebug"
+                $lines += "optional`tandroid-device`t.`tgradle`tconnectedCheck"
+            }
         }
         else {
-            $lines += "required`ttest`t.`tgradle`ttest"
-            $lines += "required`tlint`t.`tgradle`tcheck"
+            Write-Host "Detected: Gradle project (build.gradle)"
+            if (Test-Path -LiteralPath ./gradlew) {
+                $lines += "required`tgradle-test`t.`t./gradlew`ttest"
+                $lines += "required`tgradle-lint`t.`t./gradlew`tcheck"
+            }
+            else {
+                $lines += "required`tgradle-test`t.`tgradle`ttest"
+                $lines += "required`tgradle-lint`t.`tgradle`tcheck"
+            }
         }
     }
 
     if ((Get-ChildItem -Path . -Filter *.sln -File -ErrorAction SilentlyContinue) -or
         (Get-ChildItem -Path . -Filter *.csproj -File -ErrorAction SilentlyContinue)) {
         Write-Host "Detected: .NET project (*.sln / *.csproj)"
-        $lines += "required`ttest`t.`tdotnet`ttest"
-        $lines += "required`tlint`t.`tdotnet`tformat`t--verify-no-changes"
+        $lines += "required`tdotnet-test`t.`tdotnet`ttest"
+        $lines += "required`tdotnet-lint`t.`tdotnet`tformat`t--verify-no-changes"
+    }
+
+    foreach ($base in @('apps', 'services', 'packages', 'modules')) {
+        if (Test-Path -LiteralPath $base -PathType Container) {
+            $subs = Get-ChildItem -Path $base -Directory -ErrorAction SilentlyContinue
+            foreach ($sub in $subs) {
+                $subName = $sub.Name
+                if ($subName -in @('node_modules', 'target', 'build', '.venv')) { continue }
+                $subRel = "$base/$subName"
+                $prefix = "$base-$subName"
+
+                if (Test-Path -LiteralPath (Join-Path $subRel 'package.json')) {
+                    Write-Host "Detected: Nested Node.js project ($subRel)"
+                    if (Test-Path -LiteralPath (Join-Path $subRel 'pnpm-lock.yaml')) {
+                        $lines += "required`t${prefix}-node-test`t${subRel}`tpnpm`ttest"
+                        $lines += "required`t${prefix}-node-lint`t${subRel}`tpnpm`tlint"
+                    }
+                    elseif (Test-Path -LiteralPath (Join-Path $subRel 'yarn.lock')) {
+                        $lines += "required`t${prefix}-node-test`t${subRel}`tyarn`ttest"
+                        $lines += "required`t${prefix}-node-lint`t${subRel}`tyarn`tlint"
+                    }
+                    elseif (Test-Path -LiteralPath (Join-Path $subRel 'bun.lockb')) {
+                        $lines += "required`t${prefix}-node-test`t${subRel}`tbun`ttest"
+                        $lines += "required`t${prefix}-node-lint`t${subRel}`tbun`trun`tlint"
+                    }
+                    else {
+                        $lines += "required`t${prefix}-node-test`t${subRel}`tnpm`ttest"
+                        $lines += "required`t${prefix}-node-lint`t${subRel}`tnpm`trun`tlint`t--if-present"
+                    }
+                }
+                if (Test-Path -LiteralPath (Join-Path $subRel 'go.mod')) {
+                    Write-Host "Detected: Nested Go project ($subRel)"
+                    $lines += "required`t${prefix}-go-test`t${subRel}`tgo`ttest`t./..."
+                    $lines += "required`t${prefix}-go-vet`t${subRel}`tgo`tvet`t./..."
+                }
+                if (Test-Path -LiteralPath (Join-Path $subRel 'Cargo.toml')) {
+                    Write-Host "Detected: Nested Rust project ($subRel)"
+                    $lines += "required`t${prefix}-rust-test`t${subRel}`tcargo`ttest"
+                    $lines += "required`t${prefix}-rust-clippy`t${subRel}`tcargo`tclippy`t--`t-D`twarnings"
+                }
+            }
+        }
     }
 
     return $lines

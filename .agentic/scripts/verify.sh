@@ -133,81 +133,141 @@ run_check_line() {
 detect() {
     # Emits auto-detected checks as TSV on stdout. Human-readable detection
     # messages go to stderr so they never corrupt the TSV stream.
-    #
-    # -- Node.js / JavaScript / TypeScript --
+    local -a output_lines=()
+
     if [ -f package.json ]; then
         echo "Detected: Node.js project (package.json)" >&2
         if [ -f pnpm-lock.yaml ]; then
-            echo "required	test	.	pnpm	test"
-            echo "required	lint	.	pnpm	lint"
+            output_lines+=("required	node-test	.	pnpm	test")
+            output_lines+=("required	node-lint	.	pnpm	lint")
         elif [ -f yarn.lock ]; then
-            echo "required	test	.	yarn	test"
-            echo "required	lint	.	yarn	lint"
+            output_lines+=("required	node-test	.	yarn	test")
+            output_lines+=("required	node-lint	.	yarn	lint")
         elif [ -f bun.lockb ]; then
-            echo "required	test	.	bun	test"
-            echo "required	lint	.	bun	run	lint"
+            output_lines+=("required	node-test	.	bun	test")
+            output_lines+=("required	node-lint	.	bun	run	lint")
         else
-            echo "required	test	.	npm	test"
-            echo "required	lint	.	npm	run	lint	--if-present"
+            output_lines+=("required	node-test	.	npm	test")
+            output_lines+=("required	node-lint	.	npm	run	lint	--if-present")
         fi
     fi
 
-    # -- Rust --
     if [ -f Cargo.toml ]; then
         echo "Detected: Rust project (Cargo.toml)" >&2
-        echo "required	test	.	cargo	test"
-        echo "required	lint	.	cargo	clippy	--	-D	warnings"
+        output_lines+=("required	rust-test	.	cargo	test")
+        output_lines+=("required	rust-clippy	.	cargo	clippy	--	-D	warnings")
     fi
 
-    # -- Python --
     if [ -f pyproject.toml ] || [ -f requirements.txt ]; then
         echo "Detected: Python project (pyproject.toml / requirements.txt)" >&2
         if [ -f poetry.lock ]; then
-            echo "required	test	.	poetry	run	pytest"
-            echo "required	lint	.	poetry	run	ruff	check	."
+            output_lines+=("required	python-test	.	poetry	run	pytest")
+            output_lines+=("required	python-ruff	.	poetry	run	ruff	check	.")
         elif [ -f uv.lock ]; then
-            echo "required	test	.	uv	run	pytest"
-            echo "required	lint	.	uv	run	ruff	check	."
+            output_lines+=("required	python-test	.	uv	run	pytest")
+            output_lines+=("required	python-ruff	.	uv	run	ruff	check	.")
         else
-            echo "required	test	.	pytest"
-            echo "required	lint	.	ruff	check	."
+            output_lines+=("required	python-test	.	pytest")
+            output_lines+=("required	python-ruff	.	ruff	check	.")
         fi
     fi
 
-    # -- Go --
     if [ -f go.mod ]; then
         echo "Detected: Go project (go.mod)" >&2
-        echo "required	test	.	go	test	./..."
-        echo "required	lint	.	go	vet	./..."
+        output_lines+=("required	go-test	.	go	test	./...")
+        output_lines+=("required	go-vet	.	go	vet	./...")
     fi
 
-    # -- Java / JVM --
     if [ -f pom.xml ]; then
         echo "Detected: Maven project (pom.xml)" >&2
         if [ -x ./mvnw ]; then
-            echo "required	test	.	./mvnw	test"
-            echo "required	lint	.	./mvnw	checkstyle:check"
+            output_lines+=("required	maven-test	.	./mvnw	test")
+            output_lines+=("required	maven-lint	.	./mvnw	checkstyle:check")
         else
-            echo "required	test	.	mvn	test"
-            echo "required	lint	.	mvn	checkstyle:check"
+            output_lines+=("required	maven-test	.	mvn	test")
+            output_lines+=("required	maven-lint	.	mvn	checkstyle:check")
         fi
     elif [ -f build.gradle ] || [ -f build.gradle.kts ]; then
-        echo "Detected: Gradle project (build.gradle)" >&2
-        if [ -x ./gradlew ]; then
-            echo "required	test	.	./gradlew	test"
-            echo "required	lint	.	./gradlew	check"
+        local is_android=0
+        if grep -q -E 'com\.android|org\.jetbrains\.kotlin\.android|AndroidManifest\.xml' build.gradle build.gradle.kts 2>/dev/null || [ -f AndroidManifest.xml ]; then
+            is_android=1
+        fi
+        if [ "$is_android" -eq 1 ]; then
+            echo "Detected: Android / Kotlin Gradle project (build.gradle)" >&2
+            if [ -x ./gradlew ]; then
+                output_lines+=("required	android-unit	.	./gradlew	test")
+                output_lines+=("required	android-lint	.	./gradlew	lint")
+                output_lines+=("required	android-build	.	./gradlew	assembleDebug")
+                output_lines+=("optional	android-device	.	./gradlew	connectedCheck")
+            else
+                output_lines+=("required	android-unit	.	gradle	test")
+                output_lines+=("required	android-lint	.	gradle	lint")
+                output_lines+=("required	android-build	.	gradle	assembleDebug")
+                output_lines+=("optional	android-device	.	gradle	connectedCheck")
+            fi
         else
-            echo "required	test	.	gradle	test"
-            echo "required	lint	.	gradle	check"
+            echo "Detected: Gradle project (build.gradle)" >&2
+            if [ -x ./gradlew ]; then
+                output_lines+=("required	gradle-test	.	./gradlew	test")
+                output_lines+=("required	gradle-lint	.	./gradlew	check")
+            else
+                output_lines+=("required	gradle-test	.	gradle	test")
+                output_lines+=("required	gradle-lint	.	gradle	check")
+            fi
         fi
     fi
 
-    # -- .NET -- (compgen, not ls: a single *.sln or *.csproj must be detected)
     if compgen -G '*.sln' >/dev/null 2>&1 || compgen -G '*.csproj' >/dev/null 2>&1; then
         echo "Detected: .NET project (*.sln / *.csproj)" >&2
-        echo "required	test	.	dotnet	test"
-        echo "required	lint	.	dotnet	format	--verify-no-changes"
+        output_lines+=("required	dotnet-test	.	dotnet	test")
+        output_lines+=("required	dotnet-lint	.	dotnet	format	--verify-no-changes")
     fi
+
+    for base in apps services packages modules; do
+        if [ -d "$base" ]; then
+            for sub in "$base"/*; do
+                if [ -d "$sub" ] && [ "$(basename "$sub")" != "node_modules" ] && [ "$(basename "$sub")" != "target" ] && [ "$(basename "$sub")" != "build" ] && [ "$(basename "$sub")" != ".venv" ]; then
+                    local prefix="${sub//\//-}"
+                    prefix="${prefix//\\/-}"
+                    if [ -f "$sub/package.json" ]; then
+                        echo "Detected: Nested Node.js project ($sub)" >&2
+                        if [ -f "$sub/pnpm-lock.yaml" ]; then
+                            output_lines+=("required	${prefix}-node-test	$sub	pnpm	test")
+                            output_lines+=("required	${prefix}-node-lint	$sub	pnpm	lint")
+                        elif [ -f "$sub/yarn.lock" ]; then
+                            output_lines+=("required	${prefix}-node-test	$sub	yarn	test")
+                            output_lines+=("required	${prefix}-node-lint	$sub	yarn	lint")
+                        elif [ -f "$sub/bun.lockb" ]; then
+                            output_lines+=("required	${prefix}-node-test	$sub	bun	test")
+                            output_lines+=("required	${prefix}-node-lint	$sub	bun	run	lint")
+                        else
+                            output_lines+=("required	${prefix}-node-test	$sub	npm	test")
+                            output_lines+=("required	${prefix}-node-lint	$sub	npm	run	lint	--if-present")
+                        fi
+                    fi
+                    if [ -f "$sub/go.mod" ]; then
+                        echo "Detected: Nested Go project ($sub)" >&2
+                        output_lines+=("required	${prefix}-go-test	$sub	go	test	./...")
+                        output_lines+=("required	${prefix}-go-vet	$sub	go	vet	./...")
+                    fi
+                    if [ -f "$sub/Cargo.toml" ]; then
+                        echo "Detected: Nested Rust project ($sub)" >&2
+                        output_lines+=("required	${prefix}-rust-test	$sub	cargo	test")
+                        output_lines+=("required	${prefix}-rust-clippy	$sub	cargo	clippy	--	-D	warnings")
+                    fi
+                    if [ -f "$sub/pyproject.toml" ] || [ -f "$sub/requirements.txt" ]; then
+                        echo "Detected: Nested Python project ($sub)" >&2
+                        output_lines+=("required	${prefix}-python-test	$sub	pytest")
+                        output_lines+=("required	${prefix}-python-ruff	$sub	ruff	check	.")
+                    fi
+                fi
+            done
+        fi
+    done
+
+    for line in "${output_lines[@]}"; do
+        echo "$line"
+    done
 }
 
 checks_file() {
@@ -354,8 +414,47 @@ run_checks_from_file() {
     done
 }
 
+explain_detection() {
+    echo "=== Project Detection Explanation ==="
+    detect >&2
+    exit 0
+}
+
+detect_checks_file() {
+    local gen_file=".agentic/checks.generated.tsv"
+    mkdir -p ".agentic"
+    local checks
+    checks="$(detect 2>/dev/null || true)"
+    if [ -z "$checks" ]; then
+        echo "No stack detected." >&2
+        exit 0
+    fi
+    local tmp
+    tmp="$(mktemp)"
+    {
+        echo "# .agentic/checks.generated.tsv — candidate verification contract."
+        echo "# Auto-generated by detection workflow. Review assumptions and promote to .agentic/checks.tsv"
+        printf '%s\n' "$checks"
+    } > "$tmp"
+    if validate_checks_tsv "$tmp"; then
+        mv "$tmp" "$gen_file"
+        echo "Candidate contract written to $gen_file"
+    else
+        echo "ERROR: Generated checks failed validation." >&2
+        rm -f "$tmp"
+        exit 1
+    fi
+    exit 0
+}
+
 if [ "${1:-}" = "--emit-checks" ]; then
     emit_checks
+fi
+if [ "${1:-}" = "--explain-detection" ]; then
+    explain_detection
+fi
+if [ "${1:-}" = "--detect-checks" ]; then
+    detect_checks_file
 fi
 
 if checks_defined; then

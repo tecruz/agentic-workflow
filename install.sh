@@ -25,6 +25,8 @@
 #                        Default: claude,gemini,aider. AGENTS.md is always
 #                        installed; other tools read AGENTS.md natively.
 #   --generate-checks    Write .agentic/checks.tsv from the detected stack.
+#   --detect-checks      Write .agentic/checks.generated.tsv from detected stack.
+#   --accept-detected-checks Promote .agentic/checks.generated.tsv to .agentic/checks.tsv.
 #   --replace-checks     Overwrite existing .agentic/checks.tsv when generating checks.
 #   --replace-managed    Replace framework-managed files even when the adopter
 #                        modified them. Never touches project-owned files.
@@ -49,6 +51,8 @@ Options:
                        Default: claude,gemini,aider. AGENTS.md is always
                        installed; other tools read AGENTS.md natively.
   --generate-checks    Write .agentic/checks.tsv from the detected stack.
+  --detect-checks      Write .agentic/checks.generated.tsv from detected stack.
+  --accept-detected-checks Promote .agentic/checks.generated.tsv to .agentic/checks.tsv.
   --replace-checks     Overwrite existing .agentic/checks.tsv when generating checks.
   --replace-managed    Replace framework-managed files even when the adopter
                        modified them. Never touches project-owned files.
@@ -65,6 +69,8 @@ BACKUP=0
 REPLACE_MANAGED=0
 REPLACE_CHECKS=0
 GENERATE_CHECKS=0
+DETECT_CHECKS=0
+ACCEPT_DETECTED_CHECKS=0
 UPDATE=0
 TOOLS_RAW="claude,gemini,aider"
 
@@ -79,6 +85,8 @@ while [ $# -gt 0 ]; do
         --replace-managed|--force) REPLACE_MANAGED=1 ;;
         --replace-checks) REPLACE_CHECKS=1 ;;
         --generate-checks) GENERATE_CHECKS=1 ;;
+        --detect-checks) DETECT_CHECKS=1 ;;
+        --accept-detected-checks) ACCEPT_DETECTED_CHECKS=1 ;;
         --tools) TOOLS_RAW="$2"; shift ;;
         --tools=*) TOOLS_RAW="${1#*=}" ;;
         -h|--help) usage; exit 0 ;;
@@ -93,6 +101,23 @@ if [ ! -d "$TARGET_DIR" ]; then
     exit 1
 fi
 TARGET_DIR="$(cd "$TARGET_DIR" && pwd)"
+
+if [ "$DETECT_CHECKS" -eq 1 ]; then
+    (cd "$TARGET_DIR" && bash "$SOURCE_DIR/.agentic/scripts/verify.sh" --detect-checks)
+    exit 0
+fi
+if [ "$ACCEPT_DETECTED_CHECKS" -eq 1 ]; then
+    gen="$TARGET_DIR/.agentic/checks.generated.tsv"
+    dst="$TARGET_DIR/.agentic/checks.tsv"
+    if [ ! -f "$gen" ]; then
+        echo "Error: '$gen' does not exist. Run with --detect-checks first." >&2
+        exit 1
+    fi
+    (cd "$TARGET_DIR" && bash "$SOURCE_DIR/.agentic/scripts/verify.sh" --detect-checks >/dev/null)
+    cp "$gen" "$dst"
+    echo "Promoted '$gen' to '$dst'."
+    exit 0
+fi
 
 if [ "$TOOLS_RAW" = "all" ]; then
     TOOLS=(claude gemini aider)
