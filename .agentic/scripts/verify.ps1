@@ -454,7 +454,8 @@ if ($DetectChecks) {
     $null = New-Item -ItemType Directory -Path ".agentic" -Force
     $checks = @(Get-DetectedChecks)
     if ($checks.Count -eq 0) {
-        Write-Host "No stack detected."
+        Remove-Item -LiteralPath $genFile -Force -ErrorAction SilentlyContinue
+        Write-Host "No stack detected. Removed stale candidate '$genFile'."
         exit 0
     }
     $tmp = [System.IO.Path]::GetTempFileName()

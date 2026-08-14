@@ -202,3 +202,117 @@ teardown() {
     [ -f .agentic/templates ]
     [ "$(cat .agentic/templates)" = "blocker" ]
 }
+
+# ---------------------------------------------------------------------------
+# Candidate lifecycle regression tests (detect / validate / accept).
+# ---------------------------------------------------------------------------
+
+@test "--detect-checks writes a candidate contract for a detected stack" {
+    printf '{"name":"x","scripts":{"test":"true"}}\n' > package.json
+    run bash "$INSTALL" . --detect-checks --tools claude
+    [ "$status" -eq 0 ]
+    [ -f .agentic/checks.generated.tsv ]
+    grep -q $'\tnpm\t' .agentic/checks.generated.tsv
+}
+
+@test "--detect-checks --plan makes no filesystem changes" {
+    printf '{"name":"x","scripts":{"test":"true"}}\n' > package.json
+    run bash "$INSTALL" . --detect-checks --plan --tools claude
+    [ "$status" -eq 0 ]
+    [ ! -f .agentic/checks.generated.tsv ]
+}
+
+@test "--generate-checks --plan makes no filesystem changes" {
+    printf '{"name":"x","scripts":{"test":"true"}}\n' > package.json
+    run bash "$INSTALL" . --generate-checks --plan --tools claude
+    [ "$status" -eq 0 ]
+    [ ! -f .agentic/checks.generated.tsv ]
+    [ ! -f .agentic/checks.tsv ]
+}
+
+@test "--accept-detected-checks promotes the exact reviewed candidate, not a fresh detection" {
+    printf '{"name":"x","scripts":{"test":"true"}}\n' > package.json
+    bash "$INSTALL" . --detect-checks --tools claude >/dev/null 2>&1
+    # simulate a human review edit to the candidate
+    printf '\n# reviewer note: keep exactly this line\n' >> .agentic/checks.generated.tsv
+    run bash "$INSTALL" . --accept-detected-checks --tools claude
+    [ "$status" -eq 0 ]
+    [ -f .agentic/checks.tsv ]
+    grep -q "reviewer note: keep exactly this line" .agentic/checks.tsv
+}
+
+@test "--accept-detected-checks --plan makes no filesystem changes" {
+    printf '{"name":"x","scripts":{"test":"true"}}\n' > package.json
+    bash "$INSTALL" . --detect-checks --tools claude >/dev/null 2>&1
+    run bash "$INSTALL" . --accept-detected-checks --plan --tools claude
+    [ "$status" -eq 0 ]
+    [ ! -f .agentic/checks.tsv ]
+}
+
+@test "--accept-detected-checks rejects an invalid candidate without writing checks.tsv" {
+    printf '{"name":"x","scripts":{"test":"true"}}\n' > package.json
+    bash "$INSTALL" . --detect-checks --tools claude >/dev/null 2>&1
+    printf 'bogus-requirement\tbad-id\t.\tnpm\ttest\n' > .agentic/checks.generated.tsv
+    run bash "$INSTALL" . --accept-detected-checks --tools claude
+    [ "$status" -ne 0 ]
+    [ ! -f .agentic/checks.tsv ]
+}
+
+@test "--accept-detected-checks requires an existing candidate" {
+    run bash "$INSTALL" . --accept-detected-checks --tools claude
+    [ "$status" -ne 0 ]
+    [ ! -f .agentic/checks.tsv ]
+}
+
+@test "existing checks.tsv is protected without --replace-checks" {
+    printf '{"name":"x","scripts":{"test":"true"}}\n' > package.json
+    bash "$INSTALL" . --detect-checks --tools claude >/dev/null 2>&1
+    printf 'project owned checks\n' > .agentic/checks.tsv
+    run bash "$INSTALL" . --accept-detected-checks --tools claude
+    [ "$status" -ne 0 ]
+    grep -q "project owned checks" .agentic/checks.tsv
+}
+
+@test "--replace-checks overwrites a project-owned checks.tsv" {
+    printf '{"name":"x","scripts":{"test":"true"}}\n' > package.json
+    bash "$INSTALL" . --detect-checks --tools claude >/dev/null 2>&1
+    printf 'project owned checks\n' > .agentic/checks.tsv
+    run bash "$INSTALL" . --accept-detected-checks --replace-checks --tools claude
+    [ "$status" -eq 0 ]
+    ! grep -q "project owned checks" .agentic/checks.tsv
+    grep -q $'\tnpm\t' .agentic/checks.tsv
+}
+
+@test "acceptance does not alter the install manifest" {
+    printf '{"name":"x","scripts":{"test":"true"}}\n' > package.json
+    bash "$INSTALL" . --tools claude >/dev/null 2>&1
+    cp .agentic/install-manifest.tsv manifest.before
+    bash "$INSTALL" . --detect-checks --tools claude >/dev/null 2>&1
+    run bash "$INSTALL" . --accept-detected-checks --replace-checks --tools claude
+    [ "$status" -eq 0 ]
+    diff -q manifest.before .agentic/install-manifest.tsv
+}
+
+@test "a stale candidate is removed and never promoted when detection finds nothing" {
+    printf '{"name":"x","scripts":{"test":"true"}}\n' > package.json
+    bash "$INSTALL" . --detect-checks --tools claude >/dev/null 2>&1
+    [ -f .agentic/checks.generated.tsv ]
+    rm package.json
+    run bash "$INSTALL" . --detect-checks --tools claude
+    [ "$status" -eq 0 ]
+    [ ! -f .agentic/checks.generated.tsv ]
+    run bash "$INSTALL" . --generate-checks --tools claude
+    [ "$status" -eq 0 ]
+    # the template may be seeded, but stale detection content must not be
+    ! grep -q 'node-test' .agentic/checks.tsv 2>/dev/null
+    ! grep -q $'\tnpm\t' .agentic/checks.tsv 2>/dev/null
+}
+
+@test "detection and acceptance leave no temporary files behind" {
+    printf '{"name":"x","scripts":{"test":"true"}}\n' > package.json
+    bash "$INSTALL" . --detect-checks --tools claude >/dev/null 2>&1
+    run bash "$INSTALL" . --accept-detected-checks --tools claude
+    [ "$status" -eq 0 ]
+    [ ! -f .agentic/checks.tsv.agentic-tmp ]
+    [ ! -f .agentic/install-manifest.tsv.agentic-tmp ]
+}

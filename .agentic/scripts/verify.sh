@@ -429,7 +429,8 @@ detect_checks_file() {
     local checks
     checks="$(detect)" || exit 1
     if [ -z "$checks" ]; then
-        echo "No stack detected." >&2
+        rm -f "$gen_file"
+        echo "No stack detected. Removed stale candidate '$gen_file'." >&2
         exit 0
     fi
     local tmp

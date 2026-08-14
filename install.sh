@@ -409,7 +409,6 @@ install_merge() {
 }
 
 generate_checks() {
-    (cd "$TARGET_DIR" && bash "$SOURCE_DIR/.agentic/scripts/verify.sh" --detect-checks)
     local gen="$TARGET_DIR/.agentic/checks.generated.tsv"
     local rel=".agentic/checks.tsv"
     local dst="$TARGET_DIR/$rel"
@@ -417,7 +416,15 @@ generate_checks() {
         echo "  skip   $rel (project-owned; use --replace-checks to overwrite)"
         return
     fi
-    [ "$PLAN" -eq 1 ] && { echo "  gen    $rel (from detected stack)"; return; }
+    if [ "$PLAN" -eq 1 ]; then
+        echo "  gen    $rel (plan: detect and validate candidate checks, then promote)"
+        return
+    fi
+    (cd "$TARGET_DIR" && bash "$SOURCE_DIR/.agentic/scripts/verify.sh" --detect-checks) || exit 1
+    if [ ! -f "$gen" ]; then
+        echo "  note   no stack detected; $rel not generated"
+        return
+    fi
     (cd "$TARGET_DIR" && bash "$SOURCE_DIR/.agentic/scripts/verify.sh" --validate-checks "$gen") || exit 1
     snapshot_file "$rel"
     [ "$BACKUP" -eq 1 ] && [ -e "$dst" ] && backup_file "$rel"

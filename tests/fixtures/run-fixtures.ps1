@@ -72,6 +72,8 @@ Expect-Detect "rust-cargo" @("cargo")
 Expect-Detect "go-mod" @("go")
 Expect-Detect "java-maven" @("mvn")
 Expect-Detect "monorepo" @("pnpm", "go")
+Expect-Detect "polyglot-node-go" @("npm", "go")
+Expect-Detect "nested-monorepo" @("npm", "go")
 Expect-Detect "unsupported" @("__none__")
 
 if ($script:Failures -gt 0) {

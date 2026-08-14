@@ -200,3 +200,83 @@ run_checks_in_tmp() {  # run_checks_in_tmp <line>...
     [ -f "$TMPD/ran" ]
     rm -rf "$TMPD"
 }
+
+# ---------------------------------------------------------------------------
+# Candidate lifecycle regression tests (--detect-checks / --validate-checks).
+# ---------------------------------------------------------------------------
+
+@test "--detect-checks writes a candidate contract that validates" {
+    TMPD="$(mktemp -d)"
+    printf '{"name":"x","scripts":{"test":"true"}}\n' > "$TMPD/package.json"
+    run bash -c "cd '$TMPD' && bash '$VERIFY' --detect-checks >/dev/null 2>&1"
+    [ "$status" -eq 0 ]
+    [ -f "$TMPD/.agentic/checks.generated.tsv" ]
+    run bash -c "cd '$TMPD' && bash '$VERIFY' --validate-checks .agentic/checks.generated.tsv >/dev/null 2>&1"
+    [ "$status" -eq 0 ]
+    rm -rf "$TMPD"
+}
+
+@test "--detect-checks removes a stale candidate when no stack is detected" {
+    TMPD="$(mktemp -d)"
+    printf '{"name":"x","scripts":{"test":"true"}}\n' > "$TMPD/package.json"
+    bash -c "cd '$TMPD' && bash '$VERIFY' --detect-checks >/dev/null 2>&1"
+    [ -f "$TMPD/.agentic/checks.generated.tsv" ]
+    rm "$TMPD/package.json"
+    run bash -c "cd '$TMPD' && bash '$VERIFY' --detect-checks >/dev/null 2>&1"
+    [ "$status" -eq 0 ]
+    [ ! -f "$TMPD/.agentic/checks.generated.tsv" ]
+    rm -rf "$TMPD"
+}
+
+@test "--validate-checks accepts a valid candidate" {
+    TMPD="$(mktemp -d)"
+    mkdir -p "$TMPD/.agentic"
+    printf '%s\n' 'required	ok	.	sh	-c	true' > "$TMPD/.agentic/candidate.tsv"
+    run bash -c "cd '$TMPD' && bash '$VERIFY' --validate-checks .agentic/candidate.tsv >/dev/null 2>&1"
+    [ "$status" -eq 0 ]
+    rm -rf "$TMPD"
+}
+
+@test "--validate-checks rejects a malformed candidate" {
+    TMPD="$(mktemp -d)"
+    mkdir -p "$TMPD/.agentic"
+    printf '%s\n' 'bogus-requirement	bad-id	.	sh	-c	true' > "$TMPD/.agentic/candidate.tsv"
+    run bash -c "cd '$TMPD' && bash '$VERIFY' --validate-checks .agentic/candidate.tsv >/dev/null 2>&1"
+    [ "$status" -eq 1 ]
+    rm -rf "$TMPD"
+}
+
+@test "--validate-checks rejects duplicate check IDs" {
+    TMPD="$(mktemp -d)"
+    mkdir -p "$TMPD/.agentic"
+    printf '%s\n' \
+        'required	test	.	sh	-c	true' \
+        'required	test	.	sh	-c	true' \
+        > "$TMPD/.agentic/candidate.tsv"
+    run bash -c "cd '$TMPD' && bash '$VERIFY' --validate-checks .agentic/candidate.tsv >/dev/null 2>&1"
+    [ "$status" -eq 1 ]
+    rm -rf "$TMPD"
+}
+
+@test "--validate-checks fails when the file does not exist" {
+    TMPD="$(mktemp -d)"
+    run bash -c "cd '$TMPD' && bash '$VERIFY' --validate-checks .agentic/missing.tsv >/dev/null 2>&1"
+    [ "$status" -eq 1 ]
+    rm -rf "$TMPD"
+}
+
+@test "Bash and PowerShell detection produce equivalent candidates" {
+    have pwsh || skip "pwsh not available"
+    TMPD="$(mktemp -d)"
+    printf '{"name":"x","scripts":{"test":"true"}}\n' > "$TMPD/package.json"
+    ( cd "$TMPD" && bash "$VERIFY" --detect-checks >/dev/null 2>&1 )
+    bash -c "cd '$TMPD' && pwsh -NoProfile -File '$REPO_ROOT/.agentic/scripts/verify.ps1' -DetectChecks >/dev/null 2>&1"
+    # compare the emitted check lines (comments differ between implementations)
+    local bash_checks ps_checks
+    bash_checks="$(grep -v '^#' "$TMPD/.agentic/checks.generated.tsv" | sort)"
+    rm -f "$TMPD/.agentic/checks.generated.tsv"
+    bash -c "cd '$TMPD' && pwsh -NoProfile -File '$REPO_ROOT/.agentic/scripts/verify.ps1' -DetectChecks >/dev/null 2>&1"
+    ps_checks="$(grep -v '^#' "$TMPD/.agentic/checks.generated.tsv" | sort)"
+    [ "$bash_checks" = "$ps_checks" ]
+    rm -rf "$TMPD"
+}
