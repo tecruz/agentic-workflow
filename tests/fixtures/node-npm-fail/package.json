@@ -1,0 +1,1 @@
+{ "name": "node-npm-fail", "scripts": { "test": "node -e \"process.exit(1)\"", "lint": "node -e \"console.log('lint ok')\"" } }

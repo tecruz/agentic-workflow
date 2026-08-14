@@ -1,0 +1,1 @@
+{ "name": "node-pnpm", "scripts": { "test": "node -e \"console.log('ok')\"", "lint": "node -e \"console.log('lint ok')\"" } }

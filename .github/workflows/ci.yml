@@ -2,8 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [master]
+    branches: [main, master]
   pull_request:
+    branches: [main, master]
 
 jobs:
   bash-verifier:
@@ -14,9 +15,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
 
@@ -36,16 +37,27 @@ jobs:
             brew install shellcheck
           fi
 
-      - name: Install Pester for PowerShell 7
+      - name: Install Pester and PSScriptAnalyzer for PowerShell 7
         shell: pwsh
         run: |
           Install-Module Pester -RequiredVersion 5.6.0 -Scope CurrentUser -Force -SkipPublisherCheck
+          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force -SkipPublisherCheck
 
       - name: Run the framework's own checks
         run: bash .agentic/scripts/verify.sh
 
       - name: Run Bats test suites
         run: bats tests/bats
+
+      - name: PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          $results = @()
+          foreach ($f in @('install.ps1', '.agentic/scripts/verify.ps1')) {
+            $results += Invoke-ScriptAnalyzer -Path $f -Severity Error
+          }
+          $results | Format-Table -AutoSize
+          if ($results) { exit 1 }
 
       - name: Run fixture smoke harness
         run: bash tests/fixtures/run-fixtures.sh .agentic/scripts/verify.sh
@@ -54,9 +66,9 @@ jobs:
     name: verify.ps1 (Windows)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
 

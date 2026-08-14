@@ -1,0 +1,2 @@
+required	pass	.	sh	-c	exit 0
+optional	opt-fails	.	sh	-c	exit 5
