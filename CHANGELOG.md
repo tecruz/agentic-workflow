@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Basic Android / Kotlin Gradle root-project detection (root
+  `build.gradle`/`build.gradle.kts` with `com.android` /
+  `org.jetbrains.kotlin.android` markers, or a root `AndroidManifest.xml`).
+- Wrapper-enabled Gradle and Maven fixtures asserting platform-aware wrapper
+  selection: `gradlew.bat` / `mvnw.cmd` on Windows, `./gradlew` / `./mvnw`
+  elsewhere.
 - `tests/` with Bats and Pester suites plus fixture projects and smoke
   harnesses (`tests/fixtures/run-fixtures.sh` / `run-fixtures.ps1`).
 - GitHub Actions CI (`.github/workflows/ci.yml`) running the verifier, both
@@ -34,6 +40,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Generating checks is decoupled from `--replace-managed`; overwriting an
   existing `.agentic/checks.tsv` requires the explicit `--replace-checks`
   (`-RegenerateChecks`) option.
+- `.agentic/checks.generated.tsv` is now part of the installer transaction:
+  `--generate-checks` snapshots the candidate before detection, so a failed
+  install restores a reviewed candidate exactly and never leaks a freshly
+  generated one.
+- PowerShell detection emits the platform Gradle/Maven wrapper script
+  (`gradlew.bat` / `mvnw.cmd` on Windows) instead of always emitting the Unix
+  script.
 - Lifecycle now ends in **HANDOFF**, not commit (ADR-0004); self-healing is
   bounded to three evidence-based repair cycles; tests are never weakened to
   go green.

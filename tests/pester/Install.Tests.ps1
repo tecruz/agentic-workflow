@@ -214,6 +214,41 @@ Describe 'install.ps1' {
         finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
     }
 
+    It '-GenerateChecks leaves no generated candidate when the install fails and none existed' {
+        $tmp = New-TestDir
+        try {
+            $agentic = Join-Path $tmp '.agentic'
+            New-Item -ItemType Directory -Path $agentic -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $tmp 'package.json') -Value '{"name":"x","scripts":{"test":"true"}}'
+            # a directory where the manifest is expected fails the install after
+            # detection has already produced (and possibly replaced) the candidate
+            New-Item -ItemType Directory -Path (Join-Path $agentic 'install-manifest.tsv') | Out-Null
+            & $install -Target $tmp -GenerateChecks *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            Test-Path (Join-Path $tmp '.agentic\checks.generated.tsv') | Should -Be $false
+            Test-Path (Join-Path $tmp '.agentic\checks.tsv') | Should -Be $false
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-GenerateChecks restores a reviewed candidate exactly when the install fails' {
+        $tmp = New-TestDir
+        try {
+            $agentic = Join-Path $tmp '.agentic'
+            New-Item -ItemType Directory -Path $agentic -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $tmp 'package.json') -Value '{"name":"x","scripts":{"test":"true"}}'
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.generated.tsv') -Value '# reviewed candidate'
+            New-Item -ItemType Directory -Path (Join-Path $agentic 'install-manifest.tsv') | Out-Null
+            & $install -Target $tmp -GenerateChecks *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            $restored = (Get-Content -Raw (Join-Path $tmp '.agentic\checks.generated.tsv'))
+            $restored.Trim() | Should -Be '# reviewed candidate'
+            $restored | Should -Not -Match 'node-test'
+            Test-Path (Join-Path $tmp '.agentic\checks.tsv') | Should -Be $false
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
     It 'a pre-existing .new conflict candidate is restored on rollback' {
         $tmp = New-TestDir
         try {
@@ -244,6 +279,168 @@ Describe 'install.ps1' {
             Test-Path (Join-Path $agentic 'rules') | Should -Be $false
             Test-Path (Join-Path $agentic 'scripts') | Should -Be $false
             (Get-Content -Raw (Join-Path $agentic 'templates')) -match 'blocker' | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    # ---------------------------------------------------------------------
+    # Candidate lifecycle regression tests (detect / validate / accept).
+    # ---------------------------------------------------------------------
+
+    It '-DetectChecks -Plan makes no filesystem changes' {
+        $tmp = New-TestDir
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'package.json') -Value '{"name":"x","scripts":{"test":"true"}}'
+            & $install -Target $tmp -DetectChecks -Plan *> $null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path (Join-Path $tmp '.agentic\checks.generated.tsv') | Should -Be $false
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-GenerateChecks -Plan makes no filesystem changes' {
+        $tmp = New-TestDir
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'package.json') -Value '{"name":"x","scripts":{"test":"true"}}'
+            & $install -Target $tmp -GenerateChecks -Plan *> $null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path (Join-Path $tmp '.agentic\checks.generated.tsv') | Should -Be $false
+            Test-Path (Join-Path $tmp '.agentic\checks.tsv') | Should -Be $false
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-DetectChecks writes a candidate contract' {
+        $tmp = New-TestDir
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'package.json') -Value '{"name":"x","scripts":{"test":"true"}}'
+            & $install -Target $tmp -DetectChecks *> $null
+            $LASTEXITCODE | Should -Be 0
+            (Get-Content -Raw (Join-Path $tmp '.agentic\checks.generated.tsv')) -match "`tnpm`t" | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-AcceptDetectedChecks promotes the exact reviewed candidate, not a fresh detection' {
+        $tmp = New-TestDir
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'package.json') -Value '{"name":"x","scripts":{"test":"true"}}'
+            & $install -Target $tmp -DetectChecks *> $null
+            Add-Content -LiteralPath (Join-Path $tmp '.agentic\checks.generated.tsv') -Value "`n# reviewer note: keep exactly this line"
+            & $install -Target $tmp -AcceptDetectedChecks *> $null
+            $LASTEXITCODE | Should -Be 0
+            (Get-Content -Raw (Join-Path $tmp '.agentic\checks.tsv')) -match 'reviewer note: keep exactly this line' | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-AcceptDetectedChecks -Plan makes no filesystem changes' {
+        $tmp = New-TestDir
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'package.json') -Value '{"name":"x","scripts":{"test":"true"}}'
+            & $install -Target $tmp -DetectChecks *> $null
+            & $install -Target $tmp -AcceptDetectedChecks -Plan *> $null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path (Join-Path $tmp '.agentic\checks.tsv') | Should -Be $false
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-AcceptDetectedChecks rejects an invalid candidate without writing checks.tsv' {
+        $tmp = New-TestDir
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'package.json') -Value '{"name":"x","scripts":{"test":"true"}}'
+            & $install -Target $tmp -DetectChecks *> $null
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.generated.tsv') -Value "bogus-requirement`tbad-id`t.`tpwsh`t-NoProfile"
+            & $install -Target $tmp -AcceptDetectedChecks *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            Test-Path (Join-Path $tmp '.agentic\checks.tsv') | Should -Be $false
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-AcceptDetectedChecks requires an existing candidate' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp -AcceptDetectedChecks *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            Test-Path (Join-Path $tmp '.agentic\checks.tsv') | Should -Be $false
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'existing checks.tsv is protected without -ReplaceChecks' {
+        $tmp = New-TestDir
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'package.json') -Value '{"name":"x","scripts":{"test":"true"}}'
+            & $install -Target $tmp -DetectChecks *> $null
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value 'project owned checks'
+            & $install -Target $tmp -AcceptDetectedChecks *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            (Get-Content -Raw (Join-Path $tmp '.agentic\checks.tsv')) -match 'project owned checks' | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-ReplaceChecks overwrites a project-owned checks.tsv' {
+        $tmp = New-TestDir
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'package.json') -Value '{"name":"x","scripts":{"test":"true"}}'
+            & $install -Target $tmp -DetectChecks *> $null
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value 'project owned checks'
+            & $install -Target $tmp -AcceptDetectedChecks -ReplaceChecks *> $null
+            $LASTEXITCODE | Should -Be 0
+            (Get-Content -Raw (Join-Path $tmp '.agentic\checks.tsv')) -match 'project owned checks' | Should -Be $false
+            (Get-Content -Raw (Join-Path $tmp '.agentic\checks.tsv')) -match "`tnpm`t" | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'acceptance does not alter the install manifest' {
+        $tmp = New-TestDir
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'package.json') -Value '{"name":"x","scripts":{"test":"true"}}'
+            & $install -Target $tmp *> $null
+            $mf = Join-Path $tmp '.agentic\install-manifest.tsv'
+            $before = Get-FileHash -LiteralPath $mf -Algorithm SHA256
+            & $install -Target $tmp -DetectChecks *> $null
+            & $install -Target $tmp -AcceptDetectedChecks -ReplaceChecks *> $null
+            $LASTEXITCODE | Should -Be 0
+            $after = Get-FileHash -LiteralPath $mf -Algorithm SHA256
+            $after.Hash | Should -Be $before.Hash
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'a stale candidate is removed and never promoted when detection finds nothing' {
+        $tmp = New-TestDir
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'package.json') -Value '{"name":"x","scripts":{"test":"true"}}'
+            & $install -Target $tmp -DetectChecks *> $null
+            Test-Path (Join-Path $tmp '.agentic\checks.generated.tsv') | Should -Be $true
+            Remove-Item -LiteralPath (Join-Path $tmp 'package.json') -Force
+            & $install -Target $tmp -DetectChecks *> $null
+            Test-Path (Join-Path $tmp '.agentic\checks.generated.tsv') | Should -Be $false
+            & $install -Target $tmp -GenerateChecks *> $null
+            # the template may be seeded, but stale detection content must not be
+            $stale = Join-Path $tmp '.agentic\checks.tsv'
+            if (Test-Path $stale) {
+                (Get-Content -Raw $stale) -match 'node-test' | Should -Be $false
+                (Get-Content -Raw $stale) -match "`tnpm`t" | Should -Be $false
+            }
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'detection and acceptance leave no temporary files behind' {
+        $tmp = New-TestDir
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'package.json') -Value '{"name":"x","scripts":{"test":"true"}}'
+            & $install -Target $tmp -DetectChecks *> $null
+            & $install -Target $tmp -AcceptDetectedChecks *> $null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path (Join-Path $tmp '.agentic\checks.tsv.agentic-tmp') | Should -Be $false
+            Test-Path (Join-Path $tmp '.agentic\install-manifest.tsv.agentic-tmp') | Should -Be $false
         }
         finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
     }

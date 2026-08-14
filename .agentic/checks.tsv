@@ -1,4 +1,4 @@
-# .agentic/checks.tsv — authoritative verification for the agentic-worflow
+# .agentic/checks.tsv — authoritative verification for the agentic-workflow
 # repository itself. New installs seed the generic template from
 # .agentic/templates/checks.tsv; this file defines the framework's own checks.
 #
