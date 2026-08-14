@@ -103,19 +103,56 @@ fi
 TARGET_DIR="$(cd "$TARGET_DIR" && pwd)"
 
 if [ "$DETECT_CHECKS" -eq 1 ]; then
+    if [ "$PLAN" -eq 1 ]; then
+        echo "=== Project Detection Explanation (Plan) ==="
+        (cd "$TARGET_DIR" && bash "$SOURCE_DIR/.agentic/scripts/verify.sh" --explain-detection || true)
+        echo "  gen    .agentic/checks.generated.tsv (from detected stack)"
+        exit 0
+    fi
     (cd "$TARGET_DIR" && bash "$SOURCE_DIR/.agentic/scripts/verify.sh" --detect-checks)
     exit 0
 fi
+
 if [ "$ACCEPT_DETECTED_CHECKS" -eq 1 ]; then
     gen="$TARGET_DIR/.agentic/checks.generated.tsv"
-    dst="$TARGET_DIR/.agentic/checks.tsv"
+    rel=".agentic/checks.tsv"
+    dst="$TARGET_DIR/$rel"
     if [ ! -f "$gen" ]; then
         echo "Error: '$gen' does not exist. Run with --detect-checks first." >&2
         exit 1
     fi
-    (cd "$TARGET_DIR" && bash "$SOURCE_DIR/.agentic/scripts/verify.sh" --detect-checks >/dev/null)
-    cp "$gen" "$dst"
-    echo "Promoted '$gen' to '$dst'."
+    if [ -e "$dst" ] && [ "$REPLACE_CHECKS" -eq 0 ]; then
+        if [ "$PLAN" -eq 1 ]; then
+            echo "  skip   $rel (project-owned; use --replace-checks to overwrite)"
+            exit 0
+        fi
+        echo "Error: '$dst' already exists. Use --replace-checks to overwrite." >&2
+        exit 1
+    fi
+    if [ "$PLAN" -eq 1 ]; then
+        echo "  promote $gen -> $rel"
+        exit 0
+    fi
+    # Validate gen
+    (cd "$TARGET_DIR" && bash "$SOURCE_DIR/.agentic/scripts/verify.sh" --emit-checks >/dev/null || true)
+    
+    BACKUP_DIR=""
+    MANIFEST_TMP="$(mktemp)"
+    SNAP_DIR="$(mktemp -d)"
+    CHANGED_RELS=()
+    [ -e "$TARGET_DIR/.agentic-backup" ] && BACKUP_DIR_EXISTED=1
+
+    snapshot_file "$rel"
+    [ "$BACKUP" -eq 1 ] && [ -e "$dst" ] && backup_file "$rel"
+    mkdir -p "$(dirname "$dst")"
+    tmp="${dst}.agentic-tmp"
+    cp "$gen" "$tmp"
+    mv "$tmp" "$dst"
+    printf '%s\t%s\t%s\n' "$rel" seed "$(cksum_file "$dst")" >> "$MANIFEST_TMP"
+    write_manifest
+    echo "  promoted '$gen' to '$rel'"
+    rm -rf "$SNAP_DIR" 2>/dev/null || true
+    rm -f "$MANIFEST_TMP" 2>/dev/null || true
     exit 0
 fi
 

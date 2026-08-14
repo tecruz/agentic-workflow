@@ -226,7 +226,7 @@ detect() {
     for base in apps services packages modules; do
         if [ -d "$base" ]; then
             for sub in "$base"/*; do
-                if [[ "$sub" =~ [$'\t'$'\n'$'\r'] ]]; then
+                if [[ "$sub" =~ [$'\t'$'\n'$'\r'$'\x1f'[:cntrl:]] ]]; then
                     continue
                 fi
                 if [ -d "$sub" ] && [ "$(basename "$sub")" != "node_modules" ] && [ "$(basename "$sub")" != "target" ] && [ "$(basename "$sub")" != "build" ] && [ "$(basename "$sub")" != ".venv" ]; then

@@ -79,41 +79,6 @@ if (-not (Test-Path -LiteralPath $Target)) {
 }
 $TargetDir = (Resolve-Path -LiteralPath $Target).Path
 
-if ($DetectChecks) {
-    $verify = Join-Path $SourceDir ".agentic\scripts\verify.ps1"
-    Push-Location $TargetDir
-    try {
-        & $verify -DetectChecks
-    }
-    finally {
-        Pop-Location
-    }
-    exit 0
-}
-
-if ($AcceptDetectedChecks) {
-    $gen = Join-Path $TargetDir ".agentic/checks.generated.tsv"
-    $rel = ".agentic/checks.tsv"
-    $dst = Join-Path $TargetDir $rel
-    if (-not (Test-Path -LiteralPath $gen)) {
-        Write-Host "Error: '$gen' does not exist. Run with -DetectChecks first."
-        exit 1
-    }
-    if ((Test-Path -LiteralPath $dst) -and (-not $ReplaceChecks)) {
-        if ($Plan) { Write-Host "  skip   $rel (project-owned; use -ReplaceChecks to overwrite)"; exit 0 }
-        Write-Host "  skip   $rel (project-owned; use -ReplaceChecks to overwrite)"
-        exit 0
-    }
-    if ($Plan) { Write-Host "  promote $gen -> $rel"; exit 0 }
-    Snapshot-File $rel
-    if ($Backup -and (Test-Path -LiteralPath $dst)) { Backup-File $rel }
-    $parent = Split-Path -Parent $dst
-    if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
-    Copy-Item -LiteralPath $gen -Destination $dst -Force
-    Write-Host "  promoted '$gen' to '$rel'"
-    exit 0
-}
-
 $ToolsList = @()
 if ($Tools -eq "all") {
     $ToolsList = @("claude", "gemini", "aider")
@@ -174,6 +139,64 @@ $script:SnapDir = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-snap-' +
 New-Item -ItemType Directory -Path $script:SnapDir -Force | Out-Null
 $script:Changed = New-Object System.Collections.Generic.List[string]
 $script:BackupExisted = Test-Path -LiteralPath (Join-Path $TargetDir ".agentic-backup")
+
+if ($DetectChecks) {
+    if ($Plan) {
+        Write-Host "=== Project Detection Explanation (Plan) ==="
+        $verify = Join-Path $SourceDir ".agentic\scripts\verify.ps1"
+        Push-Location $TargetDir
+        try { & $verify -ExplainDetection } finally { Pop-Location }
+        Write-Host "  gen    .agentic/checks.generated.tsv (from detected stack)"
+        exit 0
+    }
+    $verify = Join-Path $SourceDir ".agentic\scripts\verify.ps1"
+    Push-Location $TargetDir
+    try { & $verify -DetectChecks } finally { Pop-Location }
+    exit 0
+}
+
+if ($AcceptDetectedChecks) {
+    $gen = Join-Path $TargetDir ".agentic/checks.generated.tsv"
+    $rel = ".agentic/checks.tsv"
+    $dst = Join-Path $TargetDir $rel
+    if (-not (Test-Path -LiteralPath $gen)) {
+        Write-Host "Error: '$gen' does not exist. Run with -DetectChecks first."
+        exit 1
+    }
+    if ((Test-Path -LiteralPath $dst) -and (-not $ReplaceChecks)) {
+        if ($Plan) {
+            Write-Host "  skip   $rel (project-owned; use -ReplaceChecks to overwrite)"
+            exit 0
+        }
+        Write-Host "Error: '$dst' already exists. Use -ReplaceChecks to overwrite."
+        exit 1
+    }
+    if ($Plan) {
+        Write-Host "  promote $gen -> $rel"
+        exit 0
+    }
+    $verify = Join-Path $SourceDir ".agentic\scripts\verify.ps1"
+    Push-Location $TargetDir
+    try { $null = & $verify -EmitChecks 2>$null } finally { Pop-Location }
+
+    try {
+        Snapshot-File $rel
+        if ($Backup -and (Test-Path -LiteralPath $dst)) { Backup-File $rel }
+        $parent = Split-Path -Parent $dst
+        if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+        $tmp = "$dst.agentic-tmp"
+        Copy-Item -LiteralPath $gen -Destination $tmp -Force
+        Move-Item -LiteralPath $tmp -Destination $dst -Force
+        Add-ManifestEntry $rel "seed" (Get-FileChecksum $dst)
+        Write-Manifest
+        Write-Host "  promoted '$gen' to '$rel'"
+        exit 0
+    }
+    catch {
+        Restore-PreviousState
+        throw $_
+    }
+}
 
 function ConvertTo-PortablePath {
     param([string] $Path)

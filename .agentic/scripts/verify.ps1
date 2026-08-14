@@ -257,7 +257,7 @@ function Get-DetectedChecks {
             $subs = Get-ChildItem -Path $base -Directory -ErrorAction SilentlyContinue
             foreach ($sub in $subs) {
                 $subName = $sub.Name
-                if ($subName -match "[\t\n\r]") { continue }
+                if ($subName -match "[\t\n\r\u001f\p{Cc}]") { continue }
                 if ($subName -in @('node_modules', 'target', 'build', '.venv')) { continue }
                 $subRel = "$base/$subName"
                 $prefix = "$base-$subName"
@@ -290,6 +290,11 @@ function Get-DetectedChecks {
                     Write-Host "Detected: Nested Rust project ($subRel)"
                     $lines += "required`t${prefix}-rust-test`t${subRel}`tcargo`ttest"
                     $lines += "required`t${prefix}-rust-clippy`t${subRel}`tcargo`tclippy`t--`t-D`twarnings"
+                }
+                if ((Test-Path -LiteralPath (Join-Path $subRel 'pyproject.toml')) -or (Test-Path -LiteralPath (Join-Path $subRel 'requirements.txt'))) {
+                    Write-Host "Detected: Nested Python project ($subRel)"
+                    $lines += "required`t${prefix}-python-test`t${subRel}`tpytest"
+                    $lines += "required`t${prefix}-python-ruff`t${subRel}`truff`tcheck`t."
                 }
             }
         }
