@@ -241,9 +241,16 @@ function Resolve-PhysicalPath {
     $current = $root
     $parts = $full.Substring($root.Length) -split '[/\\]' | Where-Object { $_ -ne '' }
     $maxHops = 32
+    $winPlatform = [bool]$IsWindows -or ($env:OS -eq 'Windows_NT')
+    $pathComparer = if ($winPlatform) {
+        [System.StringComparer]::OrdinalIgnoreCase
+    }
+    else {
+        [System.StringComparer]::Ordinal
+    }
     foreach ($part in $parts) {
         $current = Join-Path $current $part
-        $seen = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
+        $seen = [System.Collections.Generic.HashSet[string]]::new($pathComparer)
         $hops = 0
         while ($true) {
             $key = [System.IO.Path]::GetFullPath($current)
@@ -323,9 +330,16 @@ function Test-ChecksTsvValidation {
             [System.IO.Path]::AltDirectorySeparatorChar
         )
         $rootPrefix = $resolvedRootTrimmed + [System.IO.Path]::DirectorySeparatorChar
+        $winPlatform = [bool]$IsWindows -or ($env:OS -eq 'Windows_NT')
+        $pathComparison = if ($winPlatform) {
+            [System.StringComparison]::OrdinalIgnoreCase
+        }
+        else {
+            [System.StringComparison]::Ordinal
+        }
         $insideRoot =
-            $resolvedCwd.Equals($resolvedRootTrimmed, [System.StringComparison]::OrdinalIgnoreCase) -or
-            $resolvedCwd.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase)
+            $resolvedCwd.Equals($resolvedRootTrimmed, $pathComparison) -or
+            $resolvedCwd.StartsWith($rootPrefix, $pathComparison)
         if (-not $insideRoot) {
             Write-Host "ERROR: .agentic/checks.tsv line $lineNum working directory '$cwd' escapes project root."
             exit 1

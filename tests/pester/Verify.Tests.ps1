@@ -135,6 +135,38 @@ Describe 'verify.ps1 state model' {
         }
     }
 
+    It 'checks.tsv working dir with a case-differing sibling path is rejected on case-sensitive filesystems' {
+        if ($env:OS -eq 'Windows_NT' -or $IsWindows) { return }
+        $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vtest-' + [guid]::NewGuid().ToString('N'))
+        $tmpParent = Split-Path -Parent $tmp
+        $tmpLeaf = Split-Path -Leaf $tmp
+        $siblingLeaf = if ($tmpLeaf -ceq $tmpLeaf.ToLower()) { $tmpLeaf.ToUpper() } else { $tmpLeaf.ToLower() }
+        $sibling = Join-Path $tmpParent $siblingLeaf
+
+        New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+        $probeTarget = Join-Path $tmp "ABC"
+        $probeCheck = Join-Path $tmp "abc"
+        New-Item -ItemType Directory -Path $probeTarget -Force | Out-Null
+        $isCaseSensitive = -not (Test-Path -LiteralPath $probeCheck)
+        Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+
+        if (-not $isCaseSensitive) { return }
+
+        New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic') -Force | Out-Null
+        New-Item -ItemType Directory -Path $sibling -Force | Out-Null
+        try {
+            $escape = Join-Path '..' (Split-Path -Leaf $sibling)
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value (New-PassingCheck $escape)
+            Push-Location $tmp
+            try { & $verify *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
+            $code | Should -Be 1
+        }
+        finally {
+            Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force $sibling -ErrorAction SilentlyContinue
+        }
+    }
+
     It 'checks.tsv working dir through a link escape is rejected' {
         $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vtest-' + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic') -Force | Out-Null
