@@ -59,6 +59,9 @@ param(
     [string] $Tools = "claude,gemini,aider",
     [switch] $GenerateChecks,
     [switch] $RegenerateChecks,
+    [switch] $DetectChecks,
+    [switch] $AcceptDetectedChecks,
+    [switch] $ReplaceChecks,
     [switch] $ReplaceManaged,
     [switch] $Force
 )
@@ -75,6 +78,41 @@ if (-not (Test-Path -LiteralPath $Target)) {
     exit 1
 }
 $TargetDir = (Resolve-Path -LiteralPath $Target).Path
+
+if ($DetectChecks) {
+    $verify = Join-Path $SourceDir ".agentic\scripts\verify.ps1"
+    Push-Location $TargetDir
+    try {
+        & $verify -DetectChecks
+    }
+    finally {
+        Pop-Location
+    }
+    exit 0
+}
+
+if ($AcceptDetectedChecks) {
+    $gen = Join-Path $TargetDir ".agentic/checks.generated.tsv"
+    $rel = ".agentic/checks.tsv"
+    $dst = Join-Path $TargetDir $rel
+    if (-not (Test-Path -LiteralPath $gen)) {
+        Write-Host "Error: '$gen' does not exist. Run with -DetectChecks first."
+        exit 1
+    }
+    if ((Test-Path -LiteralPath $dst) -and (-not $ReplaceChecks)) {
+        if ($Plan) { Write-Host "  skip   $rel (project-owned; use -ReplaceChecks to overwrite)"; exit 0 }
+        Write-Host "  skip   $rel (project-owned; use -ReplaceChecks to overwrite)"
+        exit 0
+    }
+    if ($Plan) { Write-Host "  promote $gen -> $rel"; exit 0 }
+    Snapshot-File $rel
+    if ($Backup -and (Test-Path -LiteralPath $dst)) { Backup-File $rel }
+    $parent = Split-Path -Parent $dst
+    if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+    Copy-Item -LiteralPath $gen -Destination $dst -Force
+    Write-Host "  promoted '$gen' to '$rel'"
+    exit 0
+}
 
 $ToolsList = @()
 if ($Tools -eq "all") {

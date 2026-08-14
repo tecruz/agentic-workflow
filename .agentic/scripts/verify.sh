@@ -226,6 +226,9 @@ detect() {
     for base in apps services packages modules; do
         if [ -d "$base" ]; then
             for sub in "$base"/*; do
+                if [[ "$sub" =~ [$'\t'$'\n'$'\r'] ]]; then
+                    continue
+                fi
                 if [ -d "$sub" ] && [ "$(basename "$sub")" != "node_modules" ] && [ "$(basename "$sub")" != "target" ] && [ "$(basename "$sub")" != "build" ] && [ "$(basename "$sub")" != ".venv" ]; then
                     local prefix="${sub//\//-}"
                     prefix="${prefix//\\/-}"
@@ -265,9 +268,9 @@ detect() {
         fi
     done
 
-    for line in "${output_lines[@]}"; do
-        echo "$line"
-    done
+    if [ "${#output_lines[@]}" -gt 0 ]; then
+        printf '%s\n' "${output_lines[@]}"
+    fi
 }
 
 checks_file() {
@@ -424,7 +427,7 @@ detect_checks_file() {
     local gen_file=".agentic/checks.generated.tsv"
     mkdir -p ".agentic"
     local checks
-    checks="$(detect 2>/dev/null || true)"
+    checks="$(detect)" || exit 1
     if [ -z "$checks" ]; then
         echo "No stack detected." >&2
         exit 0
@@ -467,8 +470,13 @@ else
         echo "Note: .agentic/checks.tsv defines no checks; falling back to auto-detection."
     fi
     echo "Auto-detecting project stack (no checks.tsv)..."
-    local_lines="$(detect)"
+    local_lines="$(detect)" || exit 1
     if [ -n "$local_lines" ]; then
+        local det_tmp
+        det_tmp="$(mktemp)"
+        printf '%s\n' "$local_lines" > "$det_tmp"
+        validate_checks_tsv "$det_tmp"
+        rm -f "$det_tmp"
         DETECTED=1
         run_checks_from_file <(printf '%s\n' "$local_lines")
     fi
