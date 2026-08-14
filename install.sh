@@ -420,6 +420,10 @@ generate_checks() {
         echo "  gen    $rel (plan: detect and validate candidate checks, then promote)"
         return
     fi
+    # Detection creates, replaces, or removes the generated candidate; snapshot
+    # it before detection so a failed install restores a reviewed candidate (or
+    # removes a freshly generated one) exactly as it was before this run.
+    snapshot_file ".agentic/checks.generated.tsv"
     (cd "$TARGET_DIR" && bash "$SOURCE_DIR/.agentic/scripts/verify.sh" --detect-checks) || exit 1
     if [ ! -f "$gen" ]; then
         echo "  note   no stack detected; $rel not generated"

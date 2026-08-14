@@ -148,6 +148,29 @@ function Invoke-TsvLine {
     Invoke-Check -Requirement $requirement -Id $id -Cwd $cwd -Exe $exe -ArgsList $args
 }
 
+function Get-GradleCommand {
+    # Wrapper-enabled Gradle projects ship both platform scripts; the platform
+    # script must be selected so the emitted contract runs under the shell that
+    # will execute it (gradlew.bat under PowerShell on Windows).
+    if ($IsWindows -and (Test-Path -LiteralPath '.\gradlew.bat')) {
+        return '.\gradlew.bat'
+    }
+    if (Test-Path -LiteralPath './gradlew') {
+        return './gradlew'
+    }
+    return 'gradle'
+}
+
+function Get-MavenCommand {
+    if ($IsWindows -and (Test-Path -LiteralPath '.\mvnw.cmd')) {
+        return '.\mvnw.cmd'
+    }
+    if (Test-Path -LiteralPath './mvnw') {
+        return './mvnw'
+    }
+    return 'mvn'
+}
+
 function Get-DetectedChecks {
     [string[]] $lines = @()
 
@@ -201,14 +224,9 @@ function Get-DetectedChecks {
 
     if (Test-Path -LiteralPath pom.xml) {
         Write-Host "Detected: Maven project (pom.xml)"
-        if (Test-Path -LiteralPath ./mvnw) {
-            $lines += "required`tmaven-test`t.`t./mvnw`ttest"
-            $lines += "required`tmaven-lint`t.`t./mvnw`tcheckstyle:check"
-        }
-        else {
-            $lines += "required`tmaven-test`t.`tmvn`ttest"
-            $lines += "required`tmaven-lint`t.`tmvn`tcheckstyle:check"
-        }
+        $mavenCmd = Get-MavenCommand
+        $lines += "required`tmaven-test`t.`t$mavenCmd`ttest"
+        $lines += "required`tmaven-lint`t.`t$mavenCmd`tcheckstyle:check"
     }
     elseif ((Test-Path -LiteralPath build.gradle) -or (Test-Path -LiteralPath build.gradle.kts)) {
         $isAndroid = $false
@@ -220,29 +238,17 @@ function Get-DetectedChecks {
 
         if ($isAndroid) {
             Write-Host "Detected: Android / Kotlin Gradle project (build.gradle)"
-            if (Test-Path -LiteralPath ./gradlew) {
-                $lines += "required`tandroid-unit`t.`t./gradlew`ttest"
-                $lines += "required`tandroid-lint`t.`t./gradlew`tlint"
-                $lines += "required`tandroid-build`t.`t./gradlew`tassembleDebug"
-                $lines += "optional`tandroid-device`t.`t./gradlew`tconnectedCheck"
-            }
-            else {
-                $lines += "required`tandroid-unit`t.`tgradle`ttest"
-                $lines += "required`tandroid-lint`t.`tgradle`tlint"
-                $lines += "required`tandroid-build`t.`tgradle`tassembleDebug"
-                $lines += "optional`tandroid-device`t.`tgradle`tconnectedCheck"
-            }
+            $gradleCmd = Get-GradleCommand
+            $lines += "required`tandroid-unit`t.`t$gradleCmd`ttest"
+            $lines += "required`tandroid-lint`t.`t$gradleCmd`tlint"
+            $lines += "required`tandroid-build`t.`t$gradleCmd`tassembleDebug"
+            $lines += "optional`tandroid-device`t.`t$gradleCmd`tconnectedCheck"
         }
         else {
             Write-Host "Detected: Gradle project (build.gradle)"
-            if (Test-Path -LiteralPath ./gradlew) {
-                $lines += "required`tgradle-test`t.`t./gradlew`ttest"
-                $lines += "required`tgradle-lint`t.`t./gradlew`tcheck"
-            }
-            else {
-                $lines += "required`tgradle-test`t.`tgradle`ttest"
-                $lines += "required`tgradle-lint`t.`tgradle`tcheck"
-            }
+            $gradleCmd = Get-GradleCommand
+            $lines += "required`tgradle-test`t.`t$gradleCmd`ttest"
+            $lines += "required`tgradle-lint`t.`t$gradleCmd`tcheck"
         }
     }
 

@@ -448,4 +448,47 @@ Describe 'verify.ps1 state model' {
         }
         finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
     }
+
+    # ---------------------------------------------------------------------
+    # Platform-aware Gradle/Maven wrapper detection. Wrapper-enabled projects
+    # ship both scripts; the emitted contract must use the script the current
+    # platform can execute (gradlew.bat / mvnw.cmd on Windows, ./gradlew /
+    # ./mvnw elsewhere).
+    # ---------------------------------------------------------------------
+
+    It 'Maven wrapper detection is platform-aware (mvnw.cmd on Windows, ./mvnw elsewhere)' {
+        $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vtest-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'pom.xml') -Value '<project></project>'
+            Set-Content -LiteralPath (Join-Path $tmp 'mvnw') -Value '#!/usr/bin/env sh'
+            Set-Content -LiteralPath (Join-Path $tmp 'mvnw.cmd') -Value '@echo off'
+            Push-Location $tmp
+            try { $out = & $verify -EmitChecks 2> $null; $code = $LASTEXITCODE } finally { Pop-Location }
+            $code | Should -Be 0
+            $maven = $out | Where-Object { $_ -match 'maven-test' } | Select-Object -First 1
+            $maven | Should -Not -BeNullOrEmpty
+            if ($IsWindows) { $maven | Should -Match 'mvnw\.cmd' }
+            else { $maven | Should -Match '\./mvnw' }
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'Gradle wrapper detection is platform-aware (gradlew.bat on Windows, ./gradlew elsewhere)' {
+        $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vtest-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'build.gradle') -Value 'plugins { id "com.android.application" }'
+            Set-Content -LiteralPath (Join-Path $tmp 'gradlew') -Value '#!/usr/bin/env sh'
+            Set-Content -LiteralPath (Join-Path $tmp 'gradlew.bat') -Value '@echo off'
+            Push-Location $tmp
+            try { $out = & $verify -EmitChecks 2> $null; $code = $LASTEXITCODE } finally { Pop-Location }
+            $code | Should -Be 0
+            $android = $out | Where-Object { $_ -match 'android-unit' } | Select-Object -First 1
+            $android | Should -Not -BeNullOrEmpty
+            if ($IsWindows) { $android | Should -Match 'gradlew\.bat' }
+            else { $android | Should -Match '\./gradlew' }
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
 }

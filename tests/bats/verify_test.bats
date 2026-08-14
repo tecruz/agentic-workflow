@@ -265,6 +265,33 @@ run_checks_in_tmp() {  # run_checks_in_tmp <line>...
     rm -rf "$TMPD"
 }
 
+@test "detection emits the Unix Maven wrapper when present" {
+    case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*) skip "unix wrapper detection requires a POSIX shell" ;;
+    esac
+    TMPD="$(mktemp -d)"
+    printf '<project></project>\n' > "$TMPD/pom.xml"
+    printf '#!/bin/sh\n' > "$TMPD/mvnw" && chmod +x "$TMPD/mvnw"
+    run bash -c "cd '$TMPD' && bash '$VERIFY' --emit-checks 2>/dev/null"
+    [ "$status" -eq 0 ]
+    printf '%s' "$output" | grep -q $'\t\./mvnw\t'
+    rm -rf "$TMPD"
+}
+
+@test "detection emits the Unix Gradle/Android wrapper when present" {
+    case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*) skip "unix wrapper detection requires a POSIX shell" ;;
+    esac
+    TMPD="$(mktemp -d)"
+    printf 'plugins { id "com.android.application" }\n' > "$TMPD/build.gradle"
+    printf '#!/bin/sh\n' > "$TMPD/gradlew" && chmod +x "$TMPD/gradlew"
+    run bash -c "cd '$TMPD' && bash '$VERIFY' --emit-checks 2>/dev/null"
+    [ "$status" -eq 0 ]
+    printf '%s' "$output" | grep -q $'\t\./gradlew\t'
+    printf '%s' "$output" | grep -q $'android-unit'
+    rm -rf "$TMPD"
+}
+
 @test "Bash and PowerShell detection produce equivalent candidates" {
     have pwsh || skip "pwsh not available"
     TMPD="$(mktemp -d)"

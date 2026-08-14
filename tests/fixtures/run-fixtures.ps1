@@ -71,6 +71,17 @@ Expect-Detect "dotnet-csproj-only" @("dotnet")
 Expect-Detect "rust-cargo" @("cargo")
 Expect-Detect "go-mod" @("go")
 Expect-Detect "java-maven" @("mvn")
+if ($IsWindows) {
+    # both wrapper scripts are present; the Windows .cmd/.bat script must win
+    Expect-Detect "java-maven-wrapper" @("mvnw.cmd")
+    Expect-Detect "gradle-wrapper" @("gradlew.bat")
+    Expect-Detect "android-gradle" @("gradlew.bat", "android-unit")
+}
+else {
+    Expect-Detect "java-maven-wrapper" @("mvnw")
+    Expect-Detect "gradle-wrapper" @("gradlew")
+    Expect-Detect "android-gradle" @("gradlew", "android-unit")
+}
 Expect-Detect "monorepo" @("pnpm", "go")
 Expect-Detect "polyglot-node-go" @("npm", "go")
 Expect-Detect "nested-monorepo" @("npm", "go")

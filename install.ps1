@@ -419,6 +419,10 @@ function New-Checks {
     }
     if ($script:Plan) { Write-Host "  gen    $rel (from detected stack)"; return }
 
+    # Detection creates, replaces, or removes the generated candidate; snapshot
+    # it before detection so a failed install restores a reviewed candidate (or
+    # removes a freshly generated one) exactly as it was before this run.
+    Snapshot-File ".agentic/checks.generated.tsv"
     $verify = Join-Path $SourceDir ".agentic\scripts\verify.ps1"
     Push-Location $TargetDir
     try {

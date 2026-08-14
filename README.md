@@ -6,8 +6,8 @@ same 5-phase execution loop, and the same definition of "done" — regardless of
 language, framework, or which agent tool you use.
 
 - **Technology-independent**: the verifier auto-detects the project stack
-  (Node.js, Rust, Python, Go, JVM, .NET — see the
-  [supported stacks table](#supported-stacks)) and runs the checks that
+  (Node.js, Rust, Python, Go, Java/Maven, Gradle, Android/Kotlin, .NET — see
+  the [supported stacks table](#supported-stacks)) and runs the checks that
   project defines.
 - **Agent-tool-independent**: OpenCode, Claude Code, Gemini CLI, Cursor,
   Windsurf, Roo Code / Cline, GitHub Copilot, and Aider all read the same
@@ -70,9 +70,29 @@ your project's real architecture (or let your agent do it in its first session).
 
 The verifier runs the checks defined in `.agentic/checks.tsv` (project-owned,
 authoritative). If that file defines no checks, it auto-detects the stack as a
-bootstrap. Run the installer with `--generate-checks` to create
-`.agentic/checks.tsv` from the detected stack, then edit it to match your
-project's real definition of done.
+bootstrap.
+
+### The checks candidate lifecycle
+
+Stack detection never writes directly into `.agentic/checks.tsv`; it produces a
+reviewable **candidate** first, so you can edit it before it becomes the
+authoritative contract:
+
+1. `--detect-checks` (`-DetectChecks`) writes the detected contract to
+   `.agentic/checks.generated.tsv`. Re-running it replaces a stale candidate, or
+   removes it when no stack is found.
+2. Review and edit `.agentic/checks.generated.tsv` to match your project's real
+   definition of done.
+3. `--accept-detected-checks` (`-AcceptDetectedChecks`) validates the candidate
+   and promotes it to `.agentic/checks.tsv`. It promotes the exact reviewed
+   file, never a fresh detection, and refuses to overwrite an existing
+   `.agentic/checks.tsv` unless `--replace-checks` (`-ReplaceChecks`) is given.
+
+`--generate-checks` (`-GenerateChecks`) is the legacy single-step shortcut: it
+runs detection, validates, and promotes the candidate to `.agentic/checks.tsv`
+in one transaction. Because generation is transactional, a failed install
+restores any pre-existing `.agentic/checks.generated.tsv` (and never leaks a
+newly generated one).
 
 ### Use as a GitHub template
 
@@ -139,15 +159,29 @@ installed, so project type detection never depends on the local machine.
 | Python (poetry) | `poetry.lock` | `poetry run pytest`, `poetry run ruff check .` | `python-poetry` |
 | Python (uv) | `uv.lock` | `uv run pytest`, `uv run ruff check .` | `python-uv` |
 | Go | `go.mod` | `go test ./...`, `go vet ./...` | `go-mod` |
-| Java (Maven) | `pom.xml` | `mvn test`, `mvn checkstyle:check` | `java-maven` |
-| Java (Gradle) | `build.gradle` / `build.gradle.kts` | `gradle test`, `gradle check` | — |
+| Java (Maven) | `pom.xml` | `mvn test`, `mvn checkstyle:check`; `./mvnw` / `mvnw.cmd` when a wrapper is present | `java-maven`, `java-maven-wrapper` |
+| Java (Gradle) | `build.gradle` / `build.gradle.kts` | `gradle test`, `gradle check`; `./gradlew` / `gradlew.bat` when a wrapper is present | `gradle-wrapper` |
+| Android / Kotlin (Gradle) | root `build.gradle` / `build.gradle.kts` referencing `com.android` / `org.jetbrains.kotlin.android`, or a root `AndroidManifest.xml` | `test`, `lint`, `assembleDebug` via the Gradle wrapper or `gradle` | `android-gradle` |
 | .NET | `*.sln` / `*.csproj` | `dotnet test`, `dotnet format --verify-no-changes` | `dotnet-sln-only`, `dotnet-csproj-only` |
-| Monorepo | multiple lockfiles / manifests | merged detection per sub-stack | `monorepo` |
+| Nested monorepo | manifests in one level below `apps/`, `services/`, `packages/`, `modules/` | merged detection per nested sub-stack | `monorepo`, `nested-monorepo` |
+
+Detection notes:
+
+- **Android/Kotlin detection is basic root-project detection**: it inspects
+  root `build.gradle`/`build.gradle.kts` (and a root `AndroidManifest.xml`). It
+  does not yet follow Android plugins declared only in module build files,
+  version-catalog aliases, or convention plugins.
+- **Nested discovery is one-level**: it scans only direct children of
+  `apps/`, `services/`, `packages/`, and `modules/`, and does not interpret
+  pnpm/npm/Yarn workspaces, Nx, Turborepo, Cargo members, Gradle subprojects,
+  Maven modules, or Bazel.
+- The Gradle/Maven wrapper emitted is the platform script: `gradlew.bat` /
+  `mvnw.cmd` on Windows, `./gradlew` / `./mvnw` on Linux/macOS.
 
 The fixture smoke harnesses (`tests/fixtures/run-fixtures.sh` and
 `tests/fixtures/run-fixtures.ps1`) exercise the complete fixture list and fail
-CI on any mismatch. The Bats suites (`verify.sh` + `install.sh`) run on Linux
-and macOS; the Pester suites (`verify.ps1` + `install.ps1`) run on Windows.
+CI on any mismatch. Both the Bats and Pester suites run on all three platforms;
+`run-fixtures.sh` runs on Linux/macOS and `run-fixtures.ps1` on Windows.
 
 ---
 

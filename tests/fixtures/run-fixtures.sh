@@ -71,6 +71,9 @@ expect_detect dotnet-csproj-only  dotnet
 expect_detect rust-cargo          cargo
 expect_detect go-mod              go
 expect_detect java-maven          mvn
+expect_detect java-maven-wrapper  mvnw
+expect_detect gradle-wrapper      gradlew
+expect_detect android-gradle      gradlew android-unit
 expect_detect monorepo            pnpm go
 expect_detect polyglot-node-go      node-test go-test
 expect_detect nested-monorepo       apps-web-node-test services-api-go-test

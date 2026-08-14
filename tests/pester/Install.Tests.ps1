@@ -214,6 +214,41 @@ Describe 'install.ps1' {
         finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
     }
 
+    It '-GenerateChecks leaves no generated candidate when the install fails and none existed' {
+        $tmp = New-TestDir
+        try {
+            $agentic = Join-Path $tmp '.agentic'
+            New-Item -ItemType Directory -Path $agentic -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $tmp 'package.json') -Value '{"name":"x","scripts":{"test":"true"}}'
+            # a directory where the manifest is expected fails the install after
+            # detection has already produced (and possibly replaced) the candidate
+            New-Item -ItemType Directory -Path (Join-Path $agentic 'install-manifest.tsv') | Out-Null
+            & $install -Target $tmp -GenerateChecks *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            Test-Path (Join-Path $tmp '.agentic\checks.generated.tsv') | Should -Be $false
+            Test-Path (Join-Path $tmp '.agentic\checks.tsv') | Should -Be $false
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-GenerateChecks restores a reviewed candidate exactly when the install fails' {
+        $tmp = New-TestDir
+        try {
+            $agentic = Join-Path $tmp '.agentic'
+            New-Item -ItemType Directory -Path $agentic -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $tmp 'package.json') -Value '{"name":"x","scripts":{"test":"true"}}'
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.generated.tsv') -Value '# reviewed candidate'
+            New-Item -ItemType Directory -Path (Join-Path $agentic 'install-manifest.tsv') | Out-Null
+            & $install -Target $tmp -GenerateChecks *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            $restored = (Get-Content -Raw (Join-Path $tmp '.agentic\checks.generated.tsv'))
+            $restored.Trim() | Should -Be '# reviewed candidate'
+            $restored | Should -Not -Match 'node-test'
+            Test-Path (Join-Path $tmp '.agentic\checks.tsv') | Should -Be $false
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
     It 'a pre-existing .new conflict candidate is restored on rollback' {
         $tmp = New-TestDir
         try {

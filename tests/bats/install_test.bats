@@ -180,6 +180,27 @@ teardown() {
     [ ! -f AGENTS.md ]
 }
 
+@test "a failed --generate-checks install leaves no generated candidate when none existed" {
+    mkdir -p .agentic
+    printf '{"name":"x","scripts":{"test":"true"}}\n' > package.json
+    mkdir .agentic/install-manifest.tsv
+    run bash "$INSTALL" . --generate-checks
+    [ "$status" -ne 0 ]
+    [ ! -f .agentic/checks.generated.tsv ]
+    [ ! -f .agentic/checks.tsv ]
+}
+
+@test "a failed --generate-checks install restores a reviewed candidate exactly" {
+    mkdir -p .agentic
+    printf '{"name":"x","scripts":{"test":"true"}}\n' > package.json
+    printf '# reviewed candidate\n' > .agentic/checks.generated.tsv
+    mkdir .agentic/install-manifest.tsv
+    run bash "$INSTALL" . --generate-checks
+    [ "$status" -ne 0 ]
+    [ "$(cat .agentic/checks.generated.tsv)" = "# reviewed candidate" ]
+    [ ! -f .agentic/checks.tsv ]
+}
+
 @test "a pre-existing .new conflict candidate is restored on rollback" {
     bash "$INSTALL" . >/dev/null 2>&1
     printf '\n# custom\n' >> .agentic/WORKFLOW.md
