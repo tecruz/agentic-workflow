@@ -41,7 +41,8 @@
 param(
     [switch] $EmitChecks,
     [switch] $ExplainDetection,
-    [switch] $DetectChecks
+    [switch] $DetectChecks,
+    [string] $ValidateChecks
 )
 
 $script:Failed = $false
@@ -429,6 +430,16 @@ if (Test-Path -LiteralPath $checksPath) {
 
 if ($EmitChecks) {
     Get-DetectedChecks
+    exit 0
+}
+
+if ($ValidateChecks) {
+    if (-not (Test-Path -LiteralPath $ValidateChecks)) {
+        Write-Host "ERROR: file '$ValidateChecks' does not exist."
+        exit 1
+    }
+    Test-ChecksTsvValidation -FilePath $ValidateChecks
+    Write-Host "Checks file '$ValidateChecks' is valid."
     exit 0
 }
 

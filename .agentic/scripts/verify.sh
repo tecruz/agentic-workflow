@@ -450,6 +450,17 @@ detect_checks_file() {
     exit 0
 }
 
+validate_checks_arg() {
+    local target_file="$1"
+    if [ ! -f "$target_file" ]; then
+        echo "ERROR: file '$target_file' does not exist." >&2
+        exit 1
+    fi
+    validate_checks_tsv "$target_file"
+    echo "Checks file '$target_file' is valid."
+    exit 0
+}
+
 if [ "${1:-}" = "--emit-checks" ]; then
     emit_checks
 fi
@@ -458,6 +469,9 @@ if [ "${1:-}" = "--explain-detection" ]; then
 fi
 if [ "${1:-}" = "--detect-checks" ]; then
     detect_checks_file
+fi
+if [ "${1:-}" = "--validate-checks" ]; then
+    validate_checks_arg "${2:-}"
 fi
 
 if checks_defined; then
