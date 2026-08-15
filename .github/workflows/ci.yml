@@ -1,5 +1,12 @@
 name: CI
 
+# Pinned third-party actions by full commit SHA; the trailing comment records the
+# released tag that SHA points at so dependabot can bump the SHA + comment together.
+# Policy: never move these tags without updating the SHAs in the same commit.
+
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main, master]
@@ -15,9 +22,11 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v5
+      # actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
 
-      - uses: actions/setup-node@v5
+      # actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
         with:
           node-version: 24
 
@@ -41,7 +50,7 @@ jobs:
         shell: pwsh
         run: |
           Install-Module Pester -RequiredVersion 5.6.0 -Scope CurrentUser -Force -SkipPublisherCheck
-          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force -SkipPublisherCheck
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force -SkipPublisherCheck
 
       - name: Run the framework's own checks
         run: bash .agentic/scripts/verify.sh
@@ -66,9 +75,11 @@ jobs:
     name: verify.ps1 (Windows)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v5
+      # actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
 
-      - uses: actions/setup-node@v5
+      # actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
         with:
           node-version: 24
 
@@ -86,7 +97,7 @@ jobs:
         shell: pwsh
         run: |
           Install-Module Pester -RequiredVersion 5.6.0 -Scope CurrentUser -Force -SkipPublisherCheck
-          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force -SkipPublisherCheck
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force -SkipPublisherCheck
 
       - name: Run the framework's own checks
         shell: pwsh

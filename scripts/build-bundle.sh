@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+#
+# build-bundle.sh — package the framework into a clean adopter distribution.
+#
+# The repository is the framework's development source: it carries the
+# framework's own .agentic/checks.tsv, tests/, CI, and docs. Adopters installing
+# via "Use this template" want none of that. This script assembles a
+# self-contained distribution (dist/agentic-workflow-<version>/) containing
+# exactly the files the installers seed and manage, then produces tar.gz and
+# zip archives plus a SHA256SUMS file.
+#
+# What is intentionally NOT included:
+#   .agentic/checks.tsv   the framework's own checks (adopters seed the generic
+#                         template from .agentic/templates/checks.tsv instead)
+#   tests/ .github/ docs/ CHANGELOG.md README.md CONTRIBUTING.md SECURITY.md
+#
+# Usage:
+#   bash scripts/build-bundle.sh [--no-archives]
+#
+# Options:
+#   --no-archives   Only assemble the bundle directory (skip archives and
+#                   SHA256SUMS). Useful for tests and quick local installs.
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+VERSION="$(cat "$ROOT/.agentic/VERSION")"
+DIST="$ROOT/dist"
+BUNDLE="$DIST/agentic-workflow-$VERSION"
+NO_ARCHIVES=0
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --no-archives) NO_ARCHIVES=1 ;;
+        -h|--help) head -30 "$0"; exit 0 ;;
+        *) echo "Unknown option: $1" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+rm -rf "$BUNDLE"
+mkdir -p "$BUNDLE/.agentic/rules" \
+         "$BUNDLE/.agentic/scripts" \
+         "$BUNDLE/.agentic/templates" \
+         "$BUNDLE/.agentic/tasks" \
+         "$BUNDLE/.agentic/decisions"
+
+# Root-level protocol entry points and installers.
+cp "$ROOT/AGENTS.md" "$ROOT/CLAUDE.md" "$ROOT/GEMINI.md" "$ROOT/.aider.conf.yml" "$BUNDLE/"
+cp "$ROOT/LICENSE" "$BUNDLE/"
+cp "$ROOT/install.sh" "$ROOT/install.ps1" "$BUNDLE/"
+
+# .agentic payload: everything the installers seed or manage, minus the
+# framework's own checks.tsv (adopters seed from .agentic/templates/checks.tsv).
+cp "$ROOT/.agentic/VERSION" \
+   "$ROOT/.agentic/WORKFLOW.md" \
+   "$ROOT/.agentic/ARCHITECTURE.md" \
+   "$ROOT/.agentic/STATUS.md" \
+   "$BUNDLE/.agentic/"
+cp "$ROOT"/.agentic/rules/*.md "$BUNDLE/.agentic/rules/"
+cp "$ROOT/.agentic/scripts/verify.sh" "$ROOT/.agentic/scripts/verify.ps1" "$BUNDLE/.agentic/scripts/"
+cp "$ROOT"/.agentic/templates/*.md "$ROOT"/.agentic/templates/checks.tsv "$BUNDLE/.agentic/templates/"
+cp "$ROOT/.agentic/tasks/README.md" "$BUNDLE/.agentic/tasks/"
+cp "$ROOT/.agentic/decisions/README.md" "$BUNDLE/.agentic/decisions/"
+
+# Safety: the bundle must never leak the framework's own checks or dev-only dirs.
+for leak in ".agentic/checks.tsv" "tests" ".github" "docs" "CHANGELOG.md" "README.md" "CONTRIBUTING.md" "SECURITY.md"; do
+    if [ -e "$BUNDLE/$leak" ]; then
+        echo "ERROR: bundle leaked '$leak'; aborting." >&2
+        exit 1
+    fi
+done
+
+if [ "$NO_ARCHIVES" -eq 1 ]; then
+    echo "Bundle assembled: $BUNDLE"
+    exit 0
+fi
+
+# Archives: tar.gz via tar; zip via pwsh (Compress-Archive works on every
+# supported platform and produces Windows-friendly archives).
+tar -C "$DIST" -czf "$DIST/agentic-workflow-$VERSION.tar.gz" "agentic-workflow-$VERSION"
+if command -v pwsh >/dev/null 2>&1; then
+    # Compress-Archive needs Windows paths even when launched from git-bash.
+    bundle_win="$BUNDLE"
+    dist_win="$DIST/agentic-workflow-$VERSION.zip"
+    if command -v cygpath >/dev/null 2>&1; then
+        bundle_win="$(cygpath -w "$BUNDLE")"
+        dist_win="$(cygpath -w "$DIST/agentic-workflow-$VERSION.zip")"
+    fi
+    pwsh -NoProfile -Command "Compress-Archive -Path '$bundle_win' -DestinationPath '$dist_win' -Force"
+else
+    echo "WARNING: pwsh not found; skipping zip archive." >&2
+fi
+
+# Checksums for every archive in dist/ (the bundle directory is a build output).
+{
+    cd "$DIST"
+    for f in agentic-workflow-$VERSION.tar.gz agentic-workflow-$VERSION.zip; do
+        [ -e "$f" ] && sha256sum "$f"
+    done
+} > "$DIST/SHA256SUMS"
+
+echo "Bundle: $BUNDLE"
+echo "Archives:"
+echo "  $DIST/agentic-workflow-$VERSION.tar.gz"
+[ -f "$DIST/agentic-workflow-$VERSION.zip" ] && echo "  $DIST/agentic-workflow-$VERSION.zip"
+echo "  $DIST/SHA256SUMS"

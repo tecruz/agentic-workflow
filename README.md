@@ -55,6 +55,24 @@ Update an existing install by re-running the installer; use `--replace-managed`
 (`-ReplaceManaged`) to force-replace modified framework files. See
 `./install.sh --help` for all options.
 
+The installer also manages the lifecycle of what it installed:
+
+- **Deselect an adapter**: re-run with a smaller `--tools`/`-Tools` list (e.g.
+  `--tools claude`). The deselected adapter's files are removed; any custom
+  content you added to a merge file outside the protocol block is preserved.
+- **`--prune`** (`-Prune`): removes every file no longer part of the install
+  (deselected adapters, renamed framework files) and the legacy v1.0 adapter
+  files (`.cursorrules`, `.windsurfrules`, `.clinerules`, `CONVENTIONS.md`,
+  `.github/copilot-instructions.md`), then rewrites the manifest. Legacy
+  directories (`Memory/`, `.cursor/`) are reported but never deleted.
+- **`--uninstall`** (`-Uninstall`): removes all managed files and strips the
+  protocol block from merge files, leaving project-owned seeds
+  (`.agentic/ARCHITECTURE.md`, `STATUS.md`, `checks.tsv`, `tasks/`,
+  `decisions/`) intact.
+- Modified managed files are never silently removed: during a prune or
+  uninstall they are kept and reported as conflicts. Both `--prune` and
+  `--uninstall` support `--plan` (`-Plan`) dry runs that show what would change.
+
 Then commit the installed files and fill in `.agentic/ARCHITECTURE.md` with
 your project's real architecture (or let your agent do it in its first session).
 
@@ -98,6 +116,19 @@ newly generated one).
 
 Click **Use this template** when creating a new repository — the protocol
 ships pre-installed.
+
+### Distribution bundle
+
+`scripts/build-bundle.sh` packages a self-contained distribution into
+`dist/agentic-workflow-<version>/` plus tar.gz, zip, and SHA256SUMS. The bundle
+contains exactly what the installers seed and manage — the protocol entry
+points, both installers, and the `.agentic/` payload — and deliberately omits
+the framework's own checks, tests, CI, and docs so adopters start clean:
+
+```bash
+bash scripts/build-bundle.sh                    # assemble + archive
+bash dist/agentic-workflow-1.2.0/install.sh /path/to/your-project
+```
 
 ---
 
@@ -153,7 +184,7 @@ installed, so project type detection never depends on the local machine.
 | Node.js (npm) | `package.json` (no lockfile) | `npm test`, `npm run lint --if-present` | `node-npm`, `node-npm-fail` |
 | Node.js (pnpm) | `pnpm-lock.yaml` | `pnpm test`, `pnpm lint` | `node-pnpm`, `monorepo` |
 | Node.js (yarn) | `yarn.lock` | `yarn test`, `yarn lint` | — |
-| Node.js (bun) | `bun.lockb` | `bun test`, `bun run lint` | — |
+| Node.js (bun) | `bun.lock` / `bun.lockb` | `bun test`, `bun run lint` | `node-bun` |
 | Rust | `Cargo.toml` | `cargo test`, `cargo clippy -- -D warnings` | `rust-cargo` |
 | Python | `pyproject.toml` / `requirements.txt` | `pytest`, `ruff check .` | `python-poetry`, `python-uv` |
 | Python (poetry) | `poetry.lock` | `poetry run pytest`, `poetry run ruff check .` | `python-poetry` |
@@ -177,6 +208,10 @@ Detection notes:
   Maven modules, or Bazel.
 - The Gradle/Maven wrapper emitted is the platform script: `gradlew.bat` /
   `mvnw.cmd` on Windows, `./gradlew` / `./mvnw` on Linux/macOS.
+- **Optional-check gating**: pnpm/yarn/bun `lint` checks are emitted only when
+  `package.json` defines a `lint` script (npm keeps `--if-present`); the Python
+  `ruff` check only when Ruff is configured (`[tool.ruff]`, `ruff.toml`, or
+  `.ruff.toml`); `maven-lint` only when the POM references Checkstyle.
 
 The fixture smoke harnesses (`tests/fixtures/run-fixtures.sh` and
 `tests/fixtures/run-fixtures.ps1`) exercise the complete fixture list and fail
@@ -193,6 +228,8 @@ CI on any mismatch. Both the Bats and Pester suites run on all three platforms;
 ├── CLAUDE.md / GEMINI.md          # Import-only entry points
 ├── .aider.conf.yml                # Aider reads AGENTS.md + WORKFLOW.md
 ├── install.sh / install.ps1       # Non-destructive cross-platform installers
+├── scripts/
+│   └── build-bundle.sh            # Packages the clean adopter distribution
 ├── tests/
 │   ├── bats/                      # Bats suites (verify.sh + install.sh)
 │   ├── pester/                    # Pester suites (verify.ps1 + install.ps1)

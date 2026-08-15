@@ -1,0 +1,14 @@
+# Dependabot keeps the pinned action SHAs in .github/workflows/ci.yml up to date.
+# When a group update bumps a SHA, the release-tag comment next to the `uses`
+# line must be updated to match so the pin stays auditable.
+
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"

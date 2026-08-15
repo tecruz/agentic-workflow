@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-14
+
+### Added
+- Installer lifecycle: `--prune` and `--uninstall` options for `install.sh` /
+  `install.ps1`, both supporting `--plan` dry runs.
+- Manifest-diff migration engine: an update removes files a previous install
+  recorded that are no longer part of the desired set (deselected adapters,
+  renamed framework files). Managed files matching their recorded checksum are
+  removed; modified ones are preserved and reported as conflicts; merge files
+  lose only the marker-delimited protocol block, keeping adopter content.
+- v1.0 legacy migration: installers report legacy artifacts (`.cursorrules`,
+  `.windsurfrules`, `.clinerules`, `CONVENTIONS.md`,
+  `.github/copilot-instructions.md`); `--prune`/`--uninstall` remove the files
+  while preserving `Memory/` and `.cursor/` user data.
+- Bun detection: `bun.lock` and `bun.lockb` are recognized.
+- Script-aware lint emission: pnpm/yarn/bun `lint` checks are emitted only when
+  `package.json` defines a `lint` script (npm keeps `--if-present`).
+- Ruff gating: the Python `ruff` check is emitted only when Ruff is configured
+  (`[tool.ruff]`, `ruff.toml`, or `.ruff.toml`).
+- Maven Checkstyle gating: `maven-lint` is emitted only when the POM mentions
+  Checkstyle.
+- Nested Python projects inherit Poetry/uv detection from the repository root.
+- Golden-output contract: `tests/fixtures/golden/*.tsv` lock detection output;
+  a corrected Bash/PowerShell parity test asserts both verifiers emit identical
+  checks for every fixture.
+- Clean adopter bundle: `scripts/build-bundle.sh` assembles
+  `dist/agentic-workflow-<version>/` (installers, protocol entry points, and the
+  `.agentic/` payload minus the framework's own checks) plus tar.gz, zip, and
+  SHA256SUMS. End-to-end bundle install tests cover both installers.
+
+### Changed
+- CI is hardened: least-privilege `permissions: contents: read`, GitHub Actions
+  pinned by full commit SHA, PSScriptAnalyzer pinned to 1.25.0, and dependabot
+  for GitHub Actions.
+
+## [1.1.0] - 2026-08-14
+
 ### Added
 - Basic Android / Kotlin Gradle root-project detection (root
   `build.gradle`/`build.gradle.kts` with `com.android` /
