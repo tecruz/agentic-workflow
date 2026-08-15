@@ -53,6 +53,28 @@ expect_detect() {  # expect_detect <fixture> <tool1> [tool2...]
     printf '%-24s emit-checks       %s\n' "$name" "$status"
 }
 
+# Exact golden contract: the sorted, comment-free emitted checks must equal the
+# checked-in golden file. Catches both missing checks and unexpected extras.
+expect_golden() {  # expect_golden <fixture>
+    local name="$1" gold actual missing=0 status
+    gold="$FIX/golden/$name.tsv"
+    actual="$(cd "$FIX/$name" && bash "$VERIFY" --emit-checks 2>/dev/null | grep -v '^$' | sort)"
+    if [ ! -f "$gold" ]; then
+        echo "  $name: golden file $gold missing"
+        missing=1
+    elif [ "$actual" != "$(cat "$gold")" ]; then
+        echo "  $name: emitted contract differs from golden $gold"
+        missing=1
+    fi
+    if [ "$missing" -eq 0 ]; then
+        status="OK"
+    else
+        status="MISMATCH"
+        FAILURES=$((FAILURES + 1))
+    fi
+    printf '%-24s golden            %s\n' "$name" "$status"
+}
+
 # State-model exit codes (executable availability makes them environment-aware).
 expect_code checks-tsv         2
 if check_exe checks-tsv-pass; then expect_code checks-tsv-pass 0; else expect_code checks-tsv-pass 2; fi
@@ -63,6 +85,7 @@ if has npm; then expect_code node-npm 0; else expect_code node-npm 2; fi
 if has npm; then expect_code node-npm-fail 1; else expect_code node-npm-fail 2; fi
 
 # Stack detection via --emit-checks (deterministic).
+expect_detect node-bun            bun
 expect_detect node-pnpm           pnpm
 expect_detect python-uv           uv
 expect_detect python-poetry       poetry
@@ -78,6 +101,12 @@ expect_detect monorepo            pnpm go
 expect_detect polyglot-node-go      node-test go-test
 expect_detect nested-monorepo       apps-web-node-test services-api-go-test
 expect_detect unsupported         __none__
+
+# Exact golden contracts for the deterministic fixtures (no platform-dependent
+# wrapper selection). This is the same check the Bats/Pester suites run.
+for gold in "$FIX"/golden/*.tsv; do
+    expect_golden "$(basename "$gold" .tsv)"
+done
 
 if [ "$FAILURES" -ne 0 ]; then
     echo "$FAILURES fixture assertion(s) failed" >&2

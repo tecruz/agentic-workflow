@@ -1,0 +1,2 @@
+required	node-lint	.	pnpm	lint
+required	node-test	.	pnpm	test

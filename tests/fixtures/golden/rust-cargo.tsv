@@ -1,0 +1,2 @@
+required	rust-clippy	.	cargo	clippy	--	-D	warnings
+required	rust-test	.	cargo	test

@@ -171,6 +171,38 @@ function Get-MavenCommand {
     return 'mvn'
 }
 
+function Test-PackageScript {
+    # Returns true when the package.json at $Path declares a script named $Name.
+    # The scripts block is located textually (no JSON parser), matching the
+    # Bash detector so both implementations stay in parity.
+    param([string] $Path, [string] $Name)
+    if (-not (Test-Path -LiteralPath $Path)) { return $false }
+    $raw = Get-Content -Raw -LiteralPath $Path
+    $block = [regex]::Match($raw, '"scripts"\s*:\s*\{(.+?)\}').Groups[1].Value
+    return -not [string]::IsNullOrEmpty($block) -and ($block -match ("`"$([regex]::Escape($Name))`"\s*:"))
+}
+
+function Test-RuffConfig {
+    # Returns true when the directory $Path contains a Ruff configuration
+    # (pyproject `[tool.ruff]`, `ruff.toml`, or `.ruff.toml`). A Python project
+    # without one has not adopted Ruff, so `ruff check` would only produce a
+    # false BLOCKED/FAIL later.
+    param([string] $Path)
+    $pyproject = Join-Path $Path 'pyproject.toml'
+    if (Test-Path -LiteralPath $pyproject) {
+        if ((Get-Content -LiteralPath $pyproject -ErrorAction SilentlyContinue) -match '^\[tool\.ruff') { return $true }
+    }
+    return (Test-Path -LiteralPath (Join-Path $Path 'ruff.toml')) -or
+           (Test-Path -LiteralPath (Join-Path $Path '.ruff.toml'))
+}
+
+function Test-MavenCheckstyle {
+    # The lint check is only emitted for Maven projects that configured it.
+    param([string] $Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return $false }
+    return (Get-Content -LiteralPath $Path -Raw -ErrorAction SilentlyContinue) -match 'checkstyle'
+}
+
 function Get-DetectedChecks {
     [string[]] $lines = @()
 
@@ -178,15 +210,21 @@ function Get-DetectedChecks {
         Write-Host "Detected: Node.js project (package.json)"
         if (Test-Path -LiteralPath pnpm-lock.yaml) {
             $lines += "required`tnode-test`t.`tpnpm`ttest"
-            $lines += "required`tnode-lint`t.`tpnpm`tlint"
+            if (Test-PackageScript 'package.json' 'lint') {
+                $lines += "required`tnode-lint`t.`tpnpm`tlint"
+            }
         }
         elseif (Test-Path -LiteralPath yarn.lock) {
             $lines += "required`tnode-test`t.`tyarn`ttest"
-            $lines += "required`tnode-lint`t.`tyarn`tlint"
+            if (Test-PackageScript 'package.json' 'lint') {
+                $lines += "required`tnode-lint`t.`tyarn`tlint"
+            }
         }
-        elseif (Test-Path -LiteralPath bun.lockb) {
+        elseif ((Test-Path -LiteralPath bun.lock) -or (Test-Path -LiteralPath bun.lockb)) {
             $lines += "required`tnode-test`t.`tbun`ttest"
-            $lines += "required`tnode-lint`t.`tbun`trun`tlint"
+            if (Test-PackageScript 'package.json' 'lint') {
+                $lines += "required`tnode-lint`t.`tbun`trun`tlint"
+            }
         }
         else {
             $lines += "required`tnode-test`t.`tnpm`ttest"
@@ -204,15 +242,21 @@ function Get-DetectedChecks {
         Write-Host "Detected: Python project (pyproject.toml / requirements.txt)"
         if (Test-Path -LiteralPath poetry.lock) {
             $lines += "required`tpython-test`t.`tpoetry`trun`tpytest"
-            $lines += "required`tpython-ruff`t.`tpoetry`trun`truff`tcheck`t."
+            if (Test-RuffConfig '.') {
+                $lines += "required`tpython-ruff`t.`tpoetry`trun`truff`tcheck`t."
+            }
         }
         elseif (Test-Path -LiteralPath uv.lock) {
             $lines += "required`tpython-test`t.`tuv`trun`tpytest"
-            $lines += "required`tpython-ruff`t.`tuv`trun`truff`tcheck`t."
+            if (Test-RuffConfig '.') {
+                $lines += "required`tpython-ruff`t.`tuv`trun`truff`tcheck`t."
+            }
         }
         else {
             $lines += "required`tpython-test`t.`tpytest"
-            $lines += "required`tpython-ruff`t.`truff`tcheck`t."
+            if (Test-RuffConfig '.') {
+                $lines += "required`tpython-ruff`t.`truff`tcheck`t."
+            }
         }
     }
 
@@ -226,7 +270,9 @@ function Get-DetectedChecks {
         Write-Host "Detected: Maven project (pom.xml)"
         $mavenCmd = Get-MavenCommand
         $lines += "required`tmaven-test`t.`t$mavenCmd`ttest"
-        $lines += "required`tmaven-lint`t.`t$mavenCmd`tcheckstyle:check"
+        if (Test-MavenCheckstyle 'pom.xml') {
+            $lines += "required`tmaven-lint`t.`t$mavenCmd`tcheckstyle:check"
+        }
     }
     elseif ((Test-Path -LiteralPath build.gradle) -or (Test-Path -LiteralPath build.gradle.kts)) {
         $isAndroid = $false
@@ -273,15 +319,21 @@ function Get-DetectedChecks {
                     Write-Host "Detected: Nested Node.js project ($subRel)"
                     if (Test-Path -LiteralPath (Join-Path $subRel 'pnpm-lock.yaml')) {
                         $lines += "required`t${prefix}-node-test`t${subRel}`tpnpm`ttest"
-                        $lines += "required`t${prefix}-node-lint`t${subRel}`tpnpm`tlint"
+                        if (Test-PackageScript (Join-Path $subRel 'package.json') 'lint') {
+                            $lines += "required`t${prefix}-node-lint`t${subRel}`tpnpm`tlint"
+                        }
                     }
                     elseif (Test-Path -LiteralPath (Join-Path $subRel 'yarn.lock')) {
                         $lines += "required`t${prefix}-node-test`t${subRel}`tyarn`ttest"
-                        $lines += "required`t${prefix}-node-lint`t${subRel}`tyarn`tlint"
+                        if (Test-PackageScript (Join-Path $subRel 'package.json') 'lint') {
+                            $lines += "required`t${prefix}-node-lint`t${subRel}`tyarn`tlint"
+                        }
                     }
-                    elseif (Test-Path -LiteralPath (Join-Path $subRel 'bun.lockb')) {
+                    elseif ((Test-Path -LiteralPath (Join-Path $subRel 'bun.lock')) -or (Test-Path -LiteralPath (Join-Path $subRel 'bun.lockb'))) {
                         $lines += "required`t${prefix}-node-test`t${subRel}`tbun`ttest"
-                        $lines += "required`t${prefix}-node-lint`t${subRel}`tbun`trun`tlint"
+                        if (Test-PackageScript (Join-Path $subRel 'package.json') 'lint') {
+                            $lines += "required`t${prefix}-node-lint`t${subRel}`tbun`trun`tlint"
+                        }
                     }
                     else {
                         $lines += "required`t${prefix}-node-test`t${subRel}`tnpm`ttest"
@@ -300,8 +352,26 @@ function Get-DetectedChecks {
                 }
                 if ((Test-Path -LiteralPath (Join-Path $subRel 'pyproject.toml')) -or (Test-Path -LiteralPath (Join-Path $subRel 'requirements.txt'))) {
                     Write-Host "Detected: Nested Python project ($subRel)"
-                    $lines += "required`t${prefix}-python-test`t${subRel}`tpytest"
-                    $lines += "required`t${prefix}-python-ruff`t${subRel}`truff`tcheck`t."
+                    # Nested Python projects inherit the root-level Poetry/uv
+                    # detection rather than always falling back to bare pytest.
+                    if (Test-Path -LiteralPath (Join-Path $subRel 'poetry.lock')) {
+                        $lines += "required`t${prefix}-python-test`t${subRel}`tpoetry`trun`tpytest"
+                        if (Test-RuffConfig $subRel) {
+                            $lines += "required`t${prefix}-python-ruff`t${subRel}`tpoetry`trun`truff`tcheck`t."
+                        }
+                    }
+                    elseif (Test-Path -LiteralPath (Join-Path $subRel 'uv.lock')) {
+                        $lines += "required`t${prefix}-python-test`t${subRel}`tuv`trun`tpytest"
+                        if (Test-RuffConfig $subRel) {
+                            $lines += "required`t${prefix}-python-ruff`t${subRel}`tuv`trun`truff`tcheck`t."
+                        }
+                    }
+                    else {
+                        $lines += "required`t${prefix}-python-test`t${subRel}`tpytest"
+                        if (Test-RuffConfig $subRel) {
+                            $lines += "required`t${prefix}-python-ruff`t${subRel}`truff`tcheck`t."
+                        }
+                    }
                 }
             }
         }

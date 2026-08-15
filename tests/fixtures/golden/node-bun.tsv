@@ -1,0 +1,2 @@
+required	node-lint	.	bun	run	lint
+required	node-test	.	bun	test

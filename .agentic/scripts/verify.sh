@@ -130,6 +130,35 @@ run_check_line() {
     fi
 }
 
+# Returns 0 when the package.json at $1 declares a script named $2. The
+# scripts block is located textually, so no JSON parser is required and the
+# check stays consistent across Bash and PowerShell detection.
+pkg_has_script() {
+    local file="$1" name="$2" block
+    [ -f "$file" ] || return 1
+    block="$(sed -n '/"scripts"[[:space:]]*:/,/}/p' "$file")"
+    [ -n "$block" ] && printf '%s' "$block" | grep -q -E "\"$name\"[[:space:]]*:"
+}
+
+# Returns 0 when the directory $1 contains a Ruff configuration (pyproject
+# `[tool.ruff]`, `ruff.toml`, or `.ruff.toml`). A Python project without one
+# has not adopted Ruff, so emitting `ruff check` would only produce a false
+# BLOCKED/FAIL later.
+ruff_configured() {
+    local dir="$1"
+    [ -f "$dir/pyproject.toml" ] && grep -q '^\[tool\.ruff' "$dir/pyproject.toml" && return 0
+    [ -f "$dir/ruff.toml" ] && return 0
+    [ -f "$dir/.ruff.toml" ] && return 0
+    return 1
+}
+
+# Returns 0 when the pom.xml at $1 configures Checkstyle; the lint check is
+# only emitted for projects that actually adopted it.
+maven_has_checkstyle() {
+    local pom="$1"
+    [ -f "$pom" ] && grep -q -i 'checkstyle' "$pom"
+}
+
 detect() {
     # Emits auto-detected checks as TSV on stdout. Human-readable detection
     # messages go to stderr so they never corrupt the TSV stream.
@@ -139,13 +168,19 @@ detect() {
         echo "Detected: Node.js project (package.json)" >&2
         if [ -f pnpm-lock.yaml ]; then
             output_lines+=("required	node-test	.	pnpm	test")
-            output_lines+=("required	node-lint	.	pnpm	lint")
+            if pkg_has_script package.json lint; then
+                output_lines+=("required	node-lint	.	pnpm	lint")
+            fi
         elif [ -f yarn.lock ]; then
             output_lines+=("required	node-test	.	yarn	test")
-            output_lines+=("required	node-lint	.	yarn	lint")
-        elif [ -f bun.lockb ]; then
+            if pkg_has_script package.json lint; then
+                output_lines+=("required	node-lint	.	yarn	lint")
+            fi
+        elif [ -f bun.lock ] || [ -f bun.lockb ]; then
             output_lines+=("required	node-test	.	bun	test")
-            output_lines+=("required	node-lint	.	bun	run	lint")
+            if pkg_has_script package.json lint; then
+                output_lines+=("required	node-lint	.	bun	run	lint")
+            fi
         else
             output_lines+=("required	node-test	.	npm	test")
             output_lines+=("required	node-lint	.	npm	run	lint	--if-present")
@@ -162,13 +197,19 @@ detect() {
         echo "Detected: Python project (pyproject.toml / requirements.txt)" >&2
         if [ -f poetry.lock ]; then
             output_lines+=("required	python-test	.	poetry	run	pytest")
-            output_lines+=("required	python-ruff	.	poetry	run	ruff	check	.")
+            if ruff_configured .; then
+                output_lines+=("required	python-ruff	.	poetry	run	ruff	check	.")
+            fi
         elif [ -f uv.lock ]; then
             output_lines+=("required	python-test	.	uv	run	pytest")
-            output_lines+=("required	python-ruff	.	uv	run	ruff	check	.")
+            if ruff_configured .; then
+                output_lines+=("required	python-ruff	.	uv	run	ruff	check	.")
+            fi
         else
             output_lines+=("required	python-test	.	pytest")
-            output_lines+=("required	python-ruff	.	ruff	check	.")
+            if ruff_configured .; then
+                output_lines+=("required	python-ruff	.	ruff	check	.")
+            fi
         fi
     fi
 
@@ -182,10 +223,14 @@ detect() {
         echo "Detected: Maven project (pom.xml)" >&2
         if [ -x ./mvnw ]; then
             output_lines+=("required	maven-test	.	./mvnw	test")
-            output_lines+=("required	maven-lint	.	./mvnw	checkstyle:check")
+            if maven_has_checkstyle pom.xml; then
+                output_lines+=("required	maven-lint	.	./mvnw	checkstyle:check")
+            fi
         else
             output_lines+=("required	maven-test	.	mvn	test")
-            output_lines+=("required	maven-lint	.	mvn	checkstyle:check")
+            if maven_has_checkstyle pom.xml; then
+                output_lines+=("required	maven-lint	.	mvn	checkstyle:check")
+            fi
         fi
     elif [ -f build.gradle ] || [ -f build.gradle.kts ]; then
         local is_android=0
@@ -236,13 +281,19 @@ detect() {
                         echo "Detected: Nested Node.js project ($sub)" >&2
                         if [ -f "$sub/pnpm-lock.yaml" ]; then
                             output_lines+=("required	${prefix}-node-test	$sub	pnpm	test")
-                            output_lines+=("required	${prefix}-node-lint	$sub	pnpm	lint")
+                            if pkg_has_script "$sub/package.json" lint; then
+                                output_lines+=("required	${prefix}-node-lint	$sub	pnpm	lint")
+                            fi
                         elif [ -f "$sub/yarn.lock" ]; then
                             output_lines+=("required	${prefix}-node-test	$sub	yarn	test")
-                            output_lines+=("required	${prefix}-node-lint	$sub	yarn	lint")
-                        elif [ -f "$sub/bun.lockb" ]; then
+                            if pkg_has_script "$sub/package.json" lint; then
+                                output_lines+=("required	${prefix}-node-lint	$sub	yarn	lint")
+                            fi
+                        elif [ -f "$sub/bun.lock" ] || [ -f "$sub/bun.lockb" ]; then
                             output_lines+=("required	${prefix}-node-test	$sub	bun	test")
-                            output_lines+=("required	${prefix}-node-lint	$sub	bun	run	lint")
+                            if pkg_has_script "$sub/package.json" lint; then
+                                output_lines+=("required	${prefix}-node-lint	$sub	bun	run	lint")
+                            fi
                         else
                             output_lines+=("required	${prefix}-node-test	$sub	npm	test")
                             output_lines+=("required	${prefix}-node-lint	$sub	npm	run	lint	--if-present")
@@ -260,8 +311,25 @@ detect() {
                     fi
                     if [ -f "$sub/pyproject.toml" ] || [ -f "$sub/requirements.txt" ]; then
                         echo "Detected: Nested Python project ($sub)" >&2
-                        output_lines+=("required	${prefix}-python-test	$sub	pytest")
-                        output_lines+=("required	${prefix}-python-ruff	$sub	ruff	check	.")
+                        # Nested Python projects inherit the root-level
+                        # Poetry/uv detection rather than always falling back
+                        # to a bare `pytest` invocation.
+                        if [ -f "$sub/poetry.lock" ]; then
+                            output_lines+=("required	${prefix}-python-test	$sub	poetry	run	pytest")
+                            if ruff_configured "$sub"; then
+                                output_lines+=("required	${prefix}-python-ruff	$sub	poetry	run	ruff	check	.")
+                            fi
+                        elif [ -f "$sub/uv.lock" ]; then
+                            output_lines+=("required	${prefix}-python-test	$sub	uv	run	pytest")
+                            if ruff_configured "$sub"; then
+                                output_lines+=("required	${prefix}-python-ruff	$sub	uv	run	ruff	check	.")
+                            fi
+                        else
+                            output_lines+=("required	${prefix}-python-test	$sub	pytest")
+                            if ruff_configured "$sub"; then
+                                output_lines+=("required	${prefix}-python-ruff	$sub	ruff	check	.")
+                            fi
+                        fi
                     fi
                 fi
             done

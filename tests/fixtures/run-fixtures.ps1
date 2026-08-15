@@ -62,7 +62,31 @@ Expect-Code "unsupported" 3
 if (has npm) { Expect-Code "node-npm" 0 } else { Expect-Code "node-npm" 2 }
 if (has npm) { Expect-Code "node-npm-fail" 1 } else { Expect-Code "node-npm-fail" 2 }
 
+function Expect-Golden([string] $name) {
+    # Exact golden contract: the sorted, comment-free emitted checks must equal
+    # the checked-in golden file. Catches missing checks and unexpected extras.
+    $gold = Join-Path $fix "golden\$name.tsv"
+    $actual = ""
+    $absVerify = (Resolve-Path -LiteralPath $Verify).Path
+    Push-Location (Join-Path $fix $name)
+    try {
+        $actual = (& pwsh -NoProfile -File $absVerify -EmitChecks 2>&1 | Where-Object { $_ -and -not $_.StartsWith('Detected:') }) -join "`n"
+    }
+    finally { Pop-Location }
+    $expected = Get-Content -LiteralPath $gold
+    $actualSorted = ($actual -split "`n" | Where-Object { $_ -ne '' } | Sort-Object) -join "`n"
+    $expectedSorted = ($expected | Sort-Object) -join "`n"
+    $missing = 0
+    if ($actualSorted -ne $expectedSorted) {
+        Write-Host "  $($name): emitted contract differs from golden $gold"
+        $missing = 1
+    }
+    $status = if ($missing -eq 0) { "OK" } else { "MISMATCH"; $script:Failures++ }
+    "{0,-24} golden            {1}" -f $name, $status
+}
+
 # Stack detection via --emit-checks (deterministic).
+Expect-Detect "node-bun" @("bun")
 Expect-Detect "node-pnpm" @("pnpm")
 Expect-Detect "python-uv" @("uv")
 Expect-Detect "python-poetry" @("poetry")
@@ -86,6 +110,12 @@ Expect-Detect "monorepo" @("pnpm", "go")
 Expect-Detect "polyglot-node-go" @("npm", "go")
 Expect-Detect "nested-monorepo" @("npm", "go")
 Expect-Detect "unsupported" @("__none__")
+
+# Exact golden contracts for the deterministic fixtures (no platform-dependent
+# wrapper selection). This is the same check the Bats/Pester suites run.
+Get-ChildItem -LiteralPath (Join-Path $fix "golden") -Filter *.tsv | ForEach-Object {
+    Expect-Golden ([System.IO.Path]::GetFileNameWithoutExtension($_.Name))
+}
 
 if ($script:Failures -gt 0) {
     Write-Error "$script:Failures fixture assertion(s) failed"

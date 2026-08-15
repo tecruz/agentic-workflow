@@ -93,6 +93,81 @@ run_fixture() {  # run_fixture <fixture>
     printf '%s' "$output" | grep -q $'\tuv\t'
 }
 
+@test "a bun.lock project is detected as bun (modern lockfile)" {
+    run bash -c "cd '$FIX/node-bun' && bash '$VERIFY' --emit-checks 2>/dev/null"
+    [ "$status" -eq 0 ]
+    printf '%s' "$output" | grep -q $'\tbun\t'
+}
+
+@test "a bun.lockb project is detected as bun (legacy lockfile)" {
+    TMPD="$(mktemp -d)"
+    printf '{"name":"x","scripts":{"test":"true","lint":"true"}}\n' > "$TMPD/package.json"
+    touch "$TMPD/bun.lockb"
+    run bash -c "cd '$TMPD' && bash '$VERIFY' --emit-checks 2>/dev/null"
+    [ "$status" -eq 0 ]
+    printf '%s' "$output" | grep -q $'\tbun\t'
+    rm -rf "$TMPD"
+}
+
+@test "a pnpm project without a lint script does not emit a lint check" {
+    TMPD="$(mktemp -d)"
+    printf '{"name":"x","scripts":{"test":"true"}}\n' > "$TMPD/package.json"
+    touch "$TMPD/pnpm-lock.yaml"
+    run bash -c "cd '$TMPD' && bash '$VERIFY' --emit-checks 2>/dev/null"
+    [ "$status" -eq 0 ]
+    printf '%s' "$output" | grep -q $'\tpnpm\ttest'
+    ! printf '%s' "$output" | grep -q 'node-lint'
+    rm -rf "$TMPD"
+}
+
+@test "a pnpm project with a lint script emits the lint check" {
+    TMPD="$(mktemp -d)"
+    printf '{"name":"x","scripts":{"test":"true","lint":"true"}}\n' > "$TMPD/package.json"
+    touch "$TMPD/pnpm-lock.yaml"
+    run bash -c "cd '$TMPD' && bash '$VERIFY' --emit-checks 2>/dev/null"
+    [ "$status" -eq 0 ]
+    printf '%s' "$output" | grep -q $'\tpnpm\tlint'
+    rm -rf "$TMPD"
+}
+
+@test "a Python project without Ruff config does not emit a ruff check" {
+    TMPD="$(mktemp -d)"
+    printf '[project]\nname = "x"\n' > "$TMPD/pyproject.toml"
+    run bash -c "cd '$TMPD' && bash '$VERIFY' --emit-checks 2>/dev/null"
+    [ "$status" -eq 0 ]
+    printf '%s' "$output" | grep -q $'\tpytest'
+    ! printf '%s' "$output" | grep -q 'python-ruff'
+    rm -rf "$TMPD"
+}
+
+@test "a Python project with Ruff config emits the ruff check" {
+    TMPD="$(mktemp -d)"
+    printf '[project]\nname = "x"\n[tool.ruff]\n' > "$TMPD/pyproject.toml"
+    run bash -c "cd '$TMPD' && bash '$VERIFY' --emit-checks 2>/dev/null"
+    [ "$status" -eq 0 ]
+    printf '%s' "$output" | grep -q $'\truff\tcheck'
+    rm -rf "$TMPD"
+}
+
+@test "Maven detection emits checkstyle only when the pom configures it" {
+    TMPD="$(mktemp -d)"
+    printf '<project></project>\n' > "$TMPD/pom.xml"
+    run bash -c "cd '$TMPD' && bash '$VERIFY' --emit-checks 2>/dev/null"
+    [ "$status" -eq 0 ]
+    printf '%s' "$output" | grep -q $'\tmvn\ttest'
+    ! printf '%s' "$output" | grep -q 'maven-lint'
+    rm -rf "$TMPD"
+}
+
+@test "Maven detection emits checkstyle when the pom configures the plugin" {
+    TMPD="$(mktemp -d)"
+    printf '%s\n' '<project>' '<build><plugins><plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-checkstyle-plugin</artifactId></plugin></plugins></build>' '</project>' > "$TMPD/pom.xml"
+    run bash -c "cd '$TMPD' && bash '$VERIFY' --emit-checks 2>/dev/null"
+    [ "$status" -eq 0 ]
+    printf '%s' "$output" | grep -q 'maven-lint'
+    rm -rf "$TMPD"
+}
+
 @test "checks.tsv working dir escaping the project root is rejected" {
     run_checks_in_tmp 'required	test	..	sh	-c	true'
     [ "$status" -eq 1 ]
@@ -292,18 +367,50 @@ run_checks_in_tmp() {  # run_checks_in_tmp <line>...
     rm -rf "$TMPD"
 }
 
+# The detected-checks contract for a fixture, sorted and comment-free. Used by
+# both the golden-output tests and the Bash/PowerShell parity test.
+detected_lines() {  # detected_lines <fixture-dir>
+    ( cd "$1" && bash "$VERIFY" --emit-checks 2>/dev/null ) | grep -v '^$' | sort
+}
+
+@test "detection matches the golden contract for every deterministic fixture" {
+    # Golden files are the exact, sorted emitted contract. A detector that
+    # starts emitting unexpected checks (or silently drops a known one) fails
+    # here even when its fragments still appear in the output.
+    local gold f actual expected
+    for gold in "$FIX"/golden/*.tsv; do
+        f="$(basename "$gold" .tsv)"
+        actual="$(detected_lines "$FIX/$f")"
+        expected="$(cat "$gold")"
+        if [ "$actual" != "$expected" ]; then
+            echo "golden mismatch for fixture '$f'"
+            diff <(printf '%s\n' "$expected") <(printf '%s\n' "$actual") || true
+            return 1
+        fi
+    done
+}
+
 @test "Bash and PowerShell detection produce equivalent candidates" {
+    # The parity test must compare Bash's result with PowerShell's result, not
+    # PowerShell with itself: capture the Bash candidate BEFORE PowerShell
+    # overwrites the generated file, then compare every golden fixture.
     have pwsh || skip "pwsh not available"
-    TMPD="$(mktemp -d)"
-    printf '{"name":"x","scripts":{"test":"true"}}\n' > "$TMPD/package.json"
-    ( cd "$TMPD" && bash "$VERIFY" --detect-checks >/dev/null 2>&1 )
-    bash -c "cd '$TMPD' && pwsh -NoProfile -File '$REPO_ROOT/.agentic/scripts/verify.ps1' -DetectChecks >/dev/null 2>&1"
-    # compare the emitted check lines (comments differ between implementations)
-    local bash_checks ps_checks
-    bash_checks="$(grep -v '^#' "$TMPD/.agentic/checks.generated.tsv" | sort)"
-    rm -f "$TMPD/.agentic/checks.generated.tsv"
-    bash -c "cd '$TMPD' && pwsh -NoProfile -File '$REPO_ROOT/.agentic/scripts/verify.ps1' -DetectChecks >/dev/null 2>&1"
-    ps_checks="$(grep -v '^#' "$TMPD/.agentic/checks.generated.tsv" | sort)"
-    [ "$bash_checks" = "$ps_checks" ]
-    rm -rf "$TMPD"
+    local gold f bash_checks ps_checks TMPD
+    for gold in "$FIX"/golden/*.tsv; do
+        f="$(basename "$gold" .tsv)"
+        TMPD="$(mktemp -d)"
+        cp -r "$FIX/$f/." "$TMPD/"
+        ( cd "$TMPD" && bash "$VERIFY" --detect-checks >/dev/null 2>&1 )
+        bash_checks="$(grep -v '^#' "$TMPD/.agentic/checks.generated.tsv" | sort)"
+        rm -f "$TMPD/.agentic/checks.generated.tsv"
+        ( cd "$TMPD" && pwsh -NoProfile -File "$REPO_ROOT/.agentic/scripts/verify.ps1" -DetectChecks >/dev/null 2>&1 )
+        ps_checks="$(grep -v '^#' "$TMPD/.agentic/checks.generated.tsv" | sort)"
+        if [ "$bash_checks" != "$ps_checks" ]; then
+            echo "parity mismatch for fixture '$f'"
+            diff <(printf '%s\n' "$bash_checks") <(printf '%s\n' "$ps_checks") || true
+            rm -rf "$TMPD"
+            return 1
+        fi
+        rm -rf "$TMPD"
+    done
 }

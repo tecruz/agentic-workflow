@@ -1,0 +1,2 @@
+required	dotnet-lint	.	dotnet	format	--verify-no-changes
+required	dotnet-test	.	dotnet	test

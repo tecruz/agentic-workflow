@@ -1,0 +1,2 @@
+required	node-lint	.	npm	run	lint	--if-present
+required	node-test	.	npm	test

@@ -79,6 +79,73 @@ Describe 'verify.ps1 state model' {
         $out | Where-Object { $_ -match "`tuv`t" } | Should -Not -Be $null
     }
 
+    It 'a bun.lock project is detected as bun via --emit-checks' {
+        Push-Location (Join-Path $fix 'node-bun')
+        try { $out = & $verify -EmitChecks 2> $null; $code = $LASTEXITCODE } finally { Pop-Location }
+        $code | Should -Be 0
+        $out | Where-Object { $_ -match "`tbun`t" } | Should -Not -Be $null
+    }
+
+    It 'detection matches the golden contract for every deterministic fixture' {
+        # The checked-in golden files are the exact, sorted emitted contract.
+        # Catches missing and unexpected checks alike. The Bash implementation is
+        # held to the same contract by the Bats suite, so both stay in parity.
+        $goldenDir = Join-Path $fix 'golden'
+        Get-ChildItem -LiteralPath $goldenDir -Filter *.tsv | ForEach-Object {
+            $name = [System.IO.Path]::GetFileNameWithoutExtension($_.Name)
+            Push-Location (Join-Path $fix $name)
+            try {
+                $actual = (& $verify -EmitChecks 2> $null) | Where-Object { $_ -and -not $_.StartsWith('Detected:') }
+            }
+            finally { Pop-Location }
+            $actualSorted = (($actual | Sort-Object) -join "`n")
+            $actualSorted | Should -Be ((Get-Content -LiteralPath $_.FullName) -join "`n")
+        }
+    }
+
+    It 'a pnpm project without a lint script does not emit a lint check' {
+        $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vtest-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'package.json') -Value '{"name":"x","scripts":{"test":"true"}}'
+            Set-Content -LiteralPath (Join-Path $tmp 'pnpm-lock.yaml') -Value ''
+            Push-Location $tmp
+            try { $out = & $verify -EmitChecks 2> $null } finally { Pop-Location }
+            $out | Where-Object { $_ -match "`tpnpm`ttest" } | Should -Not -Be $null
+            $out | Where-Object { $_ -match 'node-lint' } | Should -BeNullOrEmpty
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'a Python project without Ruff config does not emit a ruff check' {
+        $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vtest-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'pyproject.toml') -Value "[project]`nname = `"x`""
+            Push-Location $tmp
+            try { $out = & $verify -EmitChecks 2> $null } finally { Pop-Location }
+            $out | Where-Object { $_ -match "`tpytest" } | Should -Not -Be $null
+            $out | Where-Object { $_ -match 'python-ruff' } | Should -BeNullOrEmpty
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'Maven detection emits checkstyle only when the pom configures it' {
+        $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vtest-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'pom.xml') -Value '<project></project>'
+            Push-Location $tmp
+            try { $out = & $verify -EmitChecks 2> $null } finally { Pop-Location }
+            $out | Where-Object { $_ -match 'maven-lint' } | Should -BeNullOrEmpty
+            Set-Content -LiteralPath (Join-Path $tmp 'pom.xml') -Value '<project><build><plugins><plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-checkstyle-plugin</artifactId></plugin></plugins></build></project>'
+            Push-Location $tmp
+            try { $out = & $verify -EmitChecks 2> $null } finally { Pop-Location }
+            $out | Where-Object { $_ -match 'maven-lint' } | Should -Not -Be $null
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
     It 'invalid checks.tsv (invalid requirement / missing fields / path traversal) exits nonzero' {
         $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vtest-' + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic') -Force | Out-Null
