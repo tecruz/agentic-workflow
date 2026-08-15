@@ -151,9 +151,13 @@ teardown() {
 @test "an update that fails after the merge phase restores the merged files" {
     bash "$INSTALL" . >/dev/null 2>&1
     printf '\n## Team notes\nkeep this content\n' >> AGENTS.md
-    chmod 444 .agentic/install-manifest.tsv
+    # Atomic temp-file writes can no longer be blocked by a read-only manifest
+    # (mv only needs directory write access). Force the update to fail inside
+    # write_manifest by turning the manifest path into a directory, which
+    # snapshot_file cannot copy.
+    rm .agentic/install-manifest.tsv
+    mkdir .agentic/install-manifest.tsv
     run bash "$INSTALL" .
-    chmod 644 .agentic/install-manifest.tsv
     [ "$status" -ne 0 ]
     grep -q "keep this content" AGENTS.md
     grep -q "AGENTIC-PROTOCOL-START" AGENTS.md
@@ -205,9 +209,11 @@ teardown() {
     bash "$INSTALL" . >/dev/null 2>&1
     printf '\n# custom\n' >> .agentic/WORKFLOW.md
     printf 'PRECIOUS CANDIDATE\n' > .agentic/WORKFLOW.md.new
-    chmod 444 .agentic/install-manifest.tsv
+    # see "an update that fails after the merge phase" for why a directory
+    # replaces the old read-only-manifest failure mechanism
+    rm .agentic/install-manifest.tsv
+    mkdir .agentic/install-manifest.tsv
     run bash "$INSTALL" .
-    chmod 644 .agentic/install-manifest.tsv
     [ "$status" -ne 0 ]
     grep -q "PRECIOUS CANDIDATE" .agentic/WORKFLOW.md.new
     grep -q "# custom" .agentic/WORKFLOW.md
@@ -447,10 +453,15 @@ teardown() {
     # The v1.0 layout shipped per-tool adapters and a pseudo-memory store with
     # no install manifest. Migrating runs a fresh install (reported legacy
     # artifacts), then --prune cleans the legacy FILES while legacy DIRECTORIES
-    # (which can hold user settings) are reported but preserved.
+    # (which can hold user settings) are reported but preserved. Each legacy
+    # file carries the framework signature so ownership is provable; a
+    # signature-less file would be preserved as an unverified conflict.
     mkdir -p .github .cursor/rules .windsurf Memory
-    touch .cursorrules .windsurfrules .clinerules CONVENTIONS.md
-    touch .github/copilot-instructions.md
+    printf '# Universal Agentic Development Protocol\n' > .cursorrules
+    printf '# Universal Agentic Development Protocol\n' > .windsurfrules
+    printf '# Universal Agentic Development Protocol\n' > .clinerules
+    printf '# Universal Agentic Development Protocol\n' > CONVENTIONS.md
+    printf '# Universal Agentic Development Protocol\n' > .github/copilot-instructions.md
     printf 'v1.0 project state\n' > Memory/PROJECT_STATE.md
     printf 'v1.0 decision log\n' > Memory/DECISION_LOG.md
     printf 'v1.0 user rules\n' > .cursor/rules/user.txt
@@ -480,7 +491,7 @@ teardown() {
 
 @test "uninstall after migration leaves seeds and legacy dirs intact" {
     mkdir -p Memory
-    touch .cursorrules
+    printf '# Universal Agentic Development Protocol\n' > .cursorrules
     printf 'project state\n' > Memory/PROJECT_STATE.md
     bash "$INSTALL" . >/dev/null 2>&1
     run bash "$INSTALL" . --uninstall
@@ -491,6 +502,118 @@ teardown() {
     [ -f .agentic/STATUS.md ]
     [ -f .agentic/checks.tsv ]
     [ ! -f .agentic/install-manifest.tsv ]
+}
+
+# ---------------------------------------------------------------------------
+# Adversarial manifest, plan read-only, and temp-file regression tests.
+# ---------------------------------------------------------------------------
+
+@test "a manifest path that escapes the project root is rejected before any mutation" {
+    mkdir -p "$TMP/proj"
+    cd "$TMP/proj"
+    bash "$INSTALL" . >/dev/null 2>&1
+    printf 'PRECIOUS SIBLING\n' > "$TMP/evil"
+    printf '../evil\tmanaged\t0000000000000000000000000000000000000000000000000000000000000000\n' >> .agentic/install-manifest.tsv
+    run bash "$INSTALL" "$TMP/proj" --prune
+    [ "$status" -ne 0 ]
+    [ "$(cat "$TMP/evil")" = "PRECIOUS SIBLING" ]
+    [ -f AGENTS.md ]
+    grep -q '^\.\./evil' .agentic/install-manifest.tsv
+}
+
+@test "a manifest path outside the framework set is rejected before any mutation" {
+    bash "$INSTALL" . >/dev/null 2>&1
+    printf 'evil.txt\tmanaged\t0000000000000000000000000000000000000000000000000000000000000000\n' >> .agentic/install-manifest.tsv
+    run bash "$INSTALL" . --prune
+    [ "$status" -ne 0 ]
+    [ -f AGENTS.md ]
+}
+
+@test "an invalid manifest category is rejected before any mutation" {
+    bash "$INSTALL" . >/dev/null 2>&1
+    printf 'AGENTS.md\tbogus\t0000000000000000000000000000000000000000000000000000000000000000\n' >> .agentic/install-manifest.tsv
+    run bash "$INSTALL" . --prune
+    [ "$status" -ne 0 ]
+    [ -f AGENTS.md ]
+}
+
+@test "an invalid manifest blocks a plain update before any mutation" {
+    bash "$INSTALL" . >/dev/null 2>&1
+    printf 'evil.txt\tmanaged\t0000000000000000000000000000000000000000000000000000000000000000\n' >> .agentic/install-manifest.tsv
+    run bash "$INSTALL" .
+    [ "$status" -ne 0 ]
+    [ -f AGENTS.md ]
+}
+
+@test "--prune never rewrites a malformed merge file" {
+    printf '%s\n' '<!-- @@AGENTIC-PROTOCOL-START@@ -->' 'broken' '<!-- @@AGENTIC-PROTOCOL-START@@ -->' > GEMINI.md
+    bash "$INSTALL" . --tools all >/dev/null 2>&1
+    run bash "$INSTALL" . --prune --tools claude
+    [ "$status" -eq 0 ]
+    [ -f GEMINI.md ]
+    [ "$(grep -c -F 'AGENTIC-PROTOCOL-START' GEMINI.md)" -eq 2 ]
+    grep -q "broken" GEMINI.md
+}
+
+@test "--prune --plan is byte-for-byte read-only" {
+    mkdir -p "$TMP/proj"
+    cd "$TMP/proj"
+    bash "$INSTALL" . --tools all >/dev/null 2>&1
+    printf '\n## Team notes\nkeep this\n' >> AGENTS.md
+    cp -r . "$TMP/before-snap"
+    run bash "$INSTALL" "$TMP/proj" --prune --plan --tools claude
+    [ "$status" -eq 0 ]
+    diff -r "$TMP/before-snap" . >/dev/null
+    [ ! -d .agentic-backup ]
+}
+
+@test "--uninstall --plan is byte-for-byte read-only" {
+    mkdir -p "$TMP/proj"
+    cd "$TMP/proj"
+    bash "$INSTALL" . --tools all >/dev/null 2>&1
+    cp -r . "$TMP/before-snap"
+    run bash "$INSTALL" "$TMP/proj" --uninstall --plan
+    [ "$status" -eq 0 ]
+    diff -r "$TMP/before-snap" . >/dev/null
+    [ ! -d .agentic-backup ]
+}
+
+@test "unverified legacy files are preserved by --prune without the new flag" {
+    printf 'my custom claude rules\n' > .clinerules
+    bash "$INSTALL" . >/dev/null 2>&1
+    run bash "$INSTALL" . --prune
+    [ "$status" -eq 0 ]
+    [ -f .clinerules ]
+    grep -q "my custom claude rules" .clinerules
+    [ ! -d .agentic-backup ]
+}
+
+@test "--prune-unverified-legacy backs up then removes unverified legacy files" {
+    printf 'my custom claude rules\n' > .clinerules
+    bash "$INSTALL" . >/dev/null 2>&1
+    run bash "$INSTALL" . --prune --prune-unverified-legacy
+    [ "$status" -eq 0 ]
+    [ ! -f .clinerules ]
+    [ -f .agentic-backup/.clinerules ]
+    grep -q "my custom claude rules" .agentic-backup/.clinerules
+}
+
+@test "--prune-unverified-legacy --plan makes no changes" {
+    printf 'my custom claude rules\n' > .clinerules
+    bash "$INSTALL" . >/dev/null 2>&1
+    run bash "$INSTALL" . --prune --prune-unverified-legacy --plan
+    [ "$status" -eq 0 ]
+    [ -f .clinerules ]
+    [ ! -d .agentic-backup ]
+}
+
+@test "a pre-existing .agentic-tmp file is never clobbered" {
+    mkdir -p .agentic
+    printf 'PRECIOUS TMP\n' > .agentic/install-manifest.tsv.agentic-tmp
+    printf 'PRECIOUS TMP\n' > .agentic/checks.tsv.agentic-tmp
+    bash "$INSTALL" . --tools claude >/dev/null 2>&1
+    [ "$(cat .agentic/install-manifest.tsv.agentic-tmp)" = "PRECIOUS TMP" ]
+    [ "$(cat .agentic/checks.tsv.agentic-tmp)" = "PRECIOUS TMP" ]
 }
 
 # ---------------------------------------------------------------------------

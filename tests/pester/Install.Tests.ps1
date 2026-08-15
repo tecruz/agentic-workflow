@@ -192,11 +192,15 @@ Describe 'install.ps1' {
         try {
             & $install -Target $tmp *> $null
             Add-Content -LiteralPath (Join-Path $tmp 'AGENTS.md') -Value "`n## Team notes`nkeep this content"
+            # Atomic temp-file writes can no longer be reliably blocked by a
+            # read-only manifest; force the failure inside Write-Manifest by
+            # turning the manifest path into a directory (mirrors the bats
+            # suite, which uses the same mechanism on bash).
             $mf = Join-Path $tmp '.agentic\install-manifest.tsv'
-            Set-ItemProperty -LiteralPath $mf -Name IsReadOnly -Value $true
+            Remove-Item -LiteralPath $mf -Force
+            New-Item -ItemType Directory -Path $mf | Out-Null
             & $install -Target $tmp *> $null
             $LASTEXITCODE | Should -Not -Be 0
-            Set-ItemProperty -LiteralPath $mf -Name IsReadOnly -Value $false
             (Get-Content -Raw (Join-Path $tmp 'AGENTS.md')) -match 'keep this content' | Should -Be $true
             (Get-Content -Raw (Join-Path $tmp 'AGENTS.md')) -match 'AGENTIC-PROTOCOL-START' | Should -Be $true
         }
@@ -255,11 +259,13 @@ Describe 'install.ps1' {
             & $install -Target $tmp *> $null
             Add-Content -LiteralPath (Join-Path $tmp '.agentic\WORKFLOW.md') -Value "`n# custom"
             Set-Content -LiteralPath (Join-Path $tmp '.agentic\WORKFLOW.md.new') -Value 'PRECIOUS CANDIDATE'
+            # see "an update that fails after the merge phase" for why a
+            # directory replaces the old read-only-manifest failure mechanism
             $mf = Join-Path $tmp '.agentic\install-manifest.tsv'
-            Set-ItemProperty -LiteralPath $mf -Name IsReadOnly -Value $true
+            Remove-Item -LiteralPath $mf -Force
+            New-Item -ItemType Directory -Path $mf | Out-Null
             & $install -Target $tmp *> $null
             $LASTEXITCODE | Should -Not -Be 0
-            Set-ItemProperty -LiteralPath $mf -Name IsReadOnly -Value $false
             (Get-Content -Raw (Join-Path $tmp '.agentic\WORKFLOW.md.new')) -match 'PRECIOUS CANDIDATE' | Should -Be $true
         }
         finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
@@ -570,8 +576,11 @@ Describe 'install.ps1' {
             foreach ($d in @('.github', '.cursor\rules', '.windsurf', 'Memory')) {
                 New-Item -ItemType Directory -Path (Join-Path $tmp $d) -Force | Out-Null
             }
+            # each legacy file carries the framework signature so ownership is
+            # provable; a signature-less file is preserved as an unverified
+            # conflict (see the adversarial tests below)
             foreach ($f in @('.cursorrules', '.windsurfrules', '.clinerules', 'CONVENTIONS.md', '.github\copilot-instructions.md')) {
-                Set-Content -LiteralPath (Join-Path $tmp $f) -Value 'v1.0 adapter'
+                Set-Content -LiteralPath (Join-Path $tmp $f) -Value '# Universal Agentic Development Protocol'
             }
             Set-Content -LiteralPath (Join-Path $tmp 'Memory\PROJECT_STATE.md') -Value 'v1.0 project state'
             Set-Content -LiteralPath (Join-Path $tmp '.cursor\rules\user.txt') -Value 'v1.0 user rules'
@@ -596,6 +605,170 @@ Describe 'install.ps1' {
             Test-Path (Join-Path $tmp '.cursor\rules\user.txt') | Should -Be $true
             Test-Path (Join-Path $tmp '.agentic\ARCHITECTURE.md') | Should -Be $true
             (Get-Content -Raw (Join-Path $tmp 'AGENTS.md')) -match 'AGENTIC-PROTOCOL-START' | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    # -----------------------------------------------------------------------
+    # Adversarial manifest, plan read-only, and temp-file regression tests.
+    # -----------------------------------------------------------------------
+
+    It 'a manifest path that escapes the project root is rejected before any mutation' {
+        $tmp = New-TestDir
+        $evil = Join-Path (Split-Path -Parent $tmp) 'evil'
+        try {
+            & $install -Target $tmp *> $null
+            Set-Content -LiteralPath $evil -Value 'PRECIOUS SIBLING'
+            Add-Content -LiteralPath (Join-Path $tmp '.agentic\install-manifest.tsv') -Value "`n../evil`tmanaged`t0000000000000000000000000000000000000000000000000000000000000000"
+            & $install -Target $tmp -Prune *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            (Get-Content -Raw $evil) -match 'PRECIOUS SIBLING' | Should -Be $true
+            Test-Path (Join-Path $tmp 'AGENTS.md') | Should -Be $true
+        }
+        finally {
+            Remove-Item -LiteralPath $evil -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'a manifest path outside the framework set is rejected before any mutation' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp *> $null
+            Add-Content -LiteralPath (Join-Path $tmp '.agentic\install-manifest.tsv') -Value "`nevil.txt`tmanaged`t0000000000000000000000000000000000000000000000000000000000000000"
+            & $install -Target $tmp -Prune *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            Test-Path (Join-Path $tmp 'AGENTS.md') | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'an invalid manifest category is rejected before any mutation' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp *> $null
+            Add-Content -LiteralPath (Join-Path $tmp '.agentic\install-manifest.tsv') -Value "`nAGENTS.md`tbogus`t0000000000000000000000000000000000000000000000000000000000000000"
+            & $install -Target $tmp -Prune *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            Test-Path (Join-Path $tmp 'AGENTS.md') | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'an invalid manifest blocks a plain update before any mutation' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp *> $null
+            Add-Content -LiteralPath (Join-Path $tmp '.agentic\install-manifest.tsv') -Value "`nevil.txt`tmanaged`t0000000000000000000000000000000000000000000000000000000000000000"
+            & $install -Target $tmp *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            Test-Path (Join-Path $tmp 'AGENTS.md') | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-Prune never rewrites a malformed merge file' {
+        $tmp = New-TestDir
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'GEMINI.md') -Value "<!-- @@AGENTIC-PROTOCOL-START@@ -->`nbroken`n<!-- @@AGENTIC-PROTOCOL-START@@ -->"
+            & $install -Target $tmp -Tools all *> $null
+            & $install -Target $tmp -Prune -Tools claude *> $null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path (Join-Path $tmp 'GEMINI.md') | Should -Be $true
+            $gem = Get-Content -Raw (Join-Path $tmp 'GEMINI.md')
+            ([regex]::Matches($gem, 'AGENTIC-PROTOCOL-START')).Count | Should -Be 2
+            $gem -match 'broken' | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-Prune -Plan is byte-for-byte read-only' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp -Tools all *> $null
+            Add-Content -LiteralPath (Join-Path $tmp 'AGENTS.md') -Value "`n## Team notes`nkeep this"
+            $snap = @(Get-ChildItem -LiteralPath $tmp -Recurse -File -Force | ForEach-Object {
+                '{0}={1}' -f $_.FullName.Substring($tmp.Length), (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+            } | Sort-Object) -join "`n"
+            & $install -Target $tmp -Prune -Plan -Tools claude *> $null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path (Join-Path $tmp '.agentic-backup') | Should -Be $false
+            $after = @(Get-ChildItem -LiteralPath $tmp -Recurse -File -Force | ForEach-Object {
+                '{0}={1}' -f $_.FullName.Substring($tmp.Length), (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+            } | Sort-Object) -join "`n"
+            $after | Should -Be $snap
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-Uninstall -Plan is byte-for-byte read-only' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp -Tools all *> $null
+            $snap = @(Get-ChildItem -LiteralPath $tmp -Recurse -File -Force | ForEach-Object {
+                '{0}={1}' -f $_.FullName.Substring($tmp.Length), (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+            } | Sort-Object) -join "`n"
+            & $install -Target $tmp -Uninstall -Plan *> $null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path (Join-Path $tmp '.agentic-backup') | Should -Be $false
+            $after = @(Get-ChildItem -LiteralPath $tmp -Recurse -File -Force | ForEach-Object {
+                '{0}={1}' -f $_.FullName.Substring($tmp.Length), (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+            } | Sort-Object) -join "`n"
+            $after | Should -Be $snap
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'unverified legacy files are preserved by -Prune without the new flag' {
+        $tmp = New-TestDir
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp '.clinerules') -Value 'my custom claude rules'
+            & $install -Target $tmp *> $null
+            & $install -Target $tmp -Prune *> $null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path (Join-Path $tmp '.clinerules') | Should -Be $true
+            (Get-Content -Raw (Join-Path $tmp '.clinerules')) -match 'my custom claude rules' | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic-backup') | Should -Be $false
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-PruneUnverifiedLegacy backs up then removes unverified legacy files' {
+        $tmp = New-TestDir
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp '.clinerules') -Value 'my custom claude rules'
+            & $install -Target $tmp *> $null
+            & $install -Target $tmp -Prune -PruneUnverifiedLegacy *> $null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path (Join-Path $tmp '.clinerules') | Should -Be $false
+            (Get-Content -Raw (Join-Path $tmp '.agentic-backup\.clinerules')) -match 'my custom claude rules' | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-PruneUnverifiedLegacy -Plan makes no changes' {
+        $tmp = New-TestDir
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp '.clinerules') -Value 'my custom claude rules'
+            & $install -Target $tmp *> $null
+            & $install -Target $tmp -Prune -PruneUnverifiedLegacy -Plan *> $null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path (Join-Path $tmp '.clinerules') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic-backup') | Should -Be $false
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'a pre-existing .agentic-tmp file is never clobbered' {
+        $tmp = New-TestDir
+        try {
+            $agentic = Join-Path $tmp '.agentic'
+            New-Item -ItemType Directory -Path $agentic -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $agentic 'install-manifest.tsv.agentic-tmp') -Value 'PRECIOUS TMP'
+            Set-Content -LiteralPath (Join-Path $agentic 'checks.tsv.agentic-tmp') -Value 'PRECIOUS TMP'
+            & $install -Target $tmp -Tools claude *> $null
+            (Get-Content -Raw (Join-Path $agentic 'install-manifest.tsv.agentic-tmp')) -match 'PRECIOUS TMP' | Should -Be $true
+            (Get-Content -Raw (Join-Path $agentic 'checks.tsv.agentic-tmp')) -match 'PRECIOUS TMP' | Should -Be $true
         }
         finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
     }

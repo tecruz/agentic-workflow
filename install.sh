@@ -31,6 +31,10 @@
 #                        files, the install manifest, and v1.0 legacy files.
 #                        Project-owned seed files and custom merge content are
 #                        preserved.
+#   --prune-unverified-legacy Remove v1.0 legacy files whose content cannot be
+#                        proven to be framework material. Every such file is
+#                        backed up to .agentic-backup/ first. Without this flag
+#                        unverifiable legacy files are preserved as conflicts.
 #   --backup             Back up files to .agentic-backup/ before modifying.
 #   --tools LIST         Comma-separated tool adapters: claude,gemini,aider,all.
 #                        Default: claude,gemini,aider. AGENTS.md is always
@@ -68,6 +72,10 @@ Options:
                        files, the install manifest, and v1.0 legacy files.
                        Project-owned seed files and custom merge content are
                        preserved.
+  --prune-unverified-legacy Remove v1.0 legacy files whose content cannot be
+                       proven to be framework material. Every such file is
+                       backed up to .agentic-backup/ first. Without this flag
+                       unverifiable legacy files are preserved as conflicts.
   --backup             Back up files to .agentic-backup/ before modifying.
   --tools LIST         Comma-separated tool adapters: claude,gemini,aider,all.
                        Default: claude,gemini,aider. AGENTS.md is always
@@ -96,6 +104,7 @@ ACCEPT_DETECTED_CHECKS=0
 UPDATE=0
 PRUNE=0
 UNINSTALL=0
+PRUNE_UNVERIFIED_LEGACY=0
 TOOLS_RAW="claude,gemini,aider"
 
 START_MARKER='<!-- @@AGENTIC-PROTOCOL-START@@ -->'
@@ -106,6 +115,7 @@ while [ $# -gt 0 ]; do
         --plan) PLAN=1 ;;
         --update) UPDATE=1 ;;
         --prune) PRUNE=1 ;;
+        --prune-unverified-legacy) PRUNE_UNVERIFIED_LEGACY=1 ;;
         --uninstall) UNINSTALL=1 ;;
         --backup) BACKUP=1 ;;
         --replace-managed|--force) REPLACE_MANAGED=1 ;;
@@ -192,8 +202,9 @@ done
 
 # v1.0 shipped per-tool adapter files that were removed in 2.x (AGENTS.md is
 # the single canonical protocol). On update they are only reported; --prune and
-# --uninstall remove the files. Legacy directories can hold user settings, so
-# they are always report-only and never auto-removed.
+# --uninstall remove a legacy file only when its content can be proven to be a
+# v1.0 framework artifact (see legacy_owned). Legacy directories can hold user
+# settings, so they are always report-only and never auto-removed.
 LEGACY_FILES=(
     ".cursorrules"
     ".windsurfrules"
@@ -207,12 +218,47 @@ LEGACY_DIRS=(
     "Memory"
 )
 
+# SHA-256 of the exact v1.0 shipped content (bytes of the v1.0.0 release).
+# A checksum match proves the file is untouched framework material. Content
+# that does not match byte-for-byte (for example after line-ending conversion)
+# still matches the framework signature via legacy_owned().
+legacy_v10_checksum() {
+    case "$1" in
+        .cursorrules) echo "010c2059541568ccf8fb7cb09792f741810814d98534b0bc2bc186124187a0a7" ;;
+        .windsurfrules) echo "3d5dd1201a4cd96808da9099eeed85f310d41b00b7661e14e1e132b70651c1c8" ;;
+        .clinerules) echo "af90e132e56e8a782a16e6ec5a622564af639fae3f4e075b082c93e73628c099" ;;
+        CONVENTIONS.md) echo "b6e8886439aee9e5a34c10d67536dc5a75cc2e548c2914ed4ae5946e15b3ea20" ;;
+        .github/copilot-instructions.md) echo "3f99180659e22a3bf7a707cb36e39bd41e033b217576193aab101279fe5ceda2" ;;
+    esac
+}
+
+# Every path this installer may legitimately record in the install manifest,
+# independent of the current tool selection so that deselected adapters can
+# still be pruned safely. Used to validate a previous manifest before any
+# mutation: an entry outside this set is evidence of tampering.
+ALL_KNOWN_FILES=( "${MANAGED_FILES[@]}" "${SEED_FILES[@]}" "${MERGE_FILES[@]}" )
+for _optional in ".aider.conf.yml" "CLAUDE.md" "GEMINI.md"; do
+    case " ${ALL_KNOWN_FILES[*]} " in
+        *" $_optional "*) ;;
+        *) ALL_KNOWN_FILES+=("$_optional") ;;
+    esac
+done
+ALL_KNOWN_FILES+=( ".agentic/checks.tsv" ".agentic/install-manifest.tsv" )
+ALL_KNOWN_FILES+=( "${LEGACY_FILES[@]}" )
+
 BACKUP_DIR=""
-MANIFEST_TMP="$(mktemp)"
-SNAP_DIR="$(mktemp -d)"
+# Scratch files are created lazily and only in a non-plan run: --plan must
+# never create snapshots or manifest scratch files, byte-for-byte read-only.
+MANIFEST_TMP=""
+SNAP_DIR=""
+TMP_FILES=()
 CHANGED_RELS=()
 BACKUP_DIR_EXISTED=0
 [ -e "$TARGET_DIR/.agentic-backup" ] && BACKUP_DIR_EXISTED=1
+if [ "$PLAN" -eq 0 ]; then
+    MANIFEST_TMP="$(mktemp)"
+    SNAP_DIR="$(mktemp -d)"
+fi
 
 # Transactional safety: every file we are about to modify is snapshotted first;
 # if the install fails partway through, rollback() restores the target to its
@@ -237,7 +283,7 @@ snapshot_file() {
 rollback() {
     local rel dst snap dir
     echo "ERROR: installation failed; restoring '$TARGET_DIR' to its prior state." >&2
-    for rel in "${CHANGED_RELS[@]}"; do
+    for rel in "${CHANGED_RELS[@]:-}"; do
         dst="$TARGET_DIR/$rel"
         snap="$SNAP_DIR/${rel//\//_}"
         if [ -f "$snap.present" ]; then
@@ -245,12 +291,11 @@ rollback() {
         else
             rm -f "$dst" 2>/dev/null || true
         fi
-        rm -f "${dst}.agentic-tmp" 2>/dev/null || true
     done
     # A failed fresh install can leave behind directories that did not exist
     # before (e.g. .agentic/). Remove any directory that became empty only
     # because of this transaction, walking up toward the project root.
-    for rel in "${CHANGED_RELS[@]}"; do
+    for rel in "${CHANGED_RELS[@]:-}"; do
         dir="$(dirname "$TARGET_DIR/$rel")"
         while [ "$dir" != "$TARGET_DIR" ] && [ "$dir" != "/" ]; do
             [ "$dir" = "$BACKUP_DIR" ] && [ "$BACKUP_DIR_EXISTED" -eq 1 ] && break
@@ -264,15 +309,28 @@ rollback() {
 }
 
 cleanup() {
-    local rc=$?
+    local rc=$? f
     if [ "$rc" -ne 0 ]; then
         rollback
     fi
-    rm -rf "$SNAP_DIR" 2>/dev/null || true
-    rm -f "$MANIFEST_TMP" 2>/dev/null || true
+    for f in "${TMP_FILES[@]:-}"; do
+        rm -f "$f" 2>/dev/null || true
+    done
+    [ -n "$SNAP_DIR" ] && rm -rf "$SNAP_DIR" 2>/dev/null || true
+    [ -n "$MANIFEST_TMP" ] && rm -f "$MANIFEST_TMP" 2>/dev/null || true
     exit "$rc"
 }
 trap cleanup EXIT
+
+# Creates an unpredictable scratch file next to $1 (same filesystem, so the
+# final `mv` is atomic) and records it for cleanup. Never a predictable
+# ".agentic-tmp" name: concurrent installs cannot clobber each other.
+new_tmp() {
+    local f
+    f="$(mktemp "$1.XXXXXX")" || return 1
+    TMP_FILES+=("$f")
+    printf '%s' "$f"
+}
 
 manifest_file() { printf '%s' "$TARGET_DIR/.agentic/install-manifest.tsv"; }
 
@@ -384,6 +442,202 @@ install_seed_checks() {
 }
 
 # ---------------------------------------------------------------------------
+# Shared merge-marker parsing. Both install_merge and the prune/uninstall path
+# classify a merge file the same way so their behavior can never diverge:
+#   absent    file does not exist
+#   empty     file exists but has no non-whitespace content
+#   plain     file has content but no framework markers
+#   valid     exactly one start + one end marker, end after start
+#   malformed any other marker arrangement (never rewritten in place)
+# merge_state <rel> sets MERGE_STATE and, for a valid block, MS_START/MS_END.
+# ---------------------------------------------------------------------------
+MERGE_STATE=""
+MS_START=""
+MS_END=""
+
+merge_state() {
+    local rel="$1" dst="$TARGET_DIR/$rel"
+    local start_count end_count start_line end_line
+    MERGE_STATE=""
+    MS_START=""
+    MS_END=""
+    if [ ! -e "$dst" ]; then
+        MERGE_STATE="absent"
+        return 0
+    fi
+    start_count="$(grep -c -F -- "$START_MARKER" "$dst" 2>/dev/null || true)"
+    end_count="$(grep -c -F -- "$END_MARKER" "$dst" 2>/dev/null || true)"
+    start_line="$(grep -n -F -- "$START_MARKER" "$dst" 2>/dev/null | head -n1 | cut -d: -f1 || true)"
+    end_line="$(grep -n -F -- "$END_MARKER" "$dst" 2>/dev/null | head -n1 | cut -d: -f1 || true)"
+    if [ "$start_count" -gt 1 ] || [ "$end_count" -gt 1 ] \
+        || { [ "$start_count" -eq 1 ] && [ "$end_count" -eq 0 ]; } \
+        || { [ "$start_count" -eq 0 ] && [ "$end_count" -eq 1 ]; } \
+        || { [ "$start_count" -eq 1 ] && [ "$end_count" -eq 1 ] && [ "$end_line" -le "$start_line" ]; }; then
+        MERGE_STATE="malformed"
+    elif [ "$start_count" -eq 1 ] && [ "$end_count" -eq 1 ]; then
+        MERGE_STATE="valid"
+        MS_START="$start_line"
+        MS_END="$end_line"
+    elif [ -s "$dst" ]; then
+        MERGE_STATE="plain"
+    else
+        MERGE_STATE="empty"
+    fi
+    return 0
+}
+
+# True when removing the managed block from $rel would leave no non-whitespace
+# content behind. Read-only: lets --plan report the would-be outcome.
+merge_remainder_blank() {
+    local rel="$1" dst="$TARGET_DIR/$rel"
+    merge_state "$rel"
+    [ "$MERGE_STATE" = "valid" ] || return 1
+    if {
+        [ "$MS_START" -gt 1 ] && head -n "$((MS_START - 1))" "$dst"
+        tail -n +"$((MS_END + 1))" "$dst"
+    } | grep -q '[^[:space:]]'; then
+        return 1
+    fi
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# Previous-manifest validation. The manifest is the record of what this
+# installer may later prune or replace; it is never trusted implicitly. A
+# malformed entry hard-fails the run before anything is written, so a tampered
+# or adversarial manifest can never steer the installer into removing files
+# outside its documented scope.
+# ---------------------------------------------------------------------------
+
+# Lexical checks: a valid manifest path is relative, has no empty / "." / ".."
+# segments, no drive-letter prefix, no backslashes, and no control characters.
+lexical_manifest_path_ok() {
+    local p="$1" seg
+    [ -n "$p" ] || return 1
+    case "$p" in
+        /*) return 1 ;;
+        *[[:cntrl:]]*) return 1 ;;
+        *'\\'*) return 1 ;;
+        [A-Za-z]:*) return 1 ;;
+    esac
+    while [ -n "$p" ]; do
+        case "$p" in
+            */*) seg="${p%%/*}"; p="${p#*/}" ;;
+            *) seg="$p"; p="" ;;
+        esac
+        case "$seg" in
+            '' | '.' | '..') return 1 ;;
+        esac
+    done
+    return 0
+}
+
+# Resolves $1 to a canonical absolute path, following directory symlinks via
+# `cd -P` and the final component via readlink when it is itself a symlink.
+# Returns 1 when the path cannot be resolved.
+resolve_physical() {
+    local p="$1" depth="${2:-0}" parent name target new
+    [ "$depth" -lt 8 ] || return 1
+    parent="$(cd "$(dirname "$p")" 2>/dev/null && pwd -P)" || return 1
+    name="$(basename "$p")"
+    if [ -L "$p" ]; then
+        target="$(readlink "$p")"
+        case "$target" in
+            /*) new="$target" ;;
+            *) new="$parent/$target" ;;
+        esac
+        resolve_physical "$new" "$((depth + 1))"
+    else
+        printf '%s/%s\n' "$parent" "$name"
+    fi
+}
+
+# True when $rel stays physically at or beneath the physical project root. A
+# symlinked directory inside the project that points outside, or a final
+# component that is a symlink to an outside path, fails confinement. Paths
+# whose parent does not exist cannot escape and are accepted.
+physical_within_root() {
+    local rel="$1" resolved resolved_root
+    if [ -e "$TARGET_DIR/$(dirname "$rel")" ] || [ -L "$TARGET_DIR/$rel" ]; then
+        resolved="$(resolve_physical "$TARGET_DIR/$rel" 2>/dev/null)" || return 1
+        resolved_root="$(cd "$TARGET_DIR" && pwd -P)"
+        case "$resolved" in
+            "$resolved_root" | "$resolved_root/"*) return 0 ;;
+            *) return 1 ;;
+        esac
+    fi
+    return 0
+}
+
+allowed_manifest_path() {
+    local rel="$1" r
+    for r in "${ALL_KNOWN_FILES[@]}"; do
+        [ "$r" = "$rel" ] && return 0
+    done
+    return 1
+}
+
+# Validates the on-disk install manifest when one exists; returns 1 on any
+# malformed entry. Read-only, so it also runs under --plan.
+validate_previous_manifest() {
+    local mf line_num=0 line seen="" first=1 p c s
+    mf="$(manifest_file)"
+    [ -f "$mf" ] || return 0
+    while IFS= read -r line || [ -n "$line" ]; do
+        line_num=$((line_num + 1))
+        line="${line%$'\r'}"
+        [ -z "$line" ] && continue
+        case "$line" in
+            \#*) continue ;;
+        esac
+        if [ "$first" -eq 1 ]; then
+            first=0
+            if ! [[ "$line" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                echo "ERROR: install manifest line $line_num is not a valid version header ('$line')." >&2
+                return 1
+            fi
+            continue
+        fi
+        IFS=$'\t' read -r p c s <<< "$line"
+        if [ -z "$p" ] || [ -z "$c" ] || [ -z "$s" ]; then
+            echo "ERROR: install manifest line $line_num is malformed (expected path<TAB>category<TAB>sha256)." >&2
+            return 1
+        fi
+        case "$c" in
+            managed|merge|seed) ;;
+            *) echo "ERROR: install manifest line $line_num has invalid category '$c' for '$p'." >&2; return 1 ;;
+        esac
+        if ! [[ "$s" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "ERROR: install manifest line $line_num has invalid checksum for '$p'." >&2
+            return 1
+        fi
+        if ! lexical_manifest_path_ok "$p"; then
+            echo "ERROR: install manifest line $line_num has invalid path '$p'." >&2
+            return 1
+        fi
+        case " $seen " in
+            *" $p "*)
+                echo "ERROR: install manifest line $line_num has duplicate path '$p'." >&2
+                return 1 ;;
+        esac
+        seen="$seen $p"
+        if ! allowed_manifest_path "$p"; then
+            echo "ERROR: install manifest line $line_num records path '$p', which is not a framework-managed path." >&2
+            return 1
+        fi
+        if ! physical_within_root "$p"; then
+            echo "ERROR: install manifest line $line_num path '$p' escapes the project root." >&2
+            return 1
+        fi
+    done < "$mf"
+    if [ "$first" -eq 1 ]; then
+        echo "ERROR: install manifest '$mf' contains no version header." >&2
+        return 1
+    fi
+    return 0
+}
+
+# ---------------------------------------------------------------------------
 # Migration, pruning, and uninstall. A previous install is described by the
 # on-disk manifest; a file is obsolete when it is no longer in the desired set
 # (for example a deselected tool adapter). Managed files are pruned only when
@@ -419,20 +673,23 @@ file_is_blank() {  # file_is_blank <file>
 # Removes a well-formed marker-delimited managed block from a merge file.
 # Returns 0 on success; 1 when the markers are malformed (never rewritten).
 strip_merge_block() {
-    local rel="$1" start_line end_line tmp
+    local rel="$1" tmp
     local dst="$TARGET_DIR/$rel"
-    start_line="$(grep -n -F -- "$START_MARKER" "$dst" 2>/dev/null | head -n1 | cut -d: -f1 || true)"
-    end_line="$(grep -n -F -- "$END_MARKER" "$dst" 2>/dev/null | head -n1 | cut -d: -f1 || true)"
-    if [ -z "$start_line" ] || [ -z "$end_line" ] || [ "$end_line" -le "$start_line" ]; then
+    merge_state "$rel"
+    if [ "$MERGE_STATE" != "valid" ]; then
         return 1
     fi
-    tmp="${dst}.agentic-tmp"
-    if ! ( if [ "$start_line" -gt 1 ]; then head -n "$((start_line - 1))" "$dst"; fi; tail -n +"$((end_line + 1))" "$dst" ) > "$tmp"; then
+    [ "$PLAN" -eq 1 ] && return 0
+    snapshot_file "$rel"
+    [ "$BACKUP" -eq 1 ] && backup_file "$rel"
+    tmp="$(new_tmp "$dst")"
+    if ! (
+        if [ "$MS_START" -gt 1 ]; then head -n "$((MS_START - 1))" "$dst"; fi
+        tail -n +"$((MS_END + 1))" "$dst"
+    ) > "$tmp"; then
         rm -f "$tmp" 2>/dev/null || true
         return 1
     fi
-    snapshot_file "$rel"
-    [ "$BACKUP" -eq 1 ] && backup_file "$rel"
     mv "$tmp" "$dst"
     return 0
 }
@@ -446,19 +703,44 @@ prune_entry() {
             return 0 ;;
         merge)
             if [ -e "$dst" ]; then
-                if strip_merge_block "$rel"; then
-                    if file_is_blank "$dst"; then
-                        [ "$PLAN" -eq 1 ] && { echo "  prune  $rel (managed block removed; file would be empty)"; return 0; }
+                merge_state "$rel"
+                case "$MERGE_STATE" in
+                    malformed)
+                        echo "  conflict $rel (malformed merge markers; not pruned)"
+                        return 0 ;;
+                    valid)
+                        if [ "$PLAN" -eq 1 ]; then
+                            if merge_remainder_blank "$rel"; then
+                                echo "  prune  $rel (managed block removed; file would be empty)"
+                            else
+                                echo "  prune  $rel (managed block removed; custom content preserved)"
+                            fi
+                        else
+                            if strip_merge_block "$rel"; then
+                                if file_is_blank "$dst"; then
+                                    snapshot_file "$rel"
+                                    [ "$BACKUP" -eq 1 ] && backup_file "$rel"
+                                    rm -f "$dst"
+                                    echo "  prune  $rel (managed block removed; file removed)"
+                                else
+                                    echo "  prune  $rel (managed block removed; custom content preserved)"
+                                fi
+                            else
+                                echo "  conflict $rel (malformed merge markers; not pruned)"
+                            fi
+                        fi
+                        return 0 ;;
+                    plain)
+                        echo "  note   $rel (no managed block found; custom content preserved)"
+                        return 0 ;;
+                    empty)
+                        [ "$PLAN" -eq 1 ] && { echo "  prune  $rel (empty; no managed content)"; return 0; }
                         snapshot_file "$rel"
                         [ "$BACKUP" -eq 1 ] && backup_file "$rel"
                         rm -f "$dst"
-                        echo "  prune  $rel (managed block removed; file removed)"
-                    else
-                        echo "  prune  $rel (managed block removed; custom content preserved)"
-                    fi
-                else
-                    echo "  conflict $rel (malformed merge markers; not pruned)"
-                fi
+                        echo "  prune  $rel (empty; no managed content)"
+                        return 0 ;;
+                esac
             fi
             return 0 ;;
         managed)
@@ -480,16 +762,48 @@ prune_entry() {
     esac
 }
 
-# v1.0 adapter files are removed only by explicit --prune/--uninstall.
+# True when $rel (a legacy file path) is provably a framework artifact: a
+# checksum match against the exact v1.0 content, a framework signature in the
+# content, or a record in the previous install manifest.
+legacy_owned() {
+    local rel="$1" known cur
+    known="$(legacy_v10_checksum "$rel")"
+    if [ -n "$known" ]; then
+        cur="$(cksum_file "$TARGET_DIR/$rel")"
+        [ "$cur" = "$known" ] && return 0
+    fi
+    if grep -q -E '@@AGENTIC-PROTOCOL-|Universal Agentic Development Protocol|\.agentic/Memory/' "$TARGET_DIR/$rel" 2>/dev/null; then
+        return 0
+    fi
+    if awk -F'\t' -v p="$rel" '$1==p {found=1} END {exit !found}' "$(manifest_file)" 2>/dev/null; then
+        return 0
+    fi
+    return 1
+}
+
+# v1.0 adapter files are removed only by explicit --prune/--uninstall, and only
+# when their content can be proven to be framework material. Unverifiable files
+# are preserved as conflicts unless --prune-unverified-legacy is given, in
+# which case they are removed after a mandatory backup to .agentic-backup/.
 prune_legacy() {
     local f
     for f in "${LEGACY_FILES[@]}"; do
         if [ -e "$TARGET_DIR/$f" ]; then
-            [ "$PLAN" -eq 1 ] && { echo "  prune  $f (legacy v1.0 artifact)"; continue; }
-            snapshot_file "$f"
-            [ "$BACKUP" -eq 1 ] && backup_file "$f"
-            rm -f "$TARGET_DIR/$f"
-            echo "  prune  $f (legacy v1.0 artifact)"
+            if legacy_owned "$f"; then
+                [ "$PLAN" -eq 1 ] && { echo "  prune  $f (legacy v1.0 artifact)"; continue; }
+                snapshot_file "$f"
+                [ "$BACKUP" -eq 1 ] && backup_file "$f"
+                rm -f "$TARGET_DIR/$f"
+                echo "  prune  $f (legacy v1.0 artifact)"
+            elif [ "$PRUNE_UNVERIFIED_LEGACY" -eq 1 ]; then
+                [ "$PLAN" -eq 1 ] && { echo "  prune  $f (unverified legacy artifact; would back up to .agentic-backup first)"; continue; }
+                snapshot_file "$f"
+                backup_file "$f"
+                rm -f "$TARGET_DIR/$f"
+                echo "  prune  $f (unverified legacy artifact; backed up to .agentic-backup)"
+            else
+                echo "  conflict $f (content could not be verified as a v1.0 framework artifact; preserved; use --prune-unverified-legacy to remove)"
+            fi
         fi
     done
     for f in "${LEGACY_DIRS[@]}"; do
@@ -525,7 +839,7 @@ write_pruned_manifest() {
     [ "$PLAN" -eq 1 ] && return
     mf="$(manifest_file)"
     [ -f "$mf" ] || return 0
-    tmp="${mf}.agentic-tmp"
+    tmp="$(new_tmp "$mf")"
     {
         echo "# agentic-workflow install manifest (auto-generated)"
         echo "# path<TAB>category<TAB>sha256"
@@ -566,70 +880,67 @@ uninstall() {
 
 install_merge() {
     local src="$1" rel="$2"
-    local dst="$TARGET_DIR/$rel" start_line end_line tmp start_count end_count
-    if [ ! -e "$dst" ]; then
-        [ "$PLAN" -eq 1 ] && { echo "  merge  $rel (create)"; return; }
-        snapshot_file "$rel"
-        mkdir -p "$(dirname "$dst")"
-        cp "$src" "$dst"
-        echo "  merge  $rel (create)"
-        printf '%s\t%s\t%s\n' "$rel" merge "$(cksum_file "$dst")" >> "$MANIFEST_TMP"
-        return
-    fi
-    start_count="$(grep -c -F -- "$START_MARKER" "$dst" 2>/dev/null || true)"
-    end_count="$(grep -c -F -- "$END_MARKER" "$dst" 2>/dev/null || true)"
-    start_line="$(grep -n -F -- "$START_MARKER" "$dst" 2>/dev/null | head -n1 | cut -d: -f1 || true)"
-    end_line="$(grep -n -F -- "$END_MARKER" "$dst" 2>/dev/null | head -n1 | cut -d: -f1 || true)"
-    # Malformed marker sets are never rewritten in place: a single start+end
-    # pair where the end marker precedes the start marker is also malformed.
-    if [ "$start_count" -gt 1 ] || [ "$end_count" -gt 1 ] \
-        || { { [ "$start_count" -eq 1 ] && [ "$end_count" -eq 0 ]; } || { [ "$start_count" -eq 0 ] && [ "$end_count" -eq 1 ]; }; } \
-        || { [ "$start_count" -eq 1 ] && [ "$end_count" -eq 1 ] && [ "$end_line" -le "$start_line" ]; }; then
-        [ "$PLAN" -eq 1 ] && { echo "  conflict $rel (malformed merge markers; candidate: $rel.new)"; return; }
-        snapshot_file "$rel"
-        snapshot_file "$rel.new"
-        cp "$src" "${dst}.new"
-        echo "  conflict $rel (malformed merge markers detected; wrote $rel.new)"
-        printf '%s\t%s\t%s\n' "$rel" merge "$(cksum_file "$src")" >> "$MANIFEST_TMP"
-        return
-    fi
-    if [ -n "$start_line" ] && [ -n "$end_line" ] && [ "$start_line" -lt "$end_line" ]; then
-        [ "$PLAN" -eq 1 ] && { echo "  merge  $rel (update managed block, preserve custom content)"; return; }
-        snapshot_file "$rel"
-        [ "$BACKUP" -eq 1 ] && backup_file "$rel"
-        tmp="${dst}.agentic-tmp"
-        if ! (
-            if [ "$start_line" -gt 1 ]; then head -n "$((start_line - 1))" "$dst"; fi
-            cat "$src"
-            tail -n +"$((end_line + 1))" "$dst"
-        ) > "$tmp"; then
-            echo "ERROR: failed to rewrite '$rel'." >&2
-            rm -f "$tmp" 2>/dev/null || true
-            exit 1
-        fi
-        mv "$tmp" "$dst"
-        echo "  merge  $rel (managed block updated, custom content preserved)"
-        printf '%s\t%s\t%s\n' "$rel" merge "$(cksum_file "$dst")" >> "$MANIFEST_TMP"
-    elif [ -s "$dst" ]; then
-        [ "$PLAN" -eq 1 ] && { echo "  merge  $rel (insert managed block above existing content)"; return; }
-        snapshot_file "$rel"
-        [ "$BACKUP" -eq 1 ] && backup_file "$rel"
-        tmp="${dst}.agentic-tmp"
-        if ! ( cat "$src"; printf '\n\n---\n\n'; cat "$dst" ) > "$tmp"; then
-            echo "ERROR: failed to rewrite '$rel'." >&2
-            rm -f "$tmp" 2>/dev/null || true
-            exit 1
-        fi
-        mv "$tmp" "$dst"
-        echo "  merge  $rel (managed block inserted, existing content preserved)"
-        printf '%s\t%s\t%s\n' "$rel" merge "$(cksum_file "$dst")" >> "$MANIFEST_TMP"
-    else
-        [ "$PLAN" -eq 1 ] && { echo "  merge  $rel (create)"; return; }
-        snapshot_file "$rel"
-        cp "$src" "$dst"
-        echo "  merge  $rel (create)"
-        printf '%s\t%s\t%s\n' "$rel" merge "$(cksum_file "$dst")" >> "$MANIFEST_TMP"
-    fi
+    local dst="$TARGET_DIR/$rel" tmp
+    merge_state "$rel"
+    case "$MERGE_STATE" in
+        absent)
+            [ "$PLAN" -eq 1 ] && { echo "  merge  $rel (create)"; return; }
+            snapshot_file "$rel"
+            mkdir -p "$(dirname "$dst")"
+            cp "$src" "$dst"
+            echo "  merge  $rel (create)"
+            printf '%s\t%s\t%s\n' "$rel" merge "$(cksum_file "$dst")" >> "$MANIFEST_TMP"
+            return ;;
+        malformed)
+            # A malformed marker set is never rewritten in place: the adopter's
+            # file is preserved and the framework content goes to a candidate.
+            [ "$PLAN" -eq 1 ] && { echo "  conflict $rel (malformed merge markers; candidate: $rel.new)"; return; }
+            snapshot_file "$rel"
+            snapshot_file "$rel.new"
+            cp "$src" "${dst}.new"
+            echo "  conflict $rel (malformed merge markers detected; wrote $rel.new)"
+            printf '%s\t%s\t%s\n' "$rel" merge "$(cksum_file "$src")" >> "$MANIFEST_TMP"
+            return ;;
+        valid)
+            [ "$PLAN" -eq 1 ] && { echo "  merge  $rel (update managed block, preserve custom content)"; return; }
+            snapshot_file "$rel"
+            [ "$BACKUP" -eq 1 ] && backup_file "$rel"
+            tmp="$(new_tmp "$dst")"
+            if ! (
+                if [ "$MS_START" -gt 1 ]; then head -n "$((MS_START - 1))" "$dst"; fi
+                cat "$src"
+                tail -n +"$((MS_END + 1))" "$dst"
+            ) > "$tmp"; then
+                echo "ERROR: failed to rewrite '$rel'." >&2
+                rm -f "$tmp" 2>/dev/null || true
+                exit 1
+            fi
+            mv "$tmp" "$dst"
+            echo "  merge  $rel (managed block updated, custom content preserved)"
+            printf '%s\t%s\t%s\n' "$rel" merge "$(cksum_file "$dst")" >> "$MANIFEST_TMP"
+            return ;;
+        plain)
+            [ "$PLAN" -eq 1 ] && { echo "  merge  $rel (insert managed block above existing content)"; return; }
+            snapshot_file "$rel"
+            [ "$BACKUP" -eq 1 ] && backup_file "$rel"
+            tmp="$(new_tmp "$dst")"
+            if ! ( cat "$src"; printf '\n\n---\n\n'; cat "$dst" ) > "$tmp"; then
+                echo "ERROR: failed to rewrite '$rel'." >&2
+                rm -f "$tmp" 2>/dev/null || true
+                exit 1
+            fi
+            mv "$tmp" "$dst"
+            echo "  merge  $rel (managed block inserted, existing content preserved)"
+            printf '%s\t%s\t%s\n' "$rel" merge "$(cksum_file "$dst")" >> "$MANIFEST_TMP"
+            return ;;
+        empty)
+            [ "$PLAN" -eq 1 ] && { echo "  merge  $rel (create)"; return; }
+            snapshot_file "$rel"
+            cp "$src" "$dst"
+            echo "  merge  $rel (create)"
+            printf '%s\t%s\t%s\n' "$rel" merge "$(cksum_file "$dst")" >> "$MANIFEST_TMP"
+            return ;;
+    esac
 }
 
 generate_checks() {
@@ -662,17 +973,19 @@ generate_checks() {
 }
 
 write_manifest() {
-    local mf
+    local mf tmp
     [ "$PLAN" -eq 1 ] && return
     mf="$(manifest_file)"
     snapshot_file ".agentic/install-manifest.tsv"
     mkdir -p "$(dirname "$mf")"
+    tmp="$(new_tmp "$mf")"
     {
         echo "# agentic-workflow install manifest (auto-generated)"
         echo "# path<TAB>category<TAB>sha256"
         echo "$PROTOCOL_VERSION"
         cat "$MANIFEST_TMP"
-    } > "$mf"
+    } > "$tmp"
+    mv "$tmp" "$mf"
 }
 
 check_partial() {
@@ -702,6 +1015,10 @@ echo "  into: $TARGET_DIR"
 echo "  tools: ${TOOLS[*]}"
 [ "$PLAN" -eq 1 ] && echo "  mode: plan (dry run, nothing will be modified)"
 echo ""
+
+# The previous manifest is never trusted implicitly: any malformed entry fails
+# the run before a single file is touched. Read-only, so it also guards --plan.
+validate_previous_manifest || exit 1
 
 if [ "$PRUNE" -eq 1 ]; then
     prune_obsolete
@@ -745,7 +1062,7 @@ if [ "$ACCEPT_DETECTED_CHECKS" -eq 1 ]; then
     snapshot_file "$rel"
     [ "$BACKUP" -eq 1 ] && [ -e "$dst" ] && backup_file "$rel"
     mkdir -p "$(dirname "$dst")"
-    tmp="${dst}.agentic-tmp"
+    tmp="$(new_tmp "$dst")"
     cp "$gen" "$tmp"
     mv "$tmp" "$dst"
     echo "  promoted '$gen' to '$rel'"
