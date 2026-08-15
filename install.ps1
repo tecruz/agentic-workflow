@@ -23,7 +23,18 @@
 
 .PARAMETER Update
     Update an existing installation (the default whenever an install manifest
-    is already present).
+    is already present). Files no longer managed (e.g. deselected tool
+    adapters) are pruned; v1.0 legacy files are reported.
+
+.PARAMETER Prune
+    Remove obsolete framework files recorded by a previous install: managed
+    files unchanged since install, managed blocks of deselected merge files,
+    and v1.0 legacy files. Modified files are preserved as conflicts.
+
+.PARAMETER Uninstall
+    Remove the framework installation: managed files unchanged since install,
+    managed blocks from merge files, the install manifest, and v1.0 legacy
+    files. Project-owned seed files and custom merge content are preserved.
 
 .PARAMETER Backup
     Back up files to .agentic-backup/ before modifying.
@@ -51,10 +62,14 @@
     ./install.ps1 -Target C:\projects\my-app -GenerateChecks -Tools all
 #>
 
+[CmdletBinding()]
 param(
     [string] $Target = ".",
+    [switch] $Help,
     [switch] $Plan,
     [switch] $Update,
+    [switch] $Prune,
+    [switch] $Uninstall,
     [switch] $Backup,
     [string] $Tools = "claude,gemini,aider",
     [switch] $GenerateChecks,
@@ -67,6 +82,39 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($Help) {
+    # Explicit usage summary so the installer never runs on -Help.
+    Write-Host @"
+install.ps1 — Install the Universal Agentic Development Protocol into a project.
+
+Usage:
+  ./install.ps1 [-Target <dir>] [options]
+
+  -Target <dir>          Project directory to install into (default: current).
+  -Tools <list>          Comma-separated adapters: claude,gemini,aider,all.
+                         Default: claude,gemini,aider. AGENTS.md is always
+                         installed; other tools read AGENTS.md natively.
+  -Update                Update an existing install (default when a manifest
+                         exists). Deselected adapters and renamed framework
+                         files are pruned; v1.0 legacy files are reported.
+  -Prune                 Remove obsolete framework files recorded by a previous
+                         install plus v1.0 legacy files. Modified files are
+                         preserved as conflicts.
+  -Uninstall             Remove the framework: managed files, managed blocks
+                         from merge files, the manifest, and v1.0 legacy files.
+                         Project-owned seeds and custom merge content remain.
+  -Plan                  Show what would be done without changing anything.
+  -Backup                Back up files to .agentic-backup/ before modifying.
+  -GenerateChecks        Write .agentic/checks.tsv from the detected stack.
+  -DetectChecks          Write .agentic/checks.generated.tsv candidate.
+  -AcceptDetectedChecks  Validate and promote the reviewed candidate.
+  -ReplaceManaged        Replace modified framework-managed files.
+  -ReplaceChecks         Overwrite a project-owned .agentic/checks.tsv.
+  -Help                  Show this usage summary.
+"@
+    exit 0
+}
 
 if ($Force) { $ReplaceManaged = $true }
 
@@ -132,6 +180,23 @@ foreach ($t in $ToolsList) {
         "aider"  { $ManagedFiles += ".aider.conf.yml" }
     }
 }
+
+# v1.0 shipped per-tool adapter files that were removed in 2.x (AGENTS.md is
+# the single canonical protocol). On update they are only reported; -Prune and
+# -Uninstall remove the files. Legacy directories can hold user settings, so
+# they are always report-only and never auto-removed.
+$LegacyFiles = @(
+    ".cursorrules",
+    ".windsurfrules",
+    ".clinerules",
+    "CONVENTIONS.md",
+    ".github/copilot-instructions.md"
+)
+$LegacyDirs = @(
+    ".cursor",
+    ".windsurf",
+    "Memory"
+)
 
 $script:BackupDir = $null
 $script:ManifestTmp = [System.IO.Path]::GetTempFileName()
@@ -393,6 +458,206 @@ function Install-Merge {
     }
 }
 
+# ---------------------------------------------------------------------------
+# Migration, pruning, and uninstall. A previous install is described by the
+# on-disk manifest; a file is obsolete when it is no longer in the desired set
+# (for example a deselected tool adapter). Managed files are pruned only when
+# unchanged since the recorded checksum; merge files are pruned by stripping
+# the marker-delimited managed block and removing the file only if that leaves
+# nothing behind. Seeds are project-owned and never pruned.
+# ---------------------------------------------------------------------------
+
+# Entries (path<TAB>category<TAB>sha256) recorded by a previous install.
+function Get-PreviousManifestEntries {
+    $mf = Join-Path $TargetDir ".agentic\install-manifest.tsv"
+    if (-not (Test-Path -LiteralPath $mf)) { return }
+    foreach ($line in Get-Content -LiteralPath $mf) {
+        if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith("#")) { continue }
+        $fields = $line -split "`t"
+        if ($fields.Count -ge 3) {
+            [pscustomobject]@{
+                Path     = ConvertTo-PortablePath $fields[0]
+                Category = $fields[1]
+                Checksum = $fields[2]
+            }
+        }
+    }
+}
+
+# True when $RelativePath is part of the current desired set (including the
+# seeded .agentic/checks.tsv, recorded under seed by Install-CheckList).
+function Test-DesiredFile {
+    param([string] $RelativePath)
+    $rel = ConvertTo-PortablePath $RelativePath
+    if ($rel -eq ".agentic/checks.tsv") { return $true }
+    foreach ($r in @($ManagedFiles + $SeedFiles + $MergeFiles)) {
+        if ((ConvertTo-PortablePath $r) -eq $rel) { return $true }
+    }
+    return $false
+}
+
+function Test-BlankFile {
+    param([string] $Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return $true }
+    return [string]::IsNullOrWhiteSpace((Get-Content -Raw -LiteralPath $Path -ErrorAction SilentlyContinue))
+}
+
+# Removes the marker-delimited managed block from a merge file. Returns $true
+# on success; $false when the markers are malformed (never rewritten).
+function Remove-MergeBlock {
+    param([string] $RelativePath)
+    $dst = Join-Path $TargetDir $RelativePath
+    $existing = Get-Content -Raw -LiteralPath $dst
+    $startIdx = $existing.IndexOf($StartMarker)
+    $endIdx = if ($startIdx -ge 0) { $existing.IndexOf($EndMarker, $startIdx) } else { -1 }
+    if ($startIdx -lt 0 -or $endIdx -le $startIdx) { return $false }
+    $newContent = $existing.Substring(0, $startIdx) + $existing.Substring($endIdx + $EndMarker.Length)
+    Snapshot-File $RelativePath
+    if ($Backup) { Backup-File $RelativePath }
+    Write-Utf8NoBom $dst $newContent
+    return $true
+}
+
+# Removes a single obsolete entry.
+function Invoke-PruneEntry {
+    param(
+        [string] $RelativePath,
+        [string] $Category,
+        [string] $Checksum
+    )
+    $dst = Join-Path $TargetDir $RelativePath
+    switch ($Category) {
+        "seed" {
+            return
+        }
+        "merge" {
+            if (Test-Path -LiteralPath $dst) {
+                if (Remove-MergeBlock $RelativePath) {
+                    if (Test-BlankFile $dst) {
+                        if ($script:Plan) { Write-Host "  prune  $RelativePath (managed block removed; file would be empty)"; return }
+                        Snapshot-File $RelativePath
+                        if ($Backup) { Backup-File $RelativePath }
+                        Remove-Item -LiteralPath $dst -Force
+                        Write-Host "  prune  $RelativePath (managed block removed; file removed)"
+                    }
+                    else {
+                        Write-Host "  prune  $RelativePath (managed block removed; custom content preserved)"
+                    }
+                }
+                else {
+                    Write-Host "  conflict $RelativePath (malformed merge markers; not pruned)"
+                }
+            }
+        }
+        "managed" {
+            if (-not (Test-Path -LiteralPath $dst)) {
+                Write-Host "  note   $RelativePath (already absent; nothing to prune)"
+                return
+            }
+            $cur = Get-FileChecksum $dst
+            if ($Checksum -eq $cur) {
+                if ($script:Plan) { Write-Host "  prune  $RelativePath (unchanged since install)"; return }
+                Snapshot-File $RelativePath
+                if ($Backup) { Backup-File $RelativePath }
+                Remove-Item -LiteralPath $dst -Force
+                Write-Host "  prune  $RelativePath (unchanged since install)"
+            }
+            else {
+                Write-Host "  conflict $RelativePath (modified since install; preserved)"
+            }
+        }
+    }
+}
+
+# v1.0 adapter files are removed only by explicit -Prune/-Uninstall.
+function Invoke-PruneLegacy {
+    foreach ($f in $LegacyFiles) {
+        $path = Join-Path $TargetDir $f
+        if (Test-Path -LiteralPath $path) {
+            if ($script:Plan) { Write-Host "  prune  $f (legacy v1.0 artifact)"; continue }
+            Snapshot-File $f
+            if ($Backup) { Backup-File $f }
+            Remove-Item -LiteralPath $path -Force
+            Write-Host "  prune  $f (legacy v1.0 artifact)"
+        }
+    }
+    foreach ($f in $LegacyDirs) {
+        if (Test-Path -LiteralPath (Join-Path $TargetDir $f)) {
+            Write-Host "  note   legacy directory $f/ left in place (may contain user settings); remove manually if unused"
+        }
+    }
+}
+
+# Reports v1.0 legacy artifacts without touching them (used on plain update).
+function Invoke-ReportLegacy {
+    foreach ($f in @($LegacyFiles + $LegacyDirs)) {
+        if (Test-Path -LiteralPath (Join-Path $TargetDir $f)) {
+            Write-Host "  note   legacy $f (v1.0 artifact; run -Prune to remove)"
+        }
+    }
+}
+
+# Prunes every previous-manifest entry that is no longer desired. Used both as
+# the migration step of an update and by the standalone -Prune operation.
+function Invoke-PruneObsolete {
+    foreach ($e in Get-PreviousManifestEntries) {
+        if (-not (Test-DesiredFile $e.Path)) {
+            Invoke-PruneEntry $e.Path $e.Category $e.Checksum
+        }
+    }
+}
+
+# Rewrites the manifest without the pruned entries (standalone -Prune path;
+# the update path rebuilds the manifest from this install's records instead).
+function Write-PruneManifest {
+    if ($script:Plan) { return }
+    $mf = Join-Path $TargetDir ".agentic\install-manifest.tsv"
+    if (-not (Test-Path -LiteralPath $mf)) { return }
+    Snapshot-File ".agentic/install-manifest.tsv"
+    $lines = @(
+        "# agentic-workflow install manifest (auto-generated)"
+        "# path<TAB>category<TAB>sha256"
+        $ProtocolVersion
+    )
+    foreach ($e in Get-PreviousManifestEntries) {
+        if (Test-DesiredFile $e.Path) {
+            $lines += ("{0}`t{1}`t{2}" -f $e.Path, $e.Category, $e.Checksum)
+        }
+    }
+    [System.IO.File]::WriteAllLines($mf, $lines, [System.Text.UTF8Encoding]::new($false))
+}
+
+function Invoke-Uninstall {
+    Write-Host ""
+    Write-Host "Uninstalling Universal Agentic Development Protocol v$ProtocolVersion"
+    Write-Host "  from: $TargetDir"
+    Write-Host "  preserving project-owned seed files and custom merge content"
+    Write-Host ""
+    foreach ($e in Get-PreviousManifestEntries) {
+        Invoke-PruneEntry $e.Path $e.Category $e.Checksum
+    }
+    Invoke-PruneLegacy
+    $mf = Join-Path $TargetDir ".agentic\install-manifest.tsv"
+    if (Test-Path -LiteralPath $mf) {
+        if ($script:Plan) { Write-Host "  prune  .agentic/install-manifest.tsv"; return }
+        Snapshot-File ".agentic/install-manifest.tsv"
+        Remove-Item -LiteralPath $mf -Force
+        Write-Host "  prune  .agentic/install-manifest.tsv"
+    }
+    if ($script:Plan) {
+        Write-Host "  note   empty framework directories under .agentic/ would be removed"
+    }
+    else {
+        # Seed files keep .agentic/ and its project-owned contents alive; only
+        # directories emptied by managed-file removal are cleaned up. Remove
+        # deepest-first so nested empty directories are also cleaned.
+        Get-ChildItem -LiteralPath (Join-Path $TargetDir ".agentic") -Directory -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { -not (Get-ChildItem -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue | Select-Object -First 1) } |
+            Sort-Object { $_.FullName.Length } -Descending |
+            ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -Recurse -ErrorAction SilentlyContinue }
+    }
+}
+
 function Invoke-CheckedScript {
     param(
         [Parameter(Mandatory)]
@@ -496,6 +761,23 @@ elseif ($Update) { Write-Host "  mode: update" }
 Write-Host ""
 
 try {
+    if ($Prune) {
+        Invoke-PruneObsolete
+        Invoke-PruneLegacy
+        Write-PruneManifest
+        Write-Host ""
+        Write-Host "Prune complete. Seeds and project-owned files were preserved."
+        exit 0
+    }
+
+    if ($Uninstall) {
+        Invoke-Uninstall
+        Write-Host ""
+        Write-Host "Uninstall complete. Project-owned seed files (.agentic/ARCHITECTURE.md,"
+        Write-Host "STATUS.md, checks.tsv, tasks/, decisions/) were left in place."
+        exit 0
+    }
+
     if ($DetectChecks) {
         if ($Plan) {
             Write-Host "=== Project Detection Explanation (Plan) ==="
@@ -551,6 +833,13 @@ try {
     foreach ($rel in $SeedFiles)    { Install-Seed $rel }
     Install-CheckList
     foreach ($rel in $MergeFiles)   { Install-Merge $rel }
+
+    # Migration step of an update: files recorded by a previous install that are
+    # no longer part of the desired set (deselected adapters, renamed framework
+    # files) are pruned before the manifest is rewritten. Legacy v1.0 artifacts
+    # are only reported here; -Prune/-Uninstall remove them explicitly.
+    Invoke-PruneObsolete
+    Invoke-ReportLegacy
 
     Write-Manifest
 

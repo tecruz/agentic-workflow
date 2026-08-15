@@ -337,3 +337,207 @@ teardown() {
     [ ! -f .agentic/checks.tsv.agentic-tmp ]
     [ ! -f .agentic/install-manifest.tsv.agentic-tmp ]
 }
+
+# ---------------------------------------------------------------------------
+# Migration, pruning, and uninstall lifecycle tests (--update migrations,
+# --prune, --uninstall, tool-adapter deselection, v1.0 legacy migration).
+# ---------------------------------------------------------------------------
+
+@test "update prunes a deselected managed adapter and installs the new one" {
+    bash "$INSTALL" . --tools all >/dev/null 2>&1
+    [ -f .aider.conf.yml ]
+    bash "$INSTALL" . --tools claude >/dev/null 2>&1
+    [ -f AGENTS.md ]
+    [ -f CLAUDE.md ]
+    [ ! -f .aider.conf.yml ]        # managed adapter deselected -> pruned
+    [ ! -f GEMINI.md ]              # was never installed with --tools claude
+    ! grep -q '.aider.conf.yml' .agentic/install-manifest.tsv
+}
+
+@test "update prunes a deselected merge adapter that is only the managed block" {
+    bash "$INSTALL" . --tools claude >/dev/null 2>&1
+    [ -f CLAUDE.md ]
+    bash "$INSTALL" . --tools gemini >/dev/null 2>&1
+    [ ! -f CLAUDE.md ]              # block-only file -> removed on deselection
+    [ -f GEMINI.md ]
+    [ -f AGENTS.md ]
+}
+
+@test "a deselected merge adapter keeps its custom content" {
+    bash "$INSTALL" . --tools claude >/dev/null 2>&1
+    printf '\n## Team notes\nkeep this content\n' >> CLAUDE.md
+    bash "$INSTALL" . --tools gemini >/dev/null 2>&1
+    [ -f CLAUDE.md ]
+    grep -q "keep this content" CLAUDE.md
+    ! grep -q "AGENTIC-PROTOCOL-START" CLAUDE.md
+}
+
+@test "pruning a modified managed adapter preserves it as a conflict" {
+    bash "$INSTALL" . --tools all >/dev/null 2>&1
+    printf '\n# adopter config\n' >> .aider.conf.yml
+    bash "$INSTALL" . --tools claude >/dev/null 2>&1
+    [ -f .aider.conf.yml ]          # modified -> preserved, never clobbered
+    grep -q "# adopter config" .aider.conf.yml
+}
+
+@test "--prune removes obsolete files and rewrites the manifest" {
+    bash "$INSTALL" . --tools all >/dev/null 2>&1
+    grep -q 'GEMINI.md' .agentic/install-manifest.tsv
+    run bash "$INSTALL" . --prune --tools claude
+    [ "$status" -eq 0 ]
+    [ ! -f GEMINI.md ]
+    [ ! -f .aider.conf.yml ]
+    [ -f AGENTS.md ]
+    [ -f CLAUDE.md ]
+    [ -f .agentic/checks.tsv ]
+    ! grep -q 'GEMINI.md' .agentic/install-manifest.tsv
+    grep -q 'seed' .agentic/install-manifest.tsv
+}
+
+@test "--prune --plan makes no changes" {
+    bash "$INSTALL" . --tools all >/dev/null 2>&1
+    run bash "$INSTALL" . --prune --plan --tools claude
+    [ "$status" -eq 0 ]
+    [ -f GEMINI.md ]
+    [ -f .aider.conf.yml ]
+}
+
+@test "--uninstall removes managed files, strips merge blocks, preserves seeds" {
+    bash "$INSTALL" . --tools claude >/dev/null 2>&1
+    run bash "$INSTALL" . --uninstall
+    [ "$status" -eq 0 ]
+    [ ! -f AGENTS.md ]
+    [ ! -f CLAUDE.md ]
+    [ ! -f .agentic/VERSION ]
+    [ ! -f .agentic/scripts/verify.sh ]
+    [ ! -f .agentic/install-manifest.tsv ]
+    [ -f .agentic/ARCHITECTURE.md ]
+    [ -f .agentic/STATUS.md ]
+    [ -f .agentic/checks.tsv ]
+}
+
+@test "--uninstall preserves modified managed files as conflicts" {
+    bash "$INSTALL" . >/dev/null 2>&1
+    printf '\n# adopter notes\n' >> .agentic/WORKFLOW.md
+    run bash "$INSTALL" . --uninstall
+    [ "$status" -eq 0 ]
+    [ -f .agentic/WORKFLOW.md ]
+    grep -q "# adopter notes" .agentic/WORKFLOW.md
+}
+
+@test "--uninstall strips the merge block and keeps custom content" {
+    bash "$INSTALL" . >/dev/null 2>&1
+    printf '\n## Team notes\nkeep this content\n' >> AGENTS.md
+    run bash "$INSTALL" . --uninstall
+    [ "$status" -eq 0 ]
+    [ -f AGENTS.md ]
+    grep -q "keep this content" AGENTS.md
+    ! grep -q "AGENTIC-PROTOCOL-START" AGENTS.md
+}
+
+@test "--uninstall --plan makes no changes" {
+    bash "$INSTALL" . >/dev/null 2>&1
+    run bash "$INSTALL" . --uninstall --plan
+    [ "$status" -eq 0 ]
+    [ -f AGENTS.md ]
+    [ -f .agentic/install-manifest.tsv ]
+}
+
+@test "v1.0 legacy migration: update reports, --prune removes files but keeps dirs" {
+    # The v1.0 layout shipped per-tool adapters and a pseudo-memory store with
+    # no install manifest. Migrating runs a fresh install (reported legacy
+    # artifacts), then --prune cleans the legacy FILES while legacy DIRECTORIES
+    # (which can hold user settings) are reported but preserved.
+    mkdir -p .github .cursor/rules .windsurf Memory
+    touch .cursorrules .windsurfrules .clinerules CONVENTIONS.md
+    touch .github/copilot-instructions.md
+    printf 'v1.0 project state\n' > Memory/PROJECT_STATE.md
+    printf 'v1.0 decision log\n' > Memory/DECISION_LOG.md
+    printf 'v1.0 user rules\n' > .cursor/rules/user.txt
+    printf '# v1.0 AGENTS.md\ncustom content\n' > AGENTS.md
+
+    run bash "$INSTALL" .
+    [ "$status" -eq 0 ]
+    # legacy artifacts are reported, not removed, by a plain install/update
+    [ -f .cursorrules ]
+    [ -f Memory/PROJECT_STATE.md ]
+    grep -q "AGENTIC-PROTOCOL-START" AGENTS.md
+    grep -q "custom content" AGENTS.md
+
+    run bash "$INSTALL" . --prune
+    [ "$status" -eq 0 ]
+    [ ! -f .cursorrules ]
+    [ ! -f .windsurfrules ]
+    [ ! -f .clinerules ]
+    [ ! -f CONVENTIONS.md ]
+    [ ! -f .github/copilot-instructions.md ]
+    [ -f Memory/PROJECT_STATE.md ]       # legacy dirs are preserved
+    [ -f .cursor/rules/user.txt ]
+    [ -f .agentic/ARCHITECTURE.md ]
+    [ -f .agentic/checks.tsv ]
+    grep -q "AGENTIC-PROTOCOL-START" AGENTS.md
+}
+
+@test "uninstall after migration leaves seeds and legacy dirs intact" {
+    mkdir -p Memory
+    touch .cursorrules
+    printf 'project state\n' > Memory/PROJECT_STATE.md
+    bash "$INSTALL" . >/dev/null 2>&1
+    run bash "$INSTALL" . --uninstall
+    [ "$status" -eq 0 ]
+    [ ! -f .cursorrules ]
+    [ -f Memory/PROJECT_STATE.md ]
+    [ -f .agentic/ARCHITECTURE.md ]
+    [ -f .agentic/STATUS.md ]
+    [ -f .agentic/checks.tsv ]
+    [ ! -f .agentic/install-manifest.tsv ]
+}
+
+# ---------------------------------------------------------------------------
+# Clean adopter bundle (scripts/build-bundle.sh) end-to-end tests.
+# ---------------------------------------------------------------------------
+
+@test "bundle build produces archives and a SHA256SUMS file" {
+    bash "$REPO_ROOT/scripts/build-bundle.sh"
+    BUNDLE="$REPO_ROOT/dist/agentic-workflow-$(cat "$REPO_ROOT/.agentic/VERSION")"
+    [ -f "$REPO_ROOT/dist/SHA256SUMS" ]
+    [ -f "$REPO_ROOT/dist/agentic-workflow-$(cat "$REPO_ROOT/.agentic/VERSION").tar.gz" ]
+    [ -f "$REPO_ROOT/dist/agentic-workflow-$(cat "$REPO_ROOT/.agentic/VERSION").zip" ]
+    [ -f "$BUNDLE/install.sh" ]
+    [ -f "$BUNDLE/AGENTS.md" ]
+    grep -q "agentic-workflow-$(cat "$REPO_ROOT/.agentic/VERSION").tar.gz" "$REPO_ROOT/dist/SHA256SUMS"
+    grep -q "agentic-workflow-$(cat "$REPO_ROOT/.agentic/VERSION").zip" "$REPO_ROOT/dist/SHA256SUMS"
+}
+
+@test "bundle excludes framework-only files" {
+    bash "$REPO_ROOT/scripts/build-bundle.sh" --no-archives
+    BUNDLE="$REPO_ROOT/dist/agentic-workflow-$(cat "$REPO_ROOT/.agentic/VERSION")"
+    [ ! -e "$BUNDLE/.agentic/checks.tsv" ]
+    [ ! -e "$BUNDLE/tests" ]
+    [ ! -e "$BUNDLE/.github" ]
+    [ ! -e "$BUNDLE/docs" ]
+    [ ! -e "$BUNDLE/CHANGELOG.md" ]
+    [ ! -e "$BUNDLE/README.md" ]
+    [ ! -e "$BUNDLE/dist" ]
+    [ -f "$BUNDLE/.agentic/templates/checks.tsv" ]   # generic template travels
+    [ -f "$BUNDLE/.agentic/scripts/verify.sh" ]
+    [ -f "$BUNDLE/LICENSE" ]
+}
+
+@test "end-to-end: install from the bundle into an empty project" {
+    bash "$REPO_ROOT/scripts/build-bundle.sh" --no-archives
+    BUNDLE="$REPO_ROOT/dist/agentic-workflow-$(cat "$REPO_ROOT/.agentic/VERSION")"
+    mkdir -p empty-project
+    cd empty-project
+    bash "$BUNDLE/install.sh" . >/dev/null 2>&1
+    [ -f AGENTS.md ]
+    [ -f .aider.conf.yml ]
+    [ -f .agentic/VERSION ]
+    [ -f .agentic/checks.tsv ]
+    grep -q "seed" .agentic/install-manifest.tsv
+    # the seeded checks come from the generic (comment-only) template, so the
+    # framework's own checks are not forced on adopters: an empty project with
+    # no check lines is reported UNSUPPORTED (exit 3), never FAIL (exit 1).
+    run bash .agentic/scripts/verify.sh
+    [ "$status" -eq 3 ]
+}

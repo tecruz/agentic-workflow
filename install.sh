@@ -19,7 +19,18 @@
 # Options:
 #   --plan               Show what would be done without changing anything.
 #   --update             Update an existing installation (the default whenever
-#                        an install manifest is already present).
+#                        an install manifest is already present). Files no
+#                        longer managed (e.g. deselected tool adapters) are
+#                        pruned; v1.0 legacy files are reported.
+#   --prune              Remove obsolete framework files recorded by a previous
+#                        install: managed files unchanged since install, managed
+#                        blocks of deselected merge files, and v1.0 legacy
+#                        files. Modified files are preserved as conflicts.
+#   --uninstall          Remove the framework installation: managed files
+#                        unchanged since install, managed blocks from merge
+#                        files, the install manifest, and v1.0 legacy files.
+#                        Project-owned seed files and custom merge content are
+#                        preserved.
 #   --backup             Back up files to .agentic-backup/ before modifying.
 #   --tools LIST         Comma-separated tool adapters: claude,gemini,aider,all.
 #                        Default: claude,gemini,aider. AGENTS.md is always
@@ -45,7 +56,18 @@ Usage:
 Options:
   --plan               Show what would be done without changing anything.
   --update             Update an existing installation (default when a
-                       previous install manifest is present).
+                       previous install manifest is present). Files no longer
+                       managed (e.g. deselected tool adapters) are pruned;
+                       v1.0 legacy files are reported.
+  --prune              Remove obsolete framework files recorded by a previous
+                       install: managed files unchanged since install, managed
+                       blocks of deselected merge files, and v1.0 legacy
+                       files. Modified files are preserved as conflicts.
+  --uninstall          Remove the framework installation: managed files
+                       unchanged since install, managed blocks from merge
+                       files, the install manifest, and v1.0 legacy files.
+                       Project-owned seed files and custom merge content are
+                       preserved.
   --backup             Back up files to .agentic-backup/ before modifying.
   --tools LIST         Comma-separated tool adapters: claude,gemini,aider,all.
                        Default: claude,gemini,aider. AGENTS.md is always
@@ -72,6 +94,8 @@ GENERATE_CHECKS=0
 DETECT_CHECKS=0
 ACCEPT_DETECTED_CHECKS=0
 UPDATE=0
+PRUNE=0
+UNINSTALL=0
 TOOLS_RAW="claude,gemini,aider"
 
 START_MARKER='<!-- @@AGENTIC-PROTOCOL-START@@ -->'
@@ -81,6 +105,8 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --plan) PLAN=1 ;;
         --update) UPDATE=1 ;;
+        --prune) PRUNE=1 ;;
+        --uninstall) UNINSTALL=1 ;;
         --backup) BACKUP=1 ;;
         --replace-managed|--force) REPLACE_MANAGED=1 ;;
         --replace-checks) REPLACE_CHECKS=1 ;;
@@ -163,6 +189,23 @@ for t in "${TOOLS[@]}"; do
         aider)  MANAGED_FILES+=(".aider.conf.yml") ;;
     esac
 done
+
+# v1.0 shipped per-tool adapter files that were removed in 2.x (AGENTS.md is
+# the single canonical protocol). On update they are only reported; --prune and
+# --uninstall remove the files. Legacy directories can hold user settings, so
+# they are always report-only and never auto-removed.
+LEGACY_FILES=(
+    ".cursorrules"
+    ".windsurfrules"
+    ".clinerules"
+    "CONVENTIONS.md"
+    ".github/copilot-instructions.md"
+)
+LEGACY_DIRS=(
+    ".cursor"
+    ".windsurf"
+    "Memory"
+)
 
 BACKUP_DIR=""
 MANIFEST_TMP="$(mktemp)"
@@ -340,6 +383,187 @@ install_seed_checks() {
     install_seed "$SOURCE_DIR/.agentic/templates/checks.tsv" "$rel"
 }
 
+# ---------------------------------------------------------------------------
+# Migration, pruning, and uninstall. A previous install is described by the
+# on-disk manifest; a file is obsolete when it is no longer in the desired set
+# (for example a deselected tool adapter). Managed files are pruned only when
+# unchanged since the recorded checksum; merge files are pruned by stripping
+# the marker-delimited managed block and removing the file only if that leaves
+# nothing behind. Seeds are project-owned and never pruned.
+# ---------------------------------------------------------------------------
+
+# Entries (path<TAB>category<TAB>sha256) recorded by a previous install.
+prev_manifest_entries() {
+    local mf
+    mf="$(manifest_file)"
+    [ -f "$mf" ] || return 0
+    awk -F'\t' 'NF>=3 && $1 !~ /^#/ {print}' "$mf"
+}
+
+# True when $rel is part of the current desired set (including the seeded
+# .agentic/checks.tsv, which install_seed_checks records under seed).
+is_desired() {
+    local rel="$1" r
+    [ "$rel" = ".agentic/checks.tsv" ] && return 0
+    for r in "${MANAGED_FILES[@]}" "${SEED_FILES[@]}" "${MERGE_FILES[@]}"; do
+        [ "$r" = "$rel" ] && return 0
+    done
+    return 1
+}
+
+file_is_blank() {  # file_is_blank <file>
+    [ ! -s "$1" ] && return 0
+    ! grep -q '[^[:space:]]' "$1"
+}
+
+# Removes a well-formed marker-delimited managed block from a merge file.
+# Returns 0 on success; 1 when the markers are malformed (never rewritten).
+strip_merge_block() {
+    local rel="$1" start_line end_line tmp
+    local dst="$TARGET_DIR/$rel"
+    start_line="$(grep -n -F -- "$START_MARKER" "$dst" 2>/dev/null | head -n1 | cut -d: -f1 || true)"
+    end_line="$(grep -n -F -- "$END_MARKER" "$dst" 2>/dev/null | head -n1 | cut -d: -f1 || true)"
+    if [ -z "$start_line" ] || [ -z "$end_line" ] || [ "$end_line" -le "$start_line" ]; then
+        return 1
+    fi
+    tmp="${dst}.agentic-tmp"
+    if ! ( if [ "$start_line" -gt 1 ]; then head -n "$((start_line - 1))" "$dst"; fi; tail -n +"$((end_line + 1))" "$dst" ) > "$tmp"; then
+        rm -f "$tmp" 2>/dev/null || true
+        return 1
+    fi
+    snapshot_file "$rel"
+    [ "$BACKUP" -eq 1 ] && backup_file "$rel"
+    mv "$tmp" "$dst"
+    return 0
+}
+
+# Removes a single obsolete entry. $3 may be empty for unrecorded files.
+prune_entry() {
+    local rel="$1" cat="$2" cks="$3" cur
+    local dst="$TARGET_DIR/$rel"
+    case "$cat" in
+        seed)
+            return 0 ;;
+        merge)
+            if [ -e "$dst" ]; then
+                if strip_merge_block "$rel"; then
+                    if file_is_blank "$dst"; then
+                        [ "$PLAN" -eq 1 ] && { echo "  prune  $rel (managed block removed; file would be empty)"; return 0; }
+                        snapshot_file "$rel"
+                        [ "$BACKUP" -eq 1 ] && backup_file "$rel"
+                        rm -f "$dst"
+                        echo "  prune  $rel (managed block removed; file removed)"
+                    else
+                        echo "  prune  $rel (managed block removed; custom content preserved)"
+                    fi
+                else
+                    echo "  conflict $rel (malformed merge markers; not pruned)"
+                fi
+            fi
+            return 0 ;;
+        managed)
+            if [ ! -e "$dst" ]; then
+                echo "  note   $rel (already absent; nothing to prune)"
+                return 0
+            fi
+            cur="$(cksum_file "$dst")"
+            if [ "$cks" = "$cur" ]; then
+                [ "$PLAN" -eq 1 ] && { echo "  prune  $rel (unchanged since install)"; return 0; }
+                snapshot_file "$rel"
+                [ "$BACKUP" -eq 1 ] && backup_file "$rel"
+                rm -f "$dst"
+                echo "  prune  $rel (unchanged since install)"
+            else
+                echo "  conflict $rel (modified since install; preserved)"
+            fi
+            return 0 ;;
+    esac
+}
+
+# v1.0 adapter files are removed only by explicit --prune/--uninstall.
+prune_legacy() {
+    local f
+    for f in "${LEGACY_FILES[@]}"; do
+        if [ -e "$TARGET_DIR/$f" ]; then
+            [ "$PLAN" -eq 1 ] && { echo "  prune  $f (legacy v1.0 artifact)"; continue; }
+            snapshot_file "$f"
+            [ "$BACKUP" -eq 1 ] && backup_file "$f"
+            rm -f "$TARGET_DIR/$f"
+            echo "  prune  $f (legacy v1.0 artifact)"
+        fi
+    done
+    for f in "${LEGACY_DIRS[@]}"; do
+        if [ -e "$TARGET_DIR/$f" ]; then
+            echo "  note   legacy directory $f/ left in place (may contain user settings); remove manually if unused"
+        fi
+    done
+}
+
+# Reports v1.0 legacy artifacts without touching them (used on plain update).
+report_legacy() {
+    local f
+    for f in "${LEGACY_FILES[@]}" "${LEGACY_DIRS[@]}"; do
+        if [ -e "$TARGET_DIR/$f" ]; then
+            echo "  note   legacy $f (v1.0 artifact; run --prune to remove)"
+        fi
+    done
+}
+
+# Prunes every previous-manifest entry that is no longer desired. Used both as
+# the migration step of an update and by the standalone --prune operation.
+prune_obsolete() {
+    local p c s
+    while IFS=$'\t' read -r p c s; do
+        is_desired "$p" || prune_entry "$p" "$c" "$s"
+    done < <(prev_manifest_entries)
+}
+
+# Rewrites the manifest without the pruned entries (standalone --prune path;
+# the update path rebuilds the manifest from this install's records instead).
+write_pruned_manifest() {
+    local mf tmp
+    [ "$PLAN" -eq 1 ] && return
+    mf="$(manifest_file)"
+    [ -f "$mf" ] || return 0
+    tmp="${mf}.agentic-tmp"
+    {
+        echo "# agentic-workflow install manifest (auto-generated)"
+        echo "# path<TAB>category<TAB>sha256"
+        echo "$PROTOCOL_VERSION"
+        while IFS=$'\t' read -r p c s; do
+            is_desired "$p" && printf '%s\t%s\t%s\n' "$p" "$c" "$s"
+        done < <(prev_manifest_entries)
+    } > "$tmp"
+    snapshot_file ".agentic/install-manifest.tsv"
+    mv "$tmp" "$mf"
+}
+
+uninstall() {
+    local p c s
+    echo ""
+    echo "Uninstalling Universal Agentic Development Protocol v$PROTOCOL_VERSION"
+    echo "  from: $TARGET_DIR"
+    echo "  preserving project-owned seed files and custom merge content"
+    echo ""
+    while IFS=$'\t' read -r p c s; do
+        prune_entry "$p" "$c" "$s"
+    done < <(prev_manifest_entries)
+    prune_legacy
+    if [ -f "$(manifest_file)" ]; then
+        [ "$PLAN" -eq 1 ] && { echo "  prune  .agentic/install-manifest.tsv"; return 0; }
+        snapshot_file ".agentic/install-manifest.tsv"
+        rm -f "$(manifest_file)"
+        echo "  prune  .agentic/install-manifest.tsv"
+    fi
+    if [ "$PLAN" -eq 1 ]; then
+        echo "  note   empty framework directories under .agentic/ would be removed"
+    else
+        # Seed files keep .agentic/ itself and its project-owned contents alive;
+        # only directories emptied by managed-file removal are cleaned up.
+        find "$TARGET_DIR/.agentic" -mindepth 1 -type d -empty -delete 2>/dev/null || true
+    fi
+}
+
 install_merge() {
     local src="$1" rel="$2"
     local dst="$TARGET_DIR/$rel" start_line end_line tmp start_count end_count
@@ -479,6 +703,23 @@ echo "  tools: ${TOOLS[*]}"
 [ "$PLAN" -eq 1 ] && echo "  mode: plan (dry run, nothing will be modified)"
 echo ""
 
+if [ "$PRUNE" -eq 1 ]; then
+    prune_obsolete
+    prune_legacy
+    write_pruned_manifest
+    echo ""
+    echo "Prune complete. Seeds and project-owned files were preserved."
+    exit 0
+fi
+
+if [ "$UNINSTALL" -eq 1 ]; then
+    uninstall
+    echo ""
+    echo "Uninstall complete. Project-owned seed files (.agentic/ARCHITECTURE.md,"
+    echo "STATUS.md, checks.tsv, tasks/, decisions/) were left in place."
+    exit 0
+fi
+
 if [ "$ACCEPT_DETECTED_CHECKS" -eq 1 ]; then
     gen="$TARGET_DIR/.agentic/checks.generated.tsv"
     rel=".agentic/checks.tsv"
@@ -526,6 +767,13 @@ install_seed_checks
 for rel in "${MERGE_FILES[@]}"; do
     install_merge "$SOURCE_DIR/$rel" "$rel"
 done
+
+# Migration step of an update: files recorded by a previous install that are no
+# longer part of the desired set (deselected adapters, renamed framework files)
+# are pruned before the manifest is rewritten. Legacy v1.0 artifacts are only
+# reported here; --prune/--uninstall remove them explicitly.
+prune_obsolete
+report_legacy
 
 write_manifest
 

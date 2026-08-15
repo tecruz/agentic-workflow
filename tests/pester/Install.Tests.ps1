@@ -444,4 +444,206 @@ Describe 'install.ps1' {
         }
         finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
     }
+
+    # -----------------------------------------------------------------------
+    # Migration, pruning, and uninstall lifecycle tests (-Update migrations,
+    # -Prune, -Uninstall, tool-adapter deselection, v1.0 legacy migration).
+    # -----------------------------------------------------------------------
+
+    It 'update prunes a deselected managed adapter and installs the new one' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp -Tools all *> $null
+            Test-Path (Join-Path $tmp '.aider.conf.yml') | Should -Be $true
+            & $install -Target $tmp -Tools claude *> $null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path (Join-Path $tmp '.aider.conf.yml') | Should -Be $false
+            Test-Path (Join-Path $tmp 'GEMINI.md') | Should -Be $false
+            Test-Path (Join-Path $tmp 'CLAUDE.md') | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'a deselected merge adapter keeps its custom content' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp -Tools claude *> $null
+            Add-Content -LiteralPath (Join-Path $tmp 'CLAUDE.md') -Value "`n## Team notes`nkeep this content"
+            & $install -Target $tmp -Tools gemini *> $null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path (Join-Path $tmp 'CLAUDE.md') | Should -Be $true
+            (Get-Content -Raw (Join-Path $tmp 'CLAUDE.md')) -match 'keep this content' | Should -Be $true
+            (Get-Content -Raw (Join-Path $tmp 'CLAUDE.md')) -match 'AGENTIC-PROTOCOL-START' | Should -Be $false
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'pruning a modified managed adapter preserves it as a conflict' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp -Tools all *> $null
+            Add-Content -LiteralPath (Join-Path $tmp '.aider.conf.yml') -Value '# adopter config'
+            & $install -Target $tmp -Tools claude *> $null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path (Join-Path $tmp '.aider.conf.yml') | Should -Be $true
+            (Get-Content -Raw (Join-Path $tmp '.aider.conf.yml')) -match '# adopter config' | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-Prune removes obsolete files and rewrites the manifest' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp -Tools all *> $null
+            & $install -Target $tmp -Prune -Tools claude *> $null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path (Join-Path $tmp 'GEMINI.md') | Should -Be $false
+            Test-Path (Join-Path $tmp '.aider.conf.yml') | Should -Be $false
+            Test-Path (Join-Path $tmp 'AGENTS.md') | Should -Be $true
+            (Get-Content -Raw (Join-Path $tmp '.agentic\install-manifest.tsv')) -match 'GEMINI.md' | Should -Be $false
+            (Get-Content -Raw (Join-Path $tmp '.agentic\install-manifest.tsv')) -match '\tseed\t' | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-Prune -Plan makes no changes' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp -Tools all *> $null
+            & $install -Target $tmp -Prune -Plan -Tools claude *> $null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path (Join-Path $tmp 'GEMINI.md') | Should -Be $true
+            Test-Path (Join-Path $tmp '.aider.conf.yml') | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-Uninstall removes managed files, strips merge blocks, preserves seeds' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp -Tools claude *> $null
+            & $install -Target $tmp -Uninstall *> $null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path (Join-Path $tmp 'AGENTS.md') | Should -Be $false
+            Test-Path (Join-Path $tmp 'CLAUDE.md') | Should -Be $false
+            Test-Path (Join-Path $tmp '.agentic\VERSION') | Should -Be $false
+            Test-Path (Join-Path $tmp '.agentic\install-manifest.tsv') | Should -Be $false
+            Test-Path (Join-Path $tmp '.agentic\ARCHITECTURE.md') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\STATUS.md') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\checks.tsv') | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-Uninstall preserves modified managed files and custom merge content' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp *> $null
+            Add-Content -LiteralPath (Join-Path $tmp '.agentic\WORKFLOW.md') -Value '# adopter notes'
+            Add-Content -LiteralPath (Join-Path $tmp 'AGENTS.md') -Value "`n## Team notes`nkeep this content"
+            & $install -Target $tmp -Uninstall *> $null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path (Join-Path $tmp '.agentic\WORKFLOW.md') | Should -Be $true
+            (Get-Content -Raw (Join-Path $tmp '.agentic\WORKFLOW.md')) -match '# adopter notes' | Should -Be $true
+            Test-Path (Join-Path $tmp 'AGENTS.md') | Should -Be $true
+            (Get-Content -Raw (Join-Path $tmp 'AGENTS.md')) -match 'keep this content' | Should -Be $true
+            (Get-Content -Raw (Join-Path $tmp 'AGENTS.md')) -match 'AGENTIC-PROTOCOL-START' | Should -Be $false
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-Uninstall -Plan makes no changes' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp *> $null
+            & $install -Target $tmp -Uninstall -Plan *> $null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path (Join-Path $tmp 'AGENTS.md') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\install-manifest.tsv') | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'v1.0 legacy migration: update reports, -Prune removes files but keeps dirs' {
+        $tmp = New-TestDir
+        try {
+            foreach ($d in @('.github', '.cursor\rules', '.windsurf', 'Memory')) {
+                New-Item -ItemType Directory -Path (Join-Path $tmp $d) -Force | Out-Null
+            }
+            foreach ($f in @('.cursorrules', '.windsurfrules', '.clinerules', 'CONVENTIONS.md', '.github\copilot-instructions.md')) {
+                Set-Content -LiteralPath (Join-Path $tmp $f) -Value 'v1.0 adapter'
+            }
+            Set-Content -LiteralPath (Join-Path $tmp 'Memory\PROJECT_STATE.md') -Value 'v1.0 project state'
+            Set-Content -LiteralPath (Join-Path $tmp '.cursor\rules\user.txt') -Value 'v1.0 user rules'
+            Set-Content -LiteralPath (Join-Path $tmp 'AGENTS.md') -Value "# v1.0 AGENTS.md`ncustom content"
+
+            & $install -Target $tmp *> $null
+            $LASTEXITCODE | Should -Be 0
+            # legacy artifacts are reported, not removed, by a plain install/update
+            Test-Path (Join-Path $tmp '.cursorrules') | Should -Be $true
+            Test-Path (Join-Path $tmp 'Memory\PROJECT_STATE.md') | Should -Be $true
+            (Get-Content -Raw (Join-Path $tmp 'AGENTS.md')) -match 'AGENTIC-PROTOCOL-START' | Should -Be $true
+            (Get-Content -Raw (Join-Path $tmp 'AGENTS.md')) -match 'custom content' | Should -Be $true
+
+            & $install -Target $tmp -Prune *> $null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path (Join-Path $tmp '.cursorrules') | Should -Be $false
+            Test-Path (Join-Path $tmp '.windsurfrules') | Should -Be $false
+            Test-Path (Join-Path $tmp '.clinerules') | Should -Be $false
+            Test-Path (Join-Path $tmp 'CONVENTIONS.md') | Should -Be $false
+            Test-Path (Join-Path $tmp '.github\copilot-instructions.md') | Should -Be $false
+            Test-Path (Join-Path $tmp 'Memory\PROJECT_STATE.md') | Should -Be $true
+            Test-Path (Join-Path $tmp '.cursor\rules\user.txt') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\ARCHITECTURE.md') | Should -Be $true
+            (Get-Content -Raw (Join-Path $tmp 'AGENTS.md')) -match 'AGENTIC-PROTOCOL-START' | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    # -----------------------------------------------------------------------
+    # Clean adopter bundle end-to-end (scripts/build-bundle.sh). The build
+    # script itself is bash; this test only exercises it when bash is present,
+    # so the suite still runs on Windows without git-bash.
+    # -----------------------------------------------------------------------
+
+    It 'bundle end-to-end: build, then install from the bundle' {
+        $bash = Get-Command bash -ErrorAction SilentlyContinue
+        if (-not $bash) { Set-ItResult -Skipped -Because 'bash (git-bash/WSL) is required to build the bundle' }
+        $version = (Get-Content -Raw (Join-Path $repoRoot '.agentic\VERSION')).Trim()
+        $dist = Join-Path $repoRoot 'dist'
+        & $bash.Source "scripts/build-bundle.sh" *> $null
+        if ($LASTEXITCODE -ne 0) { throw 'build-bundle.sh failed' }
+        $bundleRoot = Join-Path $dist "agentic-workflow-$version"
+
+        $tmp = New-TestDir
+        try {
+            & (Join-Path $bundleRoot 'install.ps1') -Target $tmp *> $null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path (Join-Path $tmp 'AGENTS.md') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\checks.tsv') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\install-manifest.tsv') | Should -Be $true
+            (Get-Content -Raw (Join-Path $tmp '.agentic\checks.tsv')) -notmatch 'ps-syntax' | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-Help prints usage and never runs an install' {
+        $tmp = New-TestDir
+        try {
+            $out = & $install -Help *>&1 | Out-String
+            $out -match 'Usage:' | Should -Be $true
+            $out -match '-Uninstall' | Should -Be $true
+            (Get-ChildItem -LiteralPath $tmp -Force -ErrorAction SilentlyContinue) | Should -HaveCount 0
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'an unknown parameter is rejected instead of silently running with defaults' {
+        $tmp = New-TestDir
+        try {
+            { & $install -Target $tmp -BogusParam *>&1 | Out-Null } | Should -Throw
+            (Get-ChildItem -LiteralPath $tmp -Force -ErrorAction SilentlyContinue) | Should -HaveCount 0
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
 }
