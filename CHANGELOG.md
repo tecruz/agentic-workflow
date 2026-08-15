@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-08-15
+
+Lifecycle hardening hotfix; addresses the `feedback (8).md` findings.
+
+### Fixed
+- **`--plan` is byte-for-byte read-only.** Merge-block removal during planned
+  prune, uninstall, and ordinary updates is now a pure calculation: the shared
+  merge parser classifies the file, the would-be remainder is predicted, and
+  plan mode reports it without snapshotting, backing up, creating temporary
+  files, or writing. Prior plan tests only asserted that files still existed;
+  new byte-for-byte Bats and Pester tests hash the tree before and after
+  `--prune --plan` and `--uninstall --plan`.
+- **Previous-manifest paths are validated and physically confined before any
+  mutation** (in every mode, including `--plan`). Every manifest row is
+  checked: exactly three tab-separated fields, a known category
+  (`managed`/`merge`/`seed`), a valid SHA-256, no duplicate paths, a lexical
+  path with no empty / `.` / `..` segments, drive prefixes, backslashes, or
+  control characters, membership in the framework's known file registry, and
+  physical confinement (symlink/junction traversal cannot escape the project
+  root). A malformed or adversarial manifest hard-fails the run before any file
+  is created, modified, or removed.
+- **Legacy cleanup no longer deletes by filename.** v1.0 legacy files
+  (`.cursorrules`, `.windsurfrules`, `.clinerules`, `CONVENTIONS.md`,
+  `.github/copilot-instructions.md`) are removed only when ownership is proven:
+  byte-for-byte match with shipped v1.0 content, the framework signature, or a
+  previous-manifest record. Unprovable files are preserved and reported as
+  conflicts; the new `--prune-unverified-legacy` / `-PruneUnverifiedLegacy`
+  removes them only with an automatic backup to `.agentic-backup/`.
+- **Merge-marker validation is shared between install and prune.** Prune and
+  uninstall now reuse the same strict parser as installation
+  (`merge_state`: absent / empty / plain / valid / malformed); only a valid
+  single block is ever rewritten. Malformed files are reported as conflicts
+  and preserved untouched.
+- **Unpredictable temporary files.** Installers write every managed, merge,
+  seed, manifest, and promoted-checks file through a `mktemp`-generated (Bash)
+  or randomly named (PowerShell) scratch file created in the destination
+  directory, then atomically rename it. Predictable `.agentic-tmp` paths are
+  gone, so a pre-existing file or symlink at one of those names can never be
+  clobbered or written through. Scratch files are created only in non-plan
+  runs.
+
+### Changed
+- The README no longer advertises the development repository itself as the
+  adopter template; the clean bundle (`dist/agentic-workflow-<version>/`) is
+  the supported distribution for adopters.
+
 ## [1.2.0] - 2026-08-14
 
 ### Added

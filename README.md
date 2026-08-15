@@ -71,7 +71,17 @@ The installer also manages the lifecycle of what it installed:
   `decisions/`) intact.
 - Modified managed files are never silently removed: during a prune or
   uninstall they are kept and reported as conflicts. Both `--prune` and
-  `--uninstall` support `--plan` (`-Plan`) dry runs that show what would change.
+  `--uninstall` support `--plan` (`-Plan`) dry runs that are byte-for-byte
+  read-only: nothing is snapshotted, backed up, or written.
+- Legacy v1.0 files are removed only when ownership can be proven — their
+  content matches a known v1.0 file, carries the framework signature, or was
+  recorded by the previous install manifest. Unprovable files are preserved
+  and reported as conflicts; pass `--prune-unverified-legacy`
+  (`-PruneUnverifiedLegacy`) to remove them anyway, which always backs each
+  one up to `.agentic-backup/` first.
+- The previous install manifest is validated before anything runs, in every
+  mode including `--plan`: a malformed, tampered, or path-escaping manifest
+  aborts the run before any file is created, modified, or removed.
 
 Then commit the installed files and fill in `.agentic/ARCHITECTURE.md` with
 your project's real architecture (or let your agent do it in its first session).
@@ -114,8 +124,11 @@ newly generated one).
 
 ### Use as a GitHub template
 
-Click **Use this template** when creating a new repository — the protocol
-ships pre-installed.
+The development repository is not itself the adopter template: it deliberately
+contains the framework's own checks, tests, CI, and documentation, which the
+clean bundle excludes. To start a project with the protocol pre-installed, use
+the distribution bundle below (or a repository generated from its contents),
+not the development repository.
 
 ### Distribution bundle
 
@@ -127,7 +140,7 @@ the framework's own checks, tests, CI, and docs so adopters start clean:
 
 ```bash
 bash scripts/build-bundle.sh                    # assemble + archive
-bash dist/agentic-workflow-1.2.0/install.sh /path/to/your-project
+bash dist/agentic-workflow-1.2.1/install.sh /path/to/your-project
 ```
 
 ---

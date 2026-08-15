@@ -36,6 +36,11 @@
     managed blocks from merge files, the install manifest, and v1.0 legacy
     files. Project-owned seed files and custom merge content are preserved.
 
+.PARAMETER PruneUnverifiedLegacy
+    Remove v1.0 legacy files whose content cannot be proven to be framework
+    material. Every such file is backed up to .agentic-backup/ first. Without
+    this flag unverifiable legacy files are preserved as conflicts.
+
 .PARAMETER Backup
     Back up files to .agentic-backup/ before modifying.
 
@@ -70,6 +75,7 @@ param(
     [switch] $Update,
     [switch] $Prune,
     [switch] $Uninstall,
+    [switch] $PruneUnverifiedLegacy,
     [switch] $Backup,
     [string] $Tools = "claude,gemini,aider",
     [switch] $GenerateChecks,
@@ -104,6 +110,8 @@ Usage:
   -Uninstall             Remove the framework: managed files, managed blocks
                          from merge files, the manifest, and v1.0 legacy files.
                          Project-owned seeds and custom merge content remain.
+  -PruneUnverifiedLegacy Remove v1.0 legacy files whose content cannot be
+                         proven framework material. Backs each up first.
   -Plan                  Show what would be done without changing anything.
   -Backup                Back up files to .agentic-backup/ before modifying.
   -GenerateChecks        Write .agentic/checks.tsv from the detected stack.
@@ -183,8 +191,9 @@ foreach ($t in $ToolsList) {
 
 # v1.0 shipped per-tool adapter files that were removed in 2.x (AGENTS.md is
 # the single canonical protocol). On update they are only reported; -Prune and
-# -Uninstall remove the files. Legacy directories can hold user settings, so
-# they are always report-only and never auto-removed.
+# -Uninstall remove a legacy file only when its content can be proven to be a
+# v1.0 framework artifact (see Test-LegacyOwned). Legacy directories can hold
+# user settings, so they are always report-only and never auto-removed.
 $LegacyFiles = @(
     ".cursorrules",
     ".windsurfrules",
@@ -198,12 +207,48 @@ $LegacyDirs = @(
     "Memory"
 )
 
+# SHA-256 of the exact v1.0 shipped content (bytes of the v1.0.0 release).
+# A checksum match proves the file is untouched framework material. Content
+# that does not match byte-for-byte (for example after line-ending conversion)
+# still matches the framework signature via Test-LegacyOwned.
+function Get-LegacyV10Checksum {
+    param([string] $RelativePath)
+    switch ($RelativePath) {
+        ".cursorrules" { return "010c2059541568ccf8fb7cb09792f741810814d98534b0bc2bc186124187a0a7" }
+        ".windsurfrules" { return "3d5dd1201a4cd96808da9099eeed85f310d41b00b7661e14e1e132b70651c1c8" }
+        ".clinerules" { return "af90e132e56e8a782a16e6ec5a622564af639fae3f4e075b082c93e73628c099" }
+        "CONVENTIONS.md" { return "b6e8886439aee9e5a34c10d67536dc5a75cc2e548c2914ed4ae5946e15b3ea20" }
+        ".github/copilot-instructions.md" { return "3f99180659e22a3bf7a707cb36e39bd41e033b217576193aab101279fe5ceda2" }
+    }
+    return $null
+}
+
+# Every path this installer may legitimately record in the install manifest,
+# independent of the current tool selection so that deselected adapters can
+# still be pruned safely. Used to validate a previous manifest before any
+# mutation: an entry outside this set is evidence of tampering.
+$AllKnownFiles = @($ManagedFiles + $SeedFiles + $MergeFiles)
+foreach ($opt in @(".aider.conf.yml", "CLAUDE.md", "GEMINI.md")) {
+    if ($opt -notin $AllKnownFiles) { $AllKnownFiles += $opt }
+}
+$AllKnownFiles += @(".agentic/checks.tsv", ".agentic/install-manifest.tsv")
+$AllKnownFiles += $LegacyFiles
+
 $script:BackupDir = $null
-$script:ManifestTmp = [System.IO.Path]::GetTempFileName()
-$script:SnapDir = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-snap-' + [guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Path $script:SnapDir -Force | Out-Null
+# Scratch files are created lazily and only in a non-plan run: -Plan must
+# never create snapshots or manifest scratch files, byte-for-byte read-only.
+$script:ManifestTmp = $null
+$script:SnapDir = $null
+$script:TmpFiles = New-Object System.Collections.Generic.List[string]
 $script:Changed = New-Object System.Collections.Generic.List[string]
 $script:BackupExisted = Test-Path -LiteralPath (Join-Path $TargetDir ".agentic-backup")
+$script:MergeStartIndex = -1
+$script:MergeEndIndex = -1
+if (-not $Plan) {
+    $script:ManifestTmp = [System.IO.Path]::GetTempFileName()
+    $script:SnapDir = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-snap-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $script:SnapDir -Force | Out-Null
+}
 
 function ConvertTo-PortablePath {
     param([string] $Path)
@@ -279,7 +324,6 @@ function Restore-PreviousState {
         else {
             Remove-Item -LiteralPath $dst -Force -ErrorAction SilentlyContinue
         }
-        Remove-Item -LiteralPath "$dst.agentic-tmp" -Force -ErrorAction SilentlyContinue
     }
     # A failed fresh install can leave behind directories that did not exist
     # before (e.g. .agentic/). Remove any directory that became empty only
@@ -303,6 +347,34 @@ function Restore-PreviousState {
 function Write-Utf8NoBom {
     param([string] $Path, [string] $Content)
     [System.IO.File]::WriteAllText($Path, $Content, [System.Text.UTF8Encoding]::new($false))
+}
+
+# Creates an unpredictable scratch file path next to $PrefixPath (same
+# filesystem, so the final Move-Item is atomic) and records it for cleanup.
+# Never a predictable ".agentic-tmp" name: concurrent installs cannot clobber
+# each other, and a pre-existing "*.agentic-tmp" file is never touched.
+function New-Tmp {
+    param([string] $PrefixPath)
+    $tmp = $null
+    do {
+        $tmp = $PrefixPath + "." + [System.IO.Path]::GetRandomFileName()
+    } while (Test-Path -LiteralPath $tmp)
+    $script:TmpFiles.Add($tmp)
+    return $tmp
+}
+
+function Write-AgenticFile {
+    param([string] $Path, [string] $Content)
+    $tmp = New-Tmp $Path
+    [System.IO.File]::WriteAllText($tmp, $Content, [System.Text.UTF8Encoding]::new($false))
+    Move-Item -LiteralPath $tmp -Destination $Path -Force
+}
+
+function Write-AgenticLines {
+    param([string] $Path, [string[]] $Lines)
+    $tmp = New-Tmp $Path
+    [System.IO.File]::WriteAllLines($tmp, $Lines, [System.Text.UTF8Encoding]::new($false))
+    Move-Item -LiteralPath $tmp -Destination $Path -Force
 }
 
 function Install-Managed {
@@ -404,57 +476,268 @@ function Install-Merge {
     $dst = Join-Path $TargetDir $RelativePath
     $srcContent = (Get-Content -Raw -LiteralPath $src).TrimEnd()
 
-    if (-not (Test-Path -LiteralPath $dst)) {
-        if ($script:Plan) { Write-Host "  merge  $RelativePath (create)"; return }
-        Snapshot-File $RelativePath
-        $parent = Split-Path -Parent $dst
-        if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
-        Write-Utf8NoBom $dst $srcContent
-        Write-Host "  merge  $RelativePath (create)"
-        Add-ManifestEntry $RelativePath "merge" (Get-FileChecksum $dst)
-        return
+    switch (Get-MergeState $RelativePath) {
+        "absent" {
+            if ($script:Plan) { Write-Host "  merge  $RelativePath (create)"; return }
+            Snapshot-File $RelativePath
+            $parent = Split-Path -Parent $dst
+            if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+            Write-AgenticFile $dst $srcContent
+            Write-Host "  merge  $RelativePath (create)"
+            Add-ManifestEntry $RelativePath "merge" (Get-FileChecksum $dst)
+        }
+        "empty" {
+            if ($script:Plan) { Write-Host "  merge  $RelativePath (create)"; return }
+            Snapshot-File $RelativePath
+            Write-AgenticFile $dst $srcContent
+            Write-Host "  merge  $RelativePath (create)"
+            Add-ManifestEntry $RelativePath "merge" (Get-FileChecksum $dst)
+        }
+        "malformed" {
+            if ($script:Plan) { Write-Host "  conflict $RelativePath (malformed merge markers)"; return }
+            Snapshot-File $RelativePath
+            Snapshot-File "$RelativePath.new"
+            Copy-Item -LiteralPath $src -Destination "$dst.new" -Force
+            Write-Host "  conflict $RelativePath (malformed merge markers detected; wrote $RelativePath.new)"
+            Add-ManifestEntry $RelativePath "merge" (Get-FileChecksum $src)
+        }
+        "plain" {
+            if ($script:Plan) { Write-Host "  merge  $RelativePath (insert managed block above existing content)"; return }
+            Snapshot-File $RelativePath
+            if ($Backup) { Backup-File $RelativePath }
+            $existing = Get-Content -Raw -LiteralPath $dst
+            $newContent = $srcContent + "`n`n---`n`n" + $existing.TrimStart()
+            Write-AgenticFile $dst $newContent
+            Write-Host "  merge  $RelativePath (managed block inserted, existing content preserved)"
+            Add-ManifestEntry $RelativePath "merge" (Get-FileChecksum $dst)
+        }
+        "valid" {
+            if ($script:Plan) { Write-Host "  merge  $RelativePath (update managed block, preserve custom content)"; return }
+            Snapshot-File $RelativePath
+            if ($Backup) { Backup-File $RelativePath }
+            $existing = Get-Content -Raw -LiteralPath $dst
+            $newContent = $existing.Substring(0, $script:MergeStartIndex) +
+                $srcContent + "`n" + $existing.Substring($script:MergeEndIndex + $EndMarker.Length)
+            Write-AgenticFile $dst $newContent
+            Write-Host "  merge  $RelativePath (managed block updated, custom content preserved)"
+            Add-ManifestEntry $RelativePath "merge" (Get-FileChecksum $dst)
+        }
     }
+}
 
+# ---------------------------------------------------------------------------
+# Shared merge-marker parsing. Both Install-Merge and the prune/uninstall path
+# classify a merge file the same way so their behavior can never diverge:
+#   absent    file does not exist
+#   empty     file exists but has no non-whitespace content
+#   plain     file has content but no framework markers
+#   valid     exactly one start + one end marker, end after start
+#   malformed any other marker arrangement (never rewritten in place)
+# Get-MergeState sets $script:MergeStartIndex / $script:MergeEndIndex to the
+# character offsets of the first start/end marker for a valid block.
+# ---------------------------------------------------------------------------
+function Get-MergeState {
+    param([string] $RelativePath)
+    $dst = Join-Path $TargetDir $RelativePath
+    if (-not (Test-Path -LiteralPath $dst)) { return "absent" }
     $existing = Get-Content -Raw -LiteralPath $dst
-    $startCount = ([regex]::Matches($existing, [regex]::Escape($StartMarker))).Count
-    $endCount = ([regex]::Matches($existing, [regex]::Escape($EndMarker))).Count
-    $startIdx = $existing.IndexOf($StartMarker)
-    $endIdx = if ($startIdx -ge 0) { $existing.IndexOf($EndMarker, $startIdx) } else { -1 }
+    $startMatches = [regex]::Matches($existing, [regex]::Escape($StartMarker))
+    $endMatches = [regex]::Matches($existing, [regex]::Escape($EndMarker))
+    $startCount = $startMatches.Count
+    $endCount = $endMatches.Count
+    $firstStart = $startMatches | Select-Object -First 1
+    $firstEnd = $endMatches | Select-Object -First 1
+    $script:MergeStartIndex = if ($firstStart) { $firstStart.Index } else { -1 }
+    $script:MergeEndIndex = if ($firstEnd) { $firstEnd.Index } else { -1 }
+    $malformed = $startCount -gt 1 -or $endCount -gt 1 -or
+        ($startCount -eq 1 -and $endCount -eq 0) -or
+        ($startCount -eq 0 -and $endCount -eq 1) -or
+        ($startCount -eq 1 -and $endCount -eq 1 -and $script:MergeEndIndex -le $script:MergeStartIndex)
+    if ($malformed) { return "malformed" }
+    if ($startCount -eq 1 -and $endCount -eq 1) { return "valid" }
+    if ([string]::IsNullOrWhiteSpace($existing)) { return "empty" }
+    return "plain"
+}
 
-    if ($startCount -gt 1 -or $endCount -gt 1 -or (($startCount -eq 1 -and $endCount -eq 0) -or ($startCount -eq 0 -and $endCount -eq 1) -or ($startCount -eq 1 -and $endCount -eq 1 -and $endIdx -le $startIdx))) {
-        if ($script:Plan) { Write-Host "  conflict $RelativePath (malformed merge markers)"; return }
-        Snapshot-File $RelativePath
-        Snapshot-File "$RelativePath.new"
-        Copy-Item -LiteralPath $src -Destination "$dst.new" -Force
-        Write-Host "  conflict $RelativePath (malformed merge markers detected; wrote $RelativePath.new)"
-        Add-ManifestEntry $RelativePath "merge" (Get-FileChecksum $src)
-        return
-    }
+# True when removing the managed block from $RelativePath would leave no
+# non-whitespace content behind. Read-only: lets -Plan report the would-be
+# outcome without modifying the file.
+function Test-MergeRemainderBlank {
+    param([string] $RelativePath)
+    $state = Get-MergeState $RelativePath
+    if ($state -ne "valid") { return $false }
+    $existing = Get-Content -Raw -LiteralPath (Join-Path $TargetDir $RelativePath)
+    $remainder = $existing.Substring(0, $script:MergeStartIndex) +
+        $existing.Substring($script:MergeEndIndex + $EndMarker.Length)
+    return [string]::IsNullOrWhiteSpace($remainder)
+}
 
-    if ($startIdx -ge 0 -and $endIdx -gt $startIdx) {
-        if ($script:Plan) { Write-Host "  merge  $RelativePath (update managed block, preserve custom content)"; return }
-        Snapshot-File $RelativePath
-        if ($Backup) { Backup-File $RelativePath }
-        $newContent = $existing.Substring(0, $startIdx) + $srcContent + "`n" + $existing.Substring($endIdx + $EndMarker.Length)
-        Write-Utf8NoBom $dst $newContent
-        Write-Host "  merge  $RelativePath (managed block updated, custom content preserved)"
-        Add-ManifestEntry $RelativePath "merge" (Get-FileChecksum $dst)
-    }
-    elseif (-not [string]::IsNullOrWhiteSpace($existing)) {
-        if ($script:Plan) { Write-Host "  merge  $RelativePath (insert managed block above existing content)"; return }
-        Snapshot-File $RelativePath
-        if ($Backup) { Backup-File $RelativePath }
-        $newContent = $srcContent + "`n`n---`n`n" + $existing.TrimStart()
-        Write-Utf8NoBom $dst $newContent
-        Write-Host "  merge  $RelativePath (managed block inserted, existing content preserved)"
-        Add-ManifestEntry $RelativePath "merge" (Get-FileChecksum $dst)
+# ---------------------------------------------------------------------------
+# Previous-manifest validation. The manifest is the record of what this
+# installer may later prune or replace; it is never trusted implicitly. A
+# malformed entry hard-fails the run before anything is written, so a tampered
+# or adversarial manifest can never steer the installer into removing files
+# outside its documented scope.
+# ---------------------------------------------------------------------------
+
+# Follows every path segment so a symlink/junction inside the project that
+# points outside resolves to its physical target, not its lexical path.
+function Resolve-PhysicalPath {
+    param([string] $Path)
+    $full = [System.IO.Path]::GetFullPath($Path)
+    $root = [System.IO.Path]::GetPathRoot($full)
+    $current = $root
+    $parts = $full.Substring($root.Length) -split '[/\\]' | Where-Object { $_ -ne '' }
+    $maxHops = 32
+    $winPlatform = [bool]$IsWindows -or ($env:OS -eq 'Windows_NT')
+    $pathComparer = if ($winPlatform) {
+        [System.StringComparer]::OrdinalIgnoreCase
     }
     else {
-        if ($script:Plan) { Write-Host "  merge  $RelativePath (create)"; return }
-        Snapshot-File $RelativePath
-        Write-Utf8NoBom $dst $srcContent
-        Write-Host "  merge  $RelativePath (create)"
-        Add-ManifestEntry $RelativePath "merge" (Get-FileChecksum $dst)
+        [System.StringComparer]::Ordinal
+    }
+    foreach ($part in $parts) {
+        $current = Join-Path $current $part
+        $seen = [System.Collections.Generic.HashSet[string]]::new($pathComparer)
+        $hops = 0
+        while ($true) {
+            $key = [System.IO.Path]::GetFullPath($current)
+            if (-not $seen.Add($key)) {
+                throw "symbolic-link cycle detected while resolving '$Path'"
+            }
+            if ($hops -gt $maxHops) {
+                throw "symbolic-link chain exceeds $maxHops hops while resolving '$Path'"
+            }
+            $item = Get-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
+            if (-not $item -or [string]::IsNullOrEmpty($item.Target)) { break }
+            $hops++
+            if ([System.IO.Path]::IsPathRooted($item.Target)) {
+                $current = $item.Target
+            }
+            else {
+                $parent = [System.IO.Path]::GetDirectoryName($current)
+                if ([string]::IsNullOrEmpty($parent)) {
+                    $parent = [System.IO.Path]::GetPathRoot($current)
+                }
+                $current = Join-Path $parent $item.Target
+            }
+        }
+    }
+    return [System.IO.Path]::GetFullPath($current)
+}
+
+# Lexical checks: a valid manifest path is relative, has no empty / "." / ".."
+# segments, no drive-letter prefix, no backslashes, and no control characters.
+function Test-LexicalManifestPath {
+    param([string] $Path)
+    if ([string]::IsNullOrEmpty($Path)) { return $false }
+    if ($Path.Contains('\\')) { return $false }
+    if ($Path -match '[\x00-\x1f\x7f]') { return $false }
+    $p = ConvertTo-PortablePath $Path
+    if ($p.StartsWith('/')) { return $false }
+    if ($p -match '^[A-Za-z]:') { return $false }
+    foreach ($seg in $p.Split('/')) {
+        if ([string]::IsNullOrEmpty($seg) -or $seg -eq '.' -or $seg -eq '..') { return $false }
+    }
+    return $true
+}
+
+# True when $RelativePath stays physically at or beneath the physical project
+# root. A symlinked directory inside the project that points outside, or a
+# final component that is a symlink to an outside path, fails confinement.
+# Paths whose parent does not exist cannot escape and are accepted.
+function Test-PhysicalWithinRoot {
+    param([string] $RelativePath)
+    $full = Join-Path $TargetDir $RelativePath
+    $parent = Split-Path -Parent $full
+    $item = Get-Item -LiteralPath $full -Force -ErrorAction SilentlyContinue
+    $isLink = $null -ne $item -and ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)
+    if (-not ((Test-Path -LiteralPath $parent -PathType Container) -or $isLink)) { return $true }
+    try {
+        $resolved = Resolve-PhysicalPath $full
+        $resolvedRoot = Resolve-PhysicalPath $TargetDir
+    }
+    catch { return $false }
+    $rootTrimmed = $resolvedRoot.TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar
+    )
+    $rootPrefix = $rootTrimmed + [System.IO.Path]::DirectorySeparatorChar
+    $win = [bool]$IsWindows -or ($env:OS -eq 'Windows_NT')
+    $cmp = if ($win) { [System.StringComparison]::OrdinalIgnoreCase } else { [System.StringComparison]::Ordinal }
+    return $resolved.Equals($rootTrimmed, $cmp) -or $resolved.StartsWith($rootPrefix, $cmp)
+}
+
+function Test-AllowedManifestPath {
+    param([string] $RelativePath)
+    $rel = ConvertTo-PortablePath $RelativePath
+    foreach ($r in $AllKnownFiles) {
+        if ((ConvertTo-PortablePath $r) -eq $rel) { return $true }
+    }
+    return $false
+}
+
+# Validates the on-disk install manifest when one exists; throws on any
+# malformed entry. Read-only, so it also runs under -Plan.
+function Assert-PreviousManifestValid {
+    $mf = Join-Path $TargetDir ".agentic\install-manifest.tsv"
+    if (-not (Test-Path -LiteralPath $mf -PathType Leaf)) { return }
+    $lineNum = 0
+    $seen = @{}
+    $first = $true
+    foreach ($rawLine in Get-Content -LiteralPath $mf) {
+        $lineNum++
+        $line = $rawLine.TrimEnd("`r")
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        if ($line.StartsWith('#')) { continue }
+        if ($first) {
+            $first = $false
+            if ($line -notmatch '^\d+\.\d+\.\d+$') {
+                Write-Host "ERROR: install manifest line $lineNum is not a valid version header ('$line')."
+                throw "invalid install manifest"
+            }
+            continue
+        }
+        $fields = $line -split "`t"
+        if ($fields.Count -ne 3) {
+            Write-Host "ERROR: install manifest line $lineNum is malformed (expected path<TAB>category<TAB>sha256)."
+            throw "invalid install manifest"
+        }
+        $p = $fields[0]; $c = $fields[1]; $s = $fields[2]
+        if ([string]::IsNullOrWhiteSpace($p) -or [string]::IsNullOrWhiteSpace($c) -or [string]::IsNullOrWhiteSpace($s)) {
+            Write-Host "ERROR: install manifest line $lineNum is malformed (expected path<TAB>category<TAB>sha256)."
+            throw "invalid install manifest"
+        }
+        if ($c -notin @("managed", "merge", "seed")) {
+            Write-Host "ERROR: install manifest line $lineNum has invalid category '$c' for '$p'."
+            throw "invalid install manifest"
+        }
+        if ($s -notmatch '^[0-9a-f]{64}$') {
+            Write-Host "ERROR: install manifest line $lineNum has invalid checksum for '$p'."
+            throw "invalid install manifest"
+        }
+        if (-not (Test-LexicalManifestPath $p)) {
+            Write-Host "ERROR: install manifest line $lineNum has invalid path '$p'."
+            throw "invalid install manifest"
+        }
+        $norm = ConvertTo-PortablePath $p
+        if ($seen.ContainsKey($norm)) {
+            Write-Host "ERROR: install manifest line $lineNum has duplicate path '$p'."
+            throw "invalid install manifest"
+        }
+        $seen[$norm] = $true
+        if (-not (Test-AllowedManifestPath $p)) {
+            Write-Host "ERROR: install manifest line $lineNum records path '$p', which is not a framework-managed path."
+            throw "invalid install manifest"
+        }
+        if (-not (Test-PhysicalWithinRoot $p)) {
+            Write-Host "ERROR: install manifest line $lineNum path '$p' escapes the project root."
+            throw "invalid install manifest"
+        }
+    }
+    if ($first) {
+        Write-Host "ERROR: install manifest '$mf' contains no version header."
+        throw "invalid install manifest"
     }
 }
 
@@ -503,18 +786,18 @@ function Test-BlankFile {
 }
 
 # Removes the marker-delimited managed block from a merge file. Returns $true
-# on success; $false when the markers are malformed (never rewritten).
+# on success; $false when the markers are malformed (never rewritten). Shares
+# the same merge classification as Install-Merge via Get-MergeState.
 function Remove-MergeBlock {
     param([string] $RelativePath)
+    if ((Get-MergeState $RelativePath) -ne "valid") { return $false }
     $dst = Join-Path $TargetDir $RelativePath
     $existing = Get-Content -Raw -LiteralPath $dst
-    $startIdx = $existing.IndexOf($StartMarker)
-    $endIdx = if ($startIdx -ge 0) { $existing.IndexOf($EndMarker, $startIdx) } else { -1 }
-    if ($startIdx -lt 0 -or $endIdx -le $startIdx) { return $false }
-    $newContent = $existing.Substring(0, $startIdx) + $existing.Substring($endIdx + $EndMarker.Length)
+    $newContent = $existing.Substring(0, $script:MergeStartIndex) +
+        $existing.Substring($script:MergeEndIndex + $EndMarker.Length)
     Snapshot-File $RelativePath
     if ($Backup) { Backup-File $RelativePath }
-    Write-Utf8NoBom $dst $newContent
+    Write-AgenticFile $dst $newContent
     return $true
 }
 
@@ -532,20 +815,42 @@ function Invoke-PruneEntry {
         }
         "merge" {
             if (Test-Path -LiteralPath $dst) {
-                if (Remove-MergeBlock $RelativePath) {
-                    if (Test-BlankFile $dst) {
-                        if ($script:Plan) { Write-Host "  prune  $RelativePath (managed block removed; file would be empty)"; return }
+                switch (Get-MergeState $RelativePath) {
+                    "empty" {
+                        if ($script:Plan) { Write-Host "  prune  $RelativePath (empty file)"; return }
                         Snapshot-File $RelativePath
                         if ($Backup) { Backup-File $RelativePath }
                         Remove-Item -LiteralPath $dst -Force
-                        Write-Host "  prune  $RelativePath (managed block removed; file removed)"
+                        Write-Host "  prune  $RelativePath (empty file)"
                     }
-                    else {
-                        Write-Host "  prune  $RelativePath (managed block removed; custom content preserved)"
+                    "plain" {
+                        Write-Host "  note   $RelativePath (no managed block found; custom content preserved)"
                     }
-                }
-                else {
-                    Write-Host "  conflict $RelativePath (malformed merge markers; not pruned)"
+                    "malformed" {
+                        Write-Host "  conflict $RelativePath (malformed merge markers; not pruned)"
+                    }
+                    "valid" {
+                        if ($script:Plan) {
+                            if (Test-MergeRemainderBlank $RelativePath) {
+                                Write-Host "  prune  $RelativePath (managed block removed; file would be empty)"
+                            }
+                            else {
+                                Write-Host "  prune  $RelativePath (managed block removed; custom content preserved)"
+                            }
+                            return
+                        }
+                        if (Remove-MergeBlock $RelativePath) {
+                            if (Test-BlankFile $dst) {
+                                Snapshot-File $RelativePath
+                                if ($Backup) { Backup-File $RelativePath }
+                                Remove-Item -LiteralPath $dst -Force
+                                Write-Host "  prune  $RelativePath (managed block removed; file removed)"
+                            }
+                            else {
+                                Write-Host "  prune  $RelativePath (managed block removed; custom content preserved)"
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -569,16 +874,47 @@ function Invoke-PruneEntry {
     }
 }
 
-# v1.0 adapter files are removed only by explicit -Prune/-Uninstall.
+# A legacy file is "owned" when its content can be proven to be v1.0
+# framework material: byte-for-byte equal to the shipped v1.0 content, or
+# carrying the framework signature text, or recorded by a previous manifest.
+# Anything else may be a user-created file and is preserved as a conflict
+# unless -PruneUnverifiedLegacy (which backs it up first) is given.
+function Test-LegacyOwned {
+    param([string] $RelativePath)
+    $path = Join-Path $TargetDir $RelativePath
+    if (-not (Test-Path -LiteralPath $path)) { return $false }
+    $expected = Get-LegacyV10Checksum $RelativePath
+    if ($expected -and (Get-FileChecksum $path) -eq $expected) { return $true }
+    $content = Get-Content -Raw -LiteralPath $path -ErrorAction SilentlyContinue
+    if ($content -match '@@AGENTIC-PROTOCOL-|Universal Agentic Development Protocol|\.agentic/Memory/') { return $true }
+    foreach ($e in Get-PreviousManifestEntries) {
+        if ((ConvertTo-PortablePath $e.Path) -eq (ConvertTo-PortablePath $RelativePath)) { return $true }
+    }
+    return $false
+}
+
+# v1.0 adapter files are removed only by explicit -Prune/-Uninstall, and only
+# when owned (or with an explicit backup under -PruneUnverifiedLegacy).
 function Invoke-PruneLegacy {
     foreach ($f in $LegacyFiles) {
         $path = Join-Path $TargetDir $f
-        if (Test-Path -LiteralPath $path) {
+        if (-not (Test-Path -LiteralPath $path)) { continue }
+        if (Test-LegacyOwned $f) {
             if ($script:Plan) { Write-Host "  prune  $f (legacy v1.0 artifact)"; continue }
             Snapshot-File $f
             if ($Backup) { Backup-File $f }
             Remove-Item -LiteralPath $path -Force
             Write-Host "  prune  $f (legacy v1.0 artifact)"
+        }
+        elseif ($PruneUnverifiedLegacy) {
+            if ($script:Plan) { Write-Host "  prune  $f (unverified legacy artifact; would back up to .agentic-backup first)"; continue }
+            Snapshot-File $f
+            Backup-File $f
+            Remove-Item -LiteralPath $path -Force
+            Write-Host "  prune  $f (unverified legacy artifact; backed up)"
+        }
+        else {
+            Write-Host "  conflict $f (content could not be verified as a v1.0 framework artifact; preserved; use -PruneUnverifiedLegacy to remove)"
         }
     }
     foreach ($f in $LegacyDirs) {
@@ -624,7 +960,7 @@ function Write-PruneManifest {
             $lines += ("{0}`t{1}`t{2}" -f $e.Path, $e.Category, $e.Checksum)
         }
     }
-    [System.IO.File]::WriteAllLines($mf, $lines, [System.Text.UTF8Encoding]::new($false))
+    Write-AgenticLines $mf $lines
 }
 
 function Invoke-Uninstall {
@@ -728,7 +1064,7 @@ function Write-Manifest {
         $ProtocolVersion
     )
     $lines += Get-Content -LiteralPath $script:ManifestTmp
-    [System.IO.File]::WriteAllLines($mf, $lines, [System.Text.UTF8Encoding]::new($false))
+    Write-AgenticLines $mf $lines
 }
 
 function Assert-NotPartial {
@@ -761,6 +1097,11 @@ elseif ($Update) { Write-Host "  mode: update" }
 Write-Host ""
 
 try {
+    # The previous manifest is validated before anything else, in every mode
+    # including -Plan: a tampered or adversarial manifest hard-fails the run
+    # before any file is created, modified, or removed.
+    Assert-PreviousManifestValid
+
     if ($Prune) {
         Invoke-PruneObsolete
         Invoke-PruneLegacy
@@ -821,7 +1162,7 @@ try {
         if ($Backup -and (Test-Path -LiteralPath $dst)) { Backup-File $rel }
         $parent = Split-Path -Parent $dst
         if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
-        $tmp = "$dst.agentic-tmp"
+        $tmp = New-Tmp $dst
         Copy-Item -LiteralPath $gen -Destination $tmp -Force
         Move-Item -LiteralPath $tmp -Destination $dst -Force
         Write-Host "  promoted '$gen' to '$rel'"
@@ -860,6 +1201,7 @@ catch {
     exit 1
 }
 finally {
-    Remove-Item -Recurse -Force $script:SnapDir -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $script:ManifestTmp -Force -ErrorAction SilentlyContinue
+    if ($script:SnapDir) { Remove-Item -Recurse -Force $script:SnapDir -ErrorAction SilentlyContinue }
+    if ($script:ManifestTmp) { Remove-Item -LiteralPath $script:ManifestTmp -Force -ErrorAction SilentlyContinue }
+    foreach ($t in $script:TmpFiles) { Remove-Item -LiteralPath $t -Force -ErrorAction SilentlyContinue }
 }
