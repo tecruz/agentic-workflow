@@ -15,10 +15,13 @@
 
 ## Notes
 
-- v1.2.1 lifecycle-hardening work is complete and verified locally:
-  `bash -n` OK; PowerShell parse OK; Bats 105 total / 0 failures / 1 CI-only
-  skip; Pester 91/91. Bundle `dist/agentic-workflow-1.2.1/` rebuilt and
-  `sha256sum -c` clean. No tag, push, or release without explicit approval.
+- v1.2.1 lifecycle-hardening + write-confinement work is complete and verified
+  locally: `bash -n` OK on `install.sh` and `.agentic/scripts/verify.sh`;
+  PowerShell parse OK on `install.ps1` and `.agentic/scripts/verify.ps1`;
+  Bats 123 total / 0 failures / 1 CI-only skip (pwsh parity); Pester 106
+  passed / 0 failed / 2 platform skips. Bundle `dist/agentic-workflow-1.2.1/`
+  rebuilt and `sha256sum -c` clean. No tag, push, or release without explicit
+  approval.
 - Adopters: replace the placeholders above with links to real task and decision
   files as they are created. Keep this file brief; the per-task and per-decision
   files hold the detail.

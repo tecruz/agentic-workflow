@@ -40,11 +40,11 @@ green suite did not catch:
   via symlink-following path resolution against the physical project root. Any
   invalid row hard-fails the run before anything changes.
 - **Legacy ownership by content, not filename.** v1.0 legacy files are removed
-  only when a known v1.0 checksum matches, the content carries the framework
-  signature, or the previous manifest records ownership. Unprovable files are
-  preserved as conflicts. The new `--prune-unverified-legacy`
-  (`-PruneUnverifiedLegacy`) removes them only with an automatic backup to
-  `.agentic-backup/`.
+  only when ownership is proven by content — a known v1.0 checksum match or the
+  framework signature. A previous manifest record alone never proves ownership.
+  Unprovable files are preserved as conflicts. The new
+  `--prune-unverified-legacy` (`-PruneUnverifiedLegacy`) removes them only with
+  an automatic backup to `.agentic-backup/`.
 - **Unpredictable temporary files.** All managed, merge, seed, manifest, and
   promoted-checks writes go through a `mktemp`-generated (Bash) or randomly
   named (PowerShell) scratch file created in the destination directory and
