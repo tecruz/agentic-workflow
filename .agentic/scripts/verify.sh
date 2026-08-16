@@ -583,9 +583,8 @@ else
     fi
     echo "Auto-detecting project stack (no checks.tsv)..."
     local_lines="$(detect)" || exit 1
-    if [ -n "$local_lines" ]; then
-        local det_tmp
-        det_tmp="$(mktemp)"
+     if [ -n "$local_lines" ]; then
+         det_tmp="$(mktemp)"
         printf '%s\n' "$local_lines" > "$det_tmp"
         validate_checks_tsv "$det_tmp"
         rm -f "$det_tmp"
