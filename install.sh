@@ -232,19 +232,42 @@ legacy_v10_checksum() {
     esac
 }
 
-# Every path this installer may legitimately record in the install manifest,
-# independent of the current tool selection so that deselected adapters can
-# still be pruned safely. Used to validate a previous manifest before any
-# mutation: an entry outside this set is evidence of tampering.
-ALL_KNOWN_FILES=( "${MANAGED_FILES[@]}" "${SEED_FILES[@]}" "${MERGE_FILES[@]}" )
-for _optional in ".aider.conf.yml" "CLAUDE.md" "GEMINI.md"; do
-    case " ${ALL_KNOWN_FILES[*]} " in
-        *" $_optional "*) ;;
-        *) ALL_KNOWN_FILES+=("$_optional") ;;
+# Canonical path -> category registry. Built independent of the current tool
+# selection so that deselected adapters remain validatable (a deselected
+# CLAUDE.md must still be recognized and pruned safely). The category recorded
+# in the manifest must match exactly: a known path carrying the wrong valid
+# category is tampering (e.g. CLAUDE.md recorded as managed would let prune
+# delete the entire file instead of only its managed block). Legacy paths and
+# the manifest itself are deliberately absent: they are never legitimate
+# managed / merge / seed records.
+MERGE_PATHS=" AGENTS.md CLAUDE.md GEMINI.md "
+SEED_PATHS=" .agentic/ARCHITECTURE.md .agentic/STATUS.md .agentic/checks.tsv "
+MANAGED_PATHS=""
+for _f in "${MANAGED_FILES[@]}"; do
+    case " $MANAGED_PATHS " in
+        *" $_f "*) ;;
+        *) MANAGED_PATHS="$MANAGED_PATHS $_f" ;;
     esac
 done
-ALL_KNOWN_FILES+=( ".agentic/checks.tsv" ".agentic/install-manifest.tsv" )
-ALL_KNOWN_FILES+=( "${LEGACY_FILES[@]}" )
+case " $MANAGED_PATHS " in
+    *" .aider.conf.yml "*) ;;
+    *) MANAGED_PATHS="$MANAGED_PATHS .aider.conf.yml" ;;
+esac
+
+# Prints the one legitimate category for a canonical manifest path, or returns
+# 1 when the path is not a framework-managed path at all.
+manifest_category() {
+    case " $MERGE_PATHS " in
+        *" $1 "*) printf '%s' merge; return 0 ;;
+    esac
+    case " $SEED_PATHS " in
+        *" $1 "*) printf '%s' seed; return 0 ;;
+    esac
+    case " $MANAGED_PATHS " in
+        *" $1 "*) printf '%s' managed; return 0 ;;
+    esac
+    return 1
+}
 
 BACKUP_DIR=""
 # Scratch files are created lazily and only in a non-plan run: --plan must
@@ -286,6 +309,9 @@ rollback() {
     for rel in "${CHANGED_RELS[@]:-}"; do
         dst="$TARGET_DIR/$rel"
         snap="$SNAP_DIR/${rel//\//_}"
+        # Never restore through a path that now escapes the project (e.g. a
+        # symlink planted mid-transaction): skip it rather than write outside.
+        assert_safe_destination "$rel" || continue
         if [ -f "$snap.present" ]; then
             cp "$snap" "$dst" 2>/dev/null || true
         else
@@ -355,9 +381,8 @@ backup_file() {
     src="$TARGET_DIR/$rel"
     flat="${rel//\//_}"
     [ -z "$BACKUP_DIR" ] && BACKUP_DIR="$TARGET_DIR/.agentic-backup"
-    mkdir -p "$BACKUP_DIR"
     snapshot_file ".agentic-backup/$flat"
-    cp -p "$src" "$BACKUP_DIR/$flat"
+    atomic_copy "$src" ".agentic-backup/$flat"
     echo "  backup $rel -> .agentic-backup/$flat"
 }
 
@@ -367,8 +392,7 @@ install_managed() {
     if [ ! -e "$dst" ]; then
         [ "$PLAN" -eq 1 ] && { echo "  copy   $rel (create)"; return; }
         snapshot_file "$rel"
-        mkdir -p "$(dirname "$dst")"
-        cp "$src" "$dst"
+        atomic_copy "$src" "$rel"
         echo "  copy   $rel (create)"
         printf '%s\t%s\t%s\n' "$rel" managed "$(cksum_file "$dst")" >> "$MANIFEST_TMP"
         return
@@ -377,7 +401,7 @@ install_managed() {
         [ "$PLAN" -eq 1 ] && { echo "  copy   $rel (replace: --replace-managed)"; return; }
         snapshot_file "$rel"
         [ "$BACKUP" -eq 1 ] && backup_file "$rel"
-        cp "$src" "$dst"
+        atomic_copy "$src" "$rel"
         echo "  copy   $rel (replaced: --replace-managed)"
         printf '%s\t%s\t%s\n' "$rel" managed "$(cksum_file "$dst")" >> "$MANIFEST_TMP"
         return
@@ -388,14 +412,14 @@ install_managed() {
         if [ "$prev" = "$cur" ]; then
             [ "$PLAN" -eq 1 ] && { echo "  update $rel (unchanged since last install)"; return; }
             snapshot_file "$rel"
-            cp "$src" "$dst"
+            atomic_copy "$src" "$rel"
             echo "  update $rel (unchanged since last install)"
             printf '%s\t%s\t%s\n' "$rel" managed "$(cksum_file "$dst")" >> "$MANIFEST_TMP"
         else
             [ "$PLAN" -eq 1 ] && { echo "  conflict $rel (modified since install; candidate: $rel.new)"; return; }
             snapshot_file "$rel"
             snapshot_file "$rel.new"
-            cp "$src" "${dst}.new"
+            atomic_copy "$src" "$rel.new"
             echo "  conflict $rel (modified since install; wrote $rel.new)"
             printf '%s\t%s\t%s\n' "$rel" managed "$(cksum_file "$src")" >> "$MANIFEST_TMP"
         fi
@@ -403,7 +427,7 @@ install_managed() {
         [ "$PLAN" -eq 1 ] && { echo "  conflict $rel (pre-existing; candidate: $rel.new)"; return; }
         snapshot_file "$rel"
         snapshot_file "$rel.new"
-        cp "$src" "${dst}.new"
+        atomic_copy "$src" "$rel.new"
         echo "  conflict $rel (pre-existing; wrote $rel.new; use --replace-managed to overwrite)"
         printf '%s\t%s\t%s\n' "$rel" managed "$(cksum_file "$src")" >> "$MANIFEST_TMP"
     fi
@@ -420,8 +444,7 @@ install_seed() {
     fi
     [ "$PLAN" -eq 1 ] && { echo "  seed   $rel (create)"; return; }
     snapshot_file "$rel"
-    mkdir -p "$(dirname "$dst")"
-    cp "$src" "$dst"
+    atomic_copy "$src" "$rel"
     echo "  seed   $rel (create)"
     printf '%s\t%s\t%s\n' "$rel" seed "$(cksum_file "$dst")" >> "$MANIFEST_TMP"
 }
@@ -569,18 +592,58 @@ physical_within_root() {
     return 0
 }
 
-allowed_manifest_path() {
-    local rel="$1" r
-    for r in "${ALL_KNOWN_FILES[@]}"; do
-        [ "$r" = "$rel" ] && return 0
+# Central write-confinement primitive. Refuses a destination $TARGET_DIR/$1
+# when:
+#   - the final component exists as a symlink (a write would follow it, and an
+#     in-project symlink is still an unexpected indirection for a framework
+#     file), or
+#   - the nearest existing ancestor resolves physically outside the project
+#     root (e.g. .agentic -> /outside, even when the leaf does not exist yet).
+# Paths whose ancestors do not exist cannot escape and are accepted.
+assert_safe_destination() {
+    local rel="$1" full leaf parent resolved resolved_root
+    [ -n "$rel" ] || return 1
+    full="$TARGET_DIR/$rel"
+    [ -L "$full" ] && return 1
+    leaf="$full"
+    while [ ! -e "$leaf" ] && [ ! -L "$leaf" ]; do
+        parent="$(dirname "$leaf")"
+        [ "$parent" = "$leaf" ] && break
+        leaf="$parent"
     done
+    resolved="$(resolve_physical "$leaf" 2>/dev/null)" || return 1
+    resolved_root="$(cd "$TARGET_DIR" && pwd -P)"
+    case "$resolved" in
+        "$resolved_root" | "$resolved_root/"*) return 0 ;;
+    esac
     return 1
+}
+
+# Atomic install write: asserts the destination is safe, then copies $1 onto a
+# scratch file created next to $2 (same filesystem, so the final rename is a
+# single atomic step). An interrupted copy can never expose a partially written
+# destination, and a pre-existing destination is only ever replaced by rename.
+# $2 is relative to TARGET_DIR.
+atomic_copy() {
+    local src="$1" rel="$2" dst tmp
+    dst="$TARGET_DIR/$rel"
+    if ! assert_safe_destination "$rel"; then
+        echo "ERROR: refusing to write '$rel': destination is not safely inside the project root." >&2
+        return 1
+    fi
+    mkdir -p "$(dirname "$dst")"
+    tmp="$(new_tmp "$dst")" || return 1
+    if ! cp "$src" "$tmp"; then
+        rm -f "$tmp" 2>/dev/null || true
+        return 1
+    fi
+    mv "$tmp" "$dst"
 }
 
 # Validates the on-disk install manifest when one exists; returns 1 on any
 # malformed entry. Read-only, so it also runs under --plan.
 validate_previous_manifest() {
-    local mf line_num=0 line seen="" first=1 p c s
+    local mf line_num=0 line seen="" first=1 p c s expected
     mf="$(manifest_file)"
     [ -f "$mf" ] || return 0
     while IFS= read -r line || [ -n "$line" ]; do
@@ -597,6 +660,15 @@ validate_previous_manifest() {
                 return 1
             fi
             continue
+        fi
+        # awk's -F'\t' never collapses adjacent tabs nor trims leading/trailing
+        # ones, unlike `IFS=$'\t' read`, so a row with an empty or extra field
+        # is rejected here and Bash and PowerShell agree on "exactly three
+        # fields". (Tabs are translated to a non-whitespace IFS character first,
+        # mirroring verify.sh, because tab is IFS whitespace.)
+        if ! printf '%s\n' "$line" | awk -F'\t' 'NF==3 {exit 0} {exit 1}'; then
+            echo "ERROR: install manifest line $line_num is malformed (expected exactly three tab-separated fields: path, category, sha256)." >&2
+            return 1
         fi
         IFS=$'\t' read -r p c s <<< "$line"
         if [ -z "$p" ] || [ -z "$c" ] || [ -z "$s" ]; then
@@ -621,8 +693,12 @@ validate_previous_manifest() {
                 return 1 ;;
         esac
         seen="$seen $p"
-        if ! allowed_manifest_path "$p"; then
+        if ! expected="$(manifest_category "$p")"; then
             echo "ERROR: install manifest line $line_num records path '$p', which is not a framework-managed path." >&2
+            return 1
+        fi
+        if [ "$c" != "$expected" ]; then
+            echo "ERROR: install manifest line $line_num records category '$c' for '$p'; expected '$expected'." >&2
             return 1
         fi
         if ! physical_within_root "$p"; then
@@ -682,6 +758,10 @@ strip_merge_block() {
     [ "$PLAN" -eq 1 ] && return 0
     snapshot_file "$rel"
     [ "$BACKUP" -eq 1 ] && backup_file "$rel"
+    assert_safe_destination "$rel" || {
+        echo "ERROR: refusing to rewrite '$rel': destination is not safely inside the project root." >&2
+        return 1
+    }
     tmp="$(new_tmp "$dst")"
     if ! (
         if [ "$MS_START" -gt 1 ]; then head -n "$((MS_START - 1))" "$dst"; fi
@@ -762,9 +842,11 @@ prune_entry() {
     esac
 }
 
-# True when $rel (a legacy file path) is provably a framework artifact: a
-# checksum match against the exact v1.0 content, a framework signature in the
-# content, or a record in the previous install manifest.
+# True when $rel (a legacy file path) is provably a framework artifact. A
+# manifest record is never sufficient on its own: ownership must be evidenced
+# by content (a checksum match against the exact v1.0 content, or a framework
+# signature in the file), otherwise the file is only removed via
+# --prune-unverified-legacy after a mandatory backup.
 legacy_owned() {
     local rel="$1" known cur
     known="$(legacy_v10_checksum "$rel")"
@@ -773,9 +855,6 @@ legacy_owned() {
         [ "$cur" = "$known" ] && return 0
     fi
     if grep -q -E '@@AGENTIC-PROTOCOL-|Universal Agentic Development Protocol|\.agentic/Memory/' "$TARGET_DIR/$rel" 2>/dev/null; then
-        return 0
-    fi
-    if awk -F'\t' -v p="$rel" '$1==p {found=1} END {exit !found}' "$(manifest_file)" 2>/dev/null; then
         return 0
     fi
     return 1
@@ -839,6 +918,10 @@ write_pruned_manifest() {
     [ "$PLAN" -eq 1 ] && return
     mf="$(manifest_file)"
     [ -f "$mf" ] || return 0
+    assert_safe_destination ".agentic/install-manifest.tsv" || {
+        echo "ERROR: refusing to write the install manifest: destination is not safely inside the project root." >&2
+        return 1
+    }
     tmp="$(new_tmp "$mf")"
     {
         echo "# agentic-workflow install manifest (auto-generated)"
@@ -886,8 +969,7 @@ install_merge() {
         absent)
             [ "$PLAN" -eq 1 ] && { echo "  merge  $rel (create)"; return; }
             snapshot_file "$rel"
-            mkdir -p "$(dirname "$dst")"
-            cp "$src" "$dst"
+            atomic_copy "$src" "$rel"
             echo "  merge  $rel (create)"
             printf '%s\t%s\t%s\n' "$rel" merge "$(cksum_file "$dst")" >> "$MANIFEST_TMP"
             return ;;
@@ -897,7 +979,7 @@ install_merge() {
             [ "$PLAN" -eq 1 ] && { echo "  conflict $rel (malformed merge markers; candidate: $rel.new)"; return; }
             snapshot_file "$rel"
             snapshot_file "$rel.new"
-            cp "$src" "${dst}.new"
+            atomic_copy "$src" "$rel.new"
             echo "  conflict $rel (malformed merge markers detected; wrote $rel.new)"
             printf '%s\t%s\t%s\n' "$rel" merge "$(cksum_file "$src")" >> "$MANIFEST_TMP"
             return ;;
@@ -905,6 +987,10 @@ install_merge() {
             [ "$PLAN" -eq 1 ] && { echo "  merge  $rel (update managed block, preserve custom content)"; return; }
             snapshot_file "$rel"
             [ "$BACKUP" -eq 1 ] && backup_file "$rel"
+            assert_safe_destination "$rel" || {
+                echo "ERROR: refusing to rewrite '$rel': destination is not safely inside the project root." >&2
+                exit 1
+            }
             tmp="$(new_tmp "$dst")"
             if ! (
                 if [ "$MS_START" -gt 1 ]; then head -n "$((MS_START - 1))" "$dst"; fi
@@ -923,6 +1009,10 @@ install_merge() {
             [ "$PLAN" -eq 1 ] && { echo "  merge  $rel (insert managed block above existing content)"; return; }
             snapshot_file "$rel"
             [ "$BACKUP" -eq 1 ] && backup_file "$rel"
+            assert_safe_destination "$rel" || {
+                echo "ERROR: refusing to rewrite '$rel': destination is not safely inside the project root." >&2
+                exit 1
+            }
             tmp="$(new_tmp "$dst")"
             if ! ( cat "$src"; printf '\n\n---\n\n'; cat "$dst" ) > "$tmp"; then
                 echo "ERROR: failed to rewrite '$rel'." >&2
@@ -936,7 +1026,7 @@ install_merge() {
         empty)
             [ "$PLAN" -eq 1 ] && { echo "  merge  $rel (create)"; return; }
             snapshot_file "$rel"
-            cp "$src" "$dst"
+            atomic_copy "$src" "$rel"
             echo "  merge  $rel (create)"
             printf '%s\t%s\t%s\n' "$rel" merge "$(cksum_file "$dst")" >> "$MANIFEST_TMP"
             return ;;
@@ -967,8 +1057,7 @@ generate_checks() {
     (cd "$TARGET_DIR" && bash "$SOURCE_DIR/.agentic/scripts/verify.sh" --validate-checks "$gen") || exit 1
     snapshot_file "$rel"
     [ "$BACKUP" -eq 1 ] && [ -e "$dst" ] && backup_file "$rel"
-    mkdir -p "$(dirname "$dst")"
-    cp "$gen" "$dst"
+    atomic_copy "$gen" "$rel"
     echo "  gen    $rel (from detected stack)"
 }
 
@@ -977,6 +1066,10 @@ write_manifest() {
     [ "$PLAN" -eq 1 ] && return
     mf="$(manifest_file)"
     snapshot_file ".agentic/install-manifest.tsv"
+    assert_safe_destination ".agentic/install-manifest.tsv" || {
+        echo "ERROR: refusing to write the install manifest: destination is not safely inside the project root." >&2
+        exit 1
+    }
     mkdir -p "$(dirname "$mf")"
     tmp="$(new_tmp "$mf")"
     {
@@ -1061,10 +1154,7 @@ if [ "$ACCEPT_DETECTED_CHECKS" -eq 1 ]; then
 
     snapshot_file "$rel"
     [ "$BACKUP" -eq 1 ] && [ -e "$dst" ] && backup_file "$rel"
-    mkdir -p "$(dirname "$dst")"
-    tmp="$(new_tmp "$dst")"
-    cp "$gen" "$tmp"
-    mv "$tmp" "$dst"
+    atomic_copy "$gen" "$rel"
     echo "  promoted '$gen' to '$rel'"
     exit 0
 fi

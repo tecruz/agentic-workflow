@@ -4,6 +4,7 @@
 
 REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
 INSTALL="$REPO_ROOT/install.sh"
+OUTSIDE_DIR=""
 
 setup() {
     TMP="$(mktemp -d)"
@@ -13,6 +14,14 @@ setup() {
 teardown() {
     cd "$REPO_ROOT"
     rm -rf "$TMP"
+    [ -z "$OUTSIDE_DIR" ] || rm -rf "$OUTSIDE_DIR"
+}
+
+# A directory physically outside the project root (a sibling of the per-test
+# $TMP), used by the symlink-confinement tests. Registered for teardown cleanup.
+make_outside_dir() {
+    OUTSIDE_DIR="$(mktemp -d "$(dirname "$TMP")/outside-XXXXXX")"
+    printf '%s' "$OUTSIDE_DIR"
 }
 
 @test "fresh install creates the core file set and manifest" {
@@ -614,6 +623,127 @@ teardown() {
     bash "$INSTALL" . --tools claude >/dev/null 2>&1
     [ "$(cat .agentic/install-manifest.tsv.agentic-tmp)" = "PRECIOUS TMP" ]
     [ "$(cat .agentic/checks.tsv.agentic-tmp)" = "PRECIOUS TMP" ]
+}
+
+# ---------------------------------------------------------------------------
+# Canonical category-registry and write-confinement adversarial tests. Every
+# test asserts the run FAILS before modifying the project or any external
+# target, and that no partial destination is ever left behind.
+# ---------------------------------------------------------------------------
+
+@test "manifest category enforcement: CLAUDE.md recorded as managed is rejected" {
+    bash "$INSTALL" . --tools all >/dev/null 2>&1
+    printf 'CLAUDE.md\tmanaged\t0000000000000000000000000000000000000000000000000000000000000000\n' >> .agentic/install-manifest.tsv
+    run bash "$INSTALL" . --prune
+    [ "$status" -ne 0 ]
+    [ -f CLAUDE.md ]
+    grep -q "AGENTIC-PROTOCOL-START" CLAUDE.md
+}
+
+@test "manifest category enforcement: .aider.conf.yml recorded as merge is rejected" {
+    bash "$INSTALL" . --tools all >/dev/null 2>&1
+    printf '.aider.conf.yml\tmerge\t0000000000000000000000000000000000000000000000000000000000000000\n' >> .agentic/install-manifest.tsv
+    run bash "$INSTALL" . --prune
+    [ "$status" -ne 0 ]
+    [ -f .aider.conf.yml ]
+}
+
+@test "manifest category enforcement: a seed path recorded as managed is rejected" {
+    bash "$INSTALL" . >/dev/null 2>&1
+    printf '.agentic/ARCHITECTURE.md\tmanaged\t0000000000000000000000000000000000000000000000000000000000000000\n' >> .agentic/install-manifest.tsv
+    run bash "$INSTALL" . --prune
+    [ "$status" -ne 0 ]
+    [ -f .agentic/ARCHITECTURE.md ]
+}
+
+@test "a forged legacy manifest row (.clinerules) is rejected before any mutation" {
+    printf 'my custom claude rules\n' > .clinerules
+    bash "$INSTALL" . >/dev/null 2>&1
+    printf '.clinerules\tmanaged\t0000000000000000000000000000000000000000000000000000000000000000\n' >> .agentic/install-manifest.tsv
+    run bash "$INSTALL" . --prune --prune-unverified-legacy
+    [ "$status" -ne 0 ]
+    [ -f .clinerules ]
+    grep -q "my custom claude rules" .clinerules
+    [ ! -d .agentic-backup ]
+}
+
+@test "a merge destination that is a symlink to an outside file is refused" {
+    outside="$(make_outside_dir)"
+    printf 'PRECIOUS OUTSIDE CONTENT\n' > "$outside/precious"
+    ln -s "$outside/precious" AGENTS.md
+    run bash "$INSTALL" .
+    [ "$status" -ne 0 ]
+    [ "$(cat "$outside/precious")" = "PRECIOUS OUTSIDE CONTENT" ]
+    [ -L AGENTS.md ]
+}
+
+@test "an .agentic directory symlinked outside is refused without writing there" {
+    outside="$(make_outside_dir)"
+    printf 'PRECIOUS OUTSIDE\n' > "$outside/keep.txt"
+    ln -s "$outside" .agentic
+    run bash "$INSTALL" .
+    [ "$status" -ne 0 ]
+    [ "$(cat "$outside/keep.txt")" = "PRECIOUS OUTSIDE" ]
+    [ ! -e "$outside/VERSION" ]
+    [ -L .agentic ]
+}
+
+@test "a failed managed copy leaves no partial destination and nothing outside is touched" {
+    [ "$(id -u)" -ne 0 ] || skip "root bypasses directory permissions"
+    mkdir -p .agentic
+    chmod 555 .agentic
+    printf 'PRECIOUS SIBLING\n' > "$TMP/evil"
+    run bash "$INSTALL" .
+    [ "$status" -ne 0 ]
+    [ ! -e .agentic/VERSION ]
+    [ "$(cat "$TMP/evil")" = "PRECIOUS SIBLING" ]
+    chmod 755 .agentic 2>/dev/null || true
+}
+
+@test "a failed seed copy leaves no partial destination" {
+    [ "$(id -u)" -ne 0 ] || skip "root bypasses directory permissions"
+    printf '{"name":"x","scripts":{"test":"true"}}\n' > package.json
+    bash "$INSTALL" . --detect-checks --tools claude >/dev/null 2>&1
+    [ -f .agentic/checks.generated.tsv ]
+    [ ! -e .agentic/checks.tsv ]
+    chmod 555 .agentic
+    run bash "$INSTALL" . --accept-detected-checks --tools claude
+    [ "$status" -ne 0 ]
+    [ ! -e .agentic/checks.tsv ]
+    [ -f .agentic/checks.generated.tsv ]
+    chmod 755 .agentic 2>/dev/null || true
+}
+
+@test "a manifest row with a leading empty field is rejected" {
+    bash "$INSTALL" . >/dev/null 2>&1
+    printf '\tmanaged\t0000000000000000000000000000000000000000000000000000000000000000\n' >> .agentic/install-manifest.tsv
+    run bash "$INSTALL" . --prune
+    [ "$status" -ne 0 ]
+    [ -f AGENTS.md ]
+}
+
+@test "a manifest row with a trailing empty field is rejected" {
+    bash "$INSTALL" . >/dev/null 2>&1
+    printf 'AGENTS.md\tmanaged\t\n' >> .agentic/install-manifest.tsv
+    run bash "$INSTALL" . --prune
+    [ "$status" -ne 0 ]
+    [ -f AGENTS.md ]
+}
+
+@test "a manifest row with an adjacent empty field is rejected" {
+    bash "$INSTALL" . >/dev/null 2>&1
+    printf 'AGENTS.md\t\t0000000000000000000000000000000000000000000000000000000000000000\n' >> .agentic/install-manifest.tsv
+    run bash "$INSTALL" . --prune
+    [ "$status" -ne 0 ]
+    [ -f AGENTS.md ]
+}
+
+@test "a manifest row with an excess (4th) field is rejected" {
+    bash "$INSTALL" . >/dev/null 2>&1
+    printf 'AGENTS.md\tmanaged\t0000000000000000000000000000000000000000000000000000000000000000\textra\n' >> .agentic/install-manifest.tsv
+    run bash "$INSTALL" . --prune
+    [ "$status" -ne 0 ]
+    [ -f AGENTS.md ]
 }
 
 # ---------------------------------------------------------------------------
