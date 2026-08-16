@@ -1063,4 +1063,146 @@ Describe 'install.ps1' {
         }
         finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
     }
+
+    # -----------------------------------------------------------------------
+    # Write-confinement and atomicity regression tests (PR #5 review). These
+    # mirror the Bats tests so Bash and PowerShell lock in the same behavior;
+    # on Windows the directory links are junctions (no elevation required).
+    # -----------------------------------------------------------------------
+
+    It 'detect mode refuses a linked .agentic without writing outside' {
+        $tmp = New-TestDir
+        $outside = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-out-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $outside -Force | Out-Null
+        try {
+            Set-Content -LiteralPath (Join-Path $outside 'keep.txt') -Value 'PRECIOUS OUTSIDE'
+            if ($IsWindows) {
+                New-Item -ItemType Junction -Path (Join-Path $tmp '.agentic') -Target $outside | Out-Null
+            }
+            else {
+                & ln -s $outside (Join-Path $tmp '.agentic')
+                if ($LASTEXITCODE -ne 0) { Set-ItResult -Skipped -Because 'symlink creation unavailable'; return }
+            }
+            & $install -Target $tmp -DetectChecks -Tools claude *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            (Get-Content -Raw (Join-Path $outside 'keep.txt')) -match 'PRECIOUS OUTSIDE' | Should -Be $true
+            Test-Path (Join-Path $outside 'checks.generated.tsv') | Should -Be $false
+            (Get-Item -LiteralPath (Join-Path $tmp '.agentic')).LinkType | Should -Not -Be $null
+        }
+        finally {
+            Remove-Item -LiteralPath (Join-Path $tmp '.agentic') -Force -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force $outside -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'prune refuses to remove a legacy file through a linked .github' {
+        $tmp = New-TestDir
+        $outside = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-out-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $outside -Force | Out-Null
+        try {
+            & $install -Target $tmp *> $null
+            Set-Content -LiteralPath (Join-Path $outside 'copilot-instructions.md') -Value 'PRECIOUS OUTSIDE'
+            if ($IsWindows) {
+                New-Item -ItemType Junction -Path (Join-Path $tmp '.github') -Target $outside | Out-Null
+            }
+            else {
+                & ln -s $outside (Join-Path $tmp '.github')
+                if ($LASTEXITCODE -ne 0) { Set-ItResult -Skipped -Because 'symlink creation unavailable'; return }
+            }
+            & $install -Target $tmp -Prune -PruneUnverifiedLegacy *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            (Get-Content -Raw (Join-Path $outside 'copilot-instructions.md')) -match 'PRECIOUS OUTSIDE' | Should -Be $true
+            (Get-Item -LiteralPath (Join-Path $tmp '.github')).LinkType | Should -Not -Be $null
+        }
+        finally {
+            Remove-Item -LiteralPath (Join-Path $tmp '.github') -Force -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force $outside -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'prune refuses to rewrite a manifest reached through a linked .agentic' {
+        $tmp = New-TestDir
+        $outside = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-out-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $outside -Force | Out-Null
+        try {
+            Set-Content -LiteralPath (Join-Path $outside 'install-manifest.tsv') -Value "1.2.1`nAGENTS.md`tmerge`t0000000000000000000000000000000000000000000000000000000000000000"
+            if ($IsWindows) {
+                New-Item -ItemType Junction -Path (Join-Path $tmp '.agentic') -Target $outside | Out-Null
+            }
+            else {
+                & ln -s $outside (Join-Path $tmp '.agentic')
+                if ($LASTEXITCODE -ne 0) { Set-ItResult -Skipped -Because 'symlink creation unavailable'; return }
+            }
+            & $install -Target $tmp -Prune *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            (Get-Content -Raw (Join-Path $outside 'install-manifest.tsv')) -match "`tmerge`t" | Should -Be $true
+            (Get-Item -LiteralPath (Join-Path $tmp '.agentic')).LinkType | Should -Not -Be $null
+        }
+        finally {
+            Remove-Item -LiteralPath (Join-Path $tmp '.agentic') -Force -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force $outside -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'case-different framework path is distinct on a case-sensitive filesystem' {
+        $tmp = New-TestDir
+        try {
+            # Probe: on a case-insensitive filesystem the two names collide.
+            Set-Content -LiteralPath (Join-Path $tmp '.CaseProbe') -Value 'probe'
+            if (Test-Path -LiteralPath (Join-Path $tmp '.caseprobe')) {
+                Set-ItResult -Skipped -Because 'case-insensitive filesystem'
+                return
+            }
+            Remove-Item -LiteralPath (Join-Path $tmp '.CaseProbe') -Force
+            New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic') -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\version') -Value 'lowercase custom'
+            & $install -Target $tmp *> $null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path (Join-Path $tmp '.agentic\VERSION') | Should -Be $true
+            (Get-Content -Raw (Join-Path $tmp '.agentic\VERSION')).Trim() | Should -Be '1.2.1'
+            (Get-Content -Raw (Join-Path $tmp '.agentic\version')) -match 'lowercase custom' | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\version.new') | Should -Be $false
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'a mid-transaction failure after a managed replacement restores prior content and mode' {
+        $tmp = New-TestDir
+        $templates = Join-Path $tmp '.agentic\templates'
+        $expectedMode = $null
+        try {
+            & $install -Target $tmp *> $null
+            $verifySh = Join-Path $tmp '.agentic\scripts\verify.sh'
+            if (-not $IsWindows) {
+                # Distinctive mode: the update rewrites the verifier, then a
+                # later write fails; rollback must restore content and this mode.
+                & chmod 750 $verifySh
+                if ($LASTEXITCODE -ne 0) { Set-ItResult -Skipped -Because 'chmod unavailable'; return }
+                $expectedMode = [int](Get-Item -LiteralPath $verifySh).UnixMode
+            }
+            try { Set-ProtectedDir $templates }
+            catch { Set-ItResult -Skipped -Because "cannot protect a directory: $($_.Exception.Message)"; return }
+            & $install -Target $tmp *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            # The verifier was replaced mid-transaction and rolled back to its
+            # prior content (and its mode on Unix).
+            (Get-Content -Raw (Join-Path $tmp '.agentic\scripts\verify.ps1')) -match 'Universal project verification script' | Should -Be $true
+            if (-not $IsWindows) {
+                [int](Get-Item -LiteralPath $verifySh).UnixMode | Should -Be $expectedMode
+            }
+            # The protected destination was never modified, and no randomized
+            # scratch file was left behind anywhere in the project.
+            Test-Path (Join-Path $templates 'FEATURE_SPEC.md') | Should -Be $true
+            $strays = @(Get-ChildItem -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -match '^[^/\\]+\.(md|yml|tsv|sh|ps1)\.[0-9A-Za-z_-]{2,}$' })
+            $strays | Should -HaveCount 0
+        }
+        finally {
+            if (Test-Path -LiteralPath $templates) { Restore-ProtectedDir $templates }
+            Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+        }
+    }
 }

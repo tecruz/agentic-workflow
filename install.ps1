@@ -135,6 +135,28 @@ if (-not (Test-Path -LiteralPath $Target)) {
 }
 $TargetDir = (Resolve-Path -LiteralPath $Target).Path
 
+# Path semantics must match the underlying filesystem: PowerShell's default
+# comparison operators are case-insensitive, which is correct on Windows but
+# unsafe on a case-sensitive Unix filesystem (a forged ".agentic/version" row
+# must never be treated as the canonical ".agentic/VERSION"). Every path-keyed
+# comparison, set, and dictionary below uses these instead.
+$script:PathComparison = if ($IsWindows) {
+    [System.StringComparison]::OrdinalIgnoreCase
+}
+else {
+    [System.StringComparison]::Ordinal
+}
+$script:PathComparer = if ($IsWindows) {
+    [System.StringComparer]::OrdinalIgnoreCase
+}
+else {
+    [System.StringComparer]::Ordinal
+}
+# Manifest category labels are fixed ASCII tokens ("managed"/"merge"/"seed");
+# they are always compared case-sensitively, on every platform.
+$script:CategoryComparison = [System.StringComparison]::Ordinal
+$script:CategoryComparer = [System.StringComparer]::Ordinal
+
 $ToolsList = @()
 if ($Tools -eq "all") {
     $ToolsList = @("claude", "gemini", "aider")
@@ -239,14 +261,27 @@ foreach ($f in $ManagedFiles) {
 }
 if (".aider.conf.yml" -notin $ManagedPaths) { $ManagedPaths += ".aider.conf.yml" }
 
+# Comparer-backed sets for category membership and duplicate detection. Built
+# once here so every manifest validation and prune decision uses the same
+# platform-appropriate comparison instead of PowerShell's default
+# case-insensitive -in / -eq operators.
+$script:MergePathSet = [System.Collections.Generic.HashSet[string]]::new($script:PathComparer)
+$script:SeedPathSet = [System.Collections.Generic.HashSet[string]]::new($script:PathComparer)
+$script:ManagedPathSet = [System.Collections.Generic.HashSet[string]]::new($script:PathComparer)
+foreach ($p in $MergePaths)   { $script:MergePathSet.Add($p) | Out-Null }
+foreach ($p in $SeedPaths)    { $script:SeedPathSet.Add($p) | Out-Null }
+foreach ($p in $ManagedPaths) { $script:ManagedPathSet.Add($p) | Out-Null }
+
 # Returns the one legitimate category for a canonical manifest path, or $null
-# when the path is not a framework-managed path at all.
+# when the path is not a framework-managed path at all. Membership uses the
+# platform path comparer (Ordinal on Unix, OrdinalIgnoreCase on Windows) so a
+# case-different path is never confused with a canonical framework path.
 function Test-ManifestCategory {
     param([string] $RelativePath)
     $rel = ConvertTo-PortablePath $RelativePath
-    if ($rel -in $MergePaths)   { return "merge" }
-    if ($rel -in $SeedPaths)    { return "seed" }
-    if ($rel -in $ManagedPaths) { return "managed" }
+    if ($script:MergePathSet.Contains($rel))   { return "merge" }
+    if ($script:SeedPathSet.Contains($rel))    { return "seed" }
+    if ($script:ManagedPathSet.Contains($rel)) { return "managed" }
     return $null
 }
 
@@ -283,7 +318,7 @@ function Read-ManifestChecksum {
     if (Test-Path -LiteralPath $mf) {
         foreach ($line in Get-Content -LiteralPath $mf) {
             $fields = $line -split "`t"
-            if ($fields.Count -ge 3 -and (ConvertTo-PortablePath $fields[0]) -eq $rel) { return $fields[2] }
+            if ($fields.Count -ge 3 -and $script:PathComparer.Equals((ConvertTo-PortablePath $fields[0]), $rel)) { return $fields[2] }
         }
     }
     return $null
@@ -333,15 +368,15 @@ function Restore-PreviousState {
     foreach ($rel in $script:Changed) {
         # Never restore through a path that now escapes the project (e.g. a
         # symlink/junction planted mid-transaction): skip it rather than write
-        # outside.
-        if (-not (Assert-SafeDestination $rel)) { continue }
+        # outside. Restore-AgenticFile / Remove-AgenticFile recheck confinement
+        # immediately before the operation and report failure.
         $dst = Join-Path $TargetDir $rel
         $snap = Join-Path $script:SnapDir ((ConvertTo-PortablePath $rel).Replace('/', '_'))
         if (Test-Path -LiteralPath "$snap.present") {
-            Copy-Item -LiteralPath $snap -Destination $dst -Force
+            if (-not (Restore-AgenticFile $snap $rel)) { continue }
         }
         else {
-            Remove-Item -LiteralPath $dst -Force -ErrorAction SilentlyContinue
+            if (-not (Remove-AgenticFile $rel)) { continue }
         }
     }
     # A failed fresh install can leave behind directories that did not exist
@@ -349,12 +384,11 @@ function Restore-PreviousState {
     # because of this transaction, walking up toward the project root.
     foreach ($rel in $script:Changed) {
         $dir = Split-Path -Parent (Join-Path $TargetDir $rel)
-        while ($dir -and -not $dir.Equals($TargetDir, [System.StringComparison]::OrdinalIgnoreCase)) {
-            if ($script:BackupDir -and $script:BackupExisted -and $dir.Equals($script:BackupDir, [System.StringComparison]::OrdinalIgnoreCase)) { break }
-            try { [System.IO.Directory]::Delete($dir, $false) }
-            catch { break }
+        while ($dir -and -not $dir.Equals($TargetDir, $script:PathComparison)) {
+            if ($script:BackupDir -and $script:BackupExisted -and $dir.Equals($script:BackupDir, $script:PathComparison)) { break }
+            Remove-AgenticEmptyDirectory $dir
             $parent = Split-Path -Parent $dir
-            if (-not $parent -or $parent.Equals($dir, [System.StringComparison]::OrdinalIgnoreCase)) { break }
+            if (-not $parent -or $parent.Equals($dir, $script:PathComparison)) { break }
             $dir = $parent
         }
     }
@@ -382,6 +416,21 @@ function New-Tmp {
     return $tmp
 }
 
+# Final rename for every staged write. The scratch file is destination-local
+# (same filesystem) so this is a single atomic step; when the rename fails the
+# temporary is removed immediately so a randomized scratch file containing
+# project or framework content can never be left behind.
+function Move-TempIntoPlace {
+    param([string] $Temp, [string] $Destination)
+    try {
+        Move-Item -LiteralPath $Temp -Destination $Destination -Force
+    }
+    catch {
+        Remove-Item -LiteralPath $Temp -Force -ErrorAction SilentlyContinue
+        throw
+    }
+}
+
 function Write-AgenticFile {
     param([string] $RelativePath, [string] $Content)
     if (-not (Assert-SafeDestination $RelativePath)) {
@@ -393,7 +442,7 @@ function Write-AgenticFile {
     if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
     $tmp = New-Tmp $dst
     [System.IO.File]::WriteAllText($tmp, $Content, [System.Text.UTF8Encoding]::new($false))
-    Move-Item -LiteralPath $tmp -Destination $dst -Force
+    Move-TempIntoPlace $tmp $dst
 }
 
 function Write-AgenticLines {
@@ -407,14 +456,16 @@ function Write-AgenticLines {
     if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
     $tmp = New-Tmp $dst
     [System.IO.File]::WriteAllLines($tmp, $Lines, [System.Text.UTF8Encoding]::new($false))
-    Move-Item -LiteralPath $tmp -Destination $dst -Force
+    Move-TempIntoPlace $tmp $dst
 }
 
 # Atomic install write: asserts the destination is safe, then copies $Source
 # onto a scratch file created next to the destination (same filesystem, so the
 # final rename is a single atomic step). An interrupted copy can never expose a
 # partially written destination, and a pre-existing destination is only ever
-# replaced by rename. $RelativePath is relative to $TargetDir.
+# replaced by rename. On Unix the source's permission bits are reapplied to the
+# scratch file, so an installed `.agentic/scripts/verify.sh` keeps its
+# executable bit. $RelativePath is relative to $TargetDir.
 function Copy-AgenticFile {
     param([string] $Source, [string] $RelativePath)
     if (-not (Assert-SafeDestination $RelativePath)) {
@@ -426,7 +477,86 @@ function Copy-AgenticFile {
     if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
     $tmp = New-Tmp $dst
     Copy-Item -LiteralPath $Source -Destination $tmp -Force
-    Move-Item -LiteralPath $tmp -Destination $dst -Force
+    if (-not $IsWindows) {
+        $mode = (Get-Item -LiteralPath $Source -Force).UnixMode
+        if ($null -ne $mode) {
+            [System.IO.File]::SetUnixFileMode($tmp, $mode)
+        }
+    }
+    Move-TempIntoPlace $tmp $dst
+}
+
+# Guarded removal: refuses a destination whose final component is a symlink or
+# whose nearest existing ancestor resolves physically outside the project root.
+# Used by prune, uninstall, legacy cleanup, and rollback. A missing destination
+# is a no-op success (rm -f semantics), so rollback can remove a path that was
+# created and then torn down within the same failed transaction.
+function Remove-AgenticFile {
+    param([string] $RelativePath)
+    if (-not (Assert-SafeDestination $RelativePath)) {
+        Write-Host "ERROR: refusing to remove '$RelativePath': destination is not safely inside the project root."
+        return $false
+    }
+    $path = Join-Path $TargetDir $RelativePath
+    if (-not (Test-Path -LiteralPath $path)) { return $true }
+    Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+    return $true
+}
+
+# Atomic rollback restore: stages the snapshot next to the destination and
+# renames it into place, preserving the snapshot's Unix mode (snapshot copies
+# keep source modes, so rollback repairs both contents and executable bits).
+# Never snapshots or backs up again, so it is safe to call from rollback.
+function Restore-AgenticFile {
+    param([string] $Snapshot, [string] $RelativePath)
+    if (-not (Assert-SafeDestination $RelativePath)) { return $false }
+    $dst = Join-Path $TargetDir $RelativePath
+    $parent = Split-Path -Parent $dst
+    if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+    $tmp = New-Tmp $dst
+    try {
+        Copy-Item -LiteralPath $Snapshot -Destination $tmp -Force
+        if (-not $IsWindows) {
+            $mode = (Get-Item -LiteralPath $Snapshot -Force).UnixMode
+            if ($null -ne $mode) {
+                [System.IO.File]::SetUnixFileMode($tmp, $mode)
+            }
+        }
+        Move-TempIntoPlace $tmp $dst
+    }
+    catch {
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+        return $false
+    }
+    return $true
+}
+
+# Removes one empty directory, but only after confirming its physical location
+# stays inside the project root and that it is not itself a reparse point, so a
+# linked directory can never be emptied from outside. Never touches a
+# non-empty directory (rmdir semantics).
+function Remove-AgenticEmptyDirectory {
+    param([string] $Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if (-not $item -or -not $item.PSIsContainer) { return }
+    if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return }
+    try {
+        $resolved = Resolve-PhysicalPath $Path
+        $resolvedRoot = Resolve-PhysicalPath $TargetDir
+    }
+    catch { return }
+    $rootTrimmed = $resolvedRoot.TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar
+    )
+    $rootPrefix = $rootTrimmed + [System.IO.Path]::DirectorySeparatorChar
+    $insideRoot = $resolved.Equals($rootTrimmed, $script:PathComparison) -or
+        $resolved.StartsWith($rootPrefix, $script:PathComparison)
+    if (-not $insideRoot) { return }
+    if (@([System.IO.Directory]::GetFileSystemEntries($Path)).Count -gt 0) { return }
+    try { [System.IO.Directory]::Delete($Path, $false) }
+    catch { }
 }
 
 function Install-Managed {
@@ -635,16 +765,9 @@ function Resolve-PhysicalPath {
     $current = $root
     $parts = $full.Substring($root.Length) -split '[/\\]' | Where-Object { $_ -ne '' }
     $maxHops = 32
-    $winPlatform = [bool]$IsWindows -or ($env:OS -eq 'Windows_NT')
-    $pathComparer = if ($winPlatform) {
-        [System.StringComparer]::OrdinalIgnoreCase
-    }
-    else {
-        [System.StringComparer]::Ordinal
-    }
     foreach ($part in $parts) {
         $current = Join-Path $current $part
-        $seen = [System.Collections.Generic.HashSet[string]]::new($pathComparer)
+        $seen = [System.Collections.Generic.HashSet[string]]::new($script:PathComparer)
         $hops = 0
         while ($true) {
             $key = [System.IO.Path]::GetFullPath($current)
@@ -709,9 +832,7 @@ function Test-PhysicalWithinRoot {
         [System.IO.Path]::AltDirectorySeparatorChar
     )
     $rootPrefix = $rootTrimmed + [System.IO.Path]::DirectorySeparatorChar
-    $win = [bool]$IsWindows -or ($env:OS -eq 'Windows_NT')
-    $cmp = if ($win) { [System.StringComparison]::OrdinalIgnoreCase } else { [System.StringComparison]::Ordinal }
-    return $resolved.Equals($rootTrimmed, $cmp) -or $resolved.StartsWith($rootPrefix, $cmp)
+    return $resolved.Equals($rootTrimmed, $script:PathComparison) -or $resolved.StartsWith($rootPrefix, $script:PathComparison)
 }
 
 # Central write-confinement predicate. Returns $false for a destination
@@ -733,7 +854,7 @@ function Assert-SafeDestination {
     $leaf = $full
     while (-not (Test-Path -LiteralPath $leaf)) {
         $parent = Split-Path -Parent $leaf
-        if ([string]::IsNullOrEmpty($parent) -or $parent.Equals($leaf, [System.StringComparison]::OrdinalIgnoreCase)) { break }
+        if ([string]::IsNullOrEmpty($parent) -or $parent.Equals($leaf, $script:PathComparison)) { break }
         $leaf = $parent
     }
     try {
@@ -746,9 +867,7 @@ function Assert-SafeDestination {
         [System.IO.Path]::AltDirectorySeparatorChar
     )
     $rootPrefix = $rootTrimmed + [System.IO.Path]::DirectorySeparatorChar
-    $win = [bool]$IsWindows -or ($env:OS -eq 'Windows_NT')
-    $cmp = if ($win) { [System.StringComparison]::OrdinalIgnoreCase } else { [System.StringComparison]::Ordinal }
-    return $resolved.Equals($rootTrimmed, $cmp) -or $resolved.StartsWith($rootPrefix, $cmp)
+    return $resolved.Equals($rootTrimmed, $script:PathComparison) -or $resolved.StartsWith($rootPrefix, $script:PathComparison)
 }
 
 # Validates the on-disk install manifest when one exists; throws on any
@@ -757,7 +876,7 @@ function Assert-PreviousManifestValid {
     $mf = Join-Path $TargetDir ".agentic\install-manifest.tsv"
     if (-not (Test-Path -LiteralPath $mf -PathType Leaf)) { return }
     $lineNum = 0
-    $seen = @{}
+    $seen = [System.Collections.Generic.HashSet[string]]::new($script:PathComparer)
     $first = $true
     foreach ($rawLine in Get-Content -LiteralPath $mf) {
         $lineNum++
@@ -782,7 +901,11 @@ function Assert-PreviousManifestValid {
             Write-Host "ERROR: install manifest line $lineNum is malformed (expected path<TAB>category<TAB>sha256)."
             throw "invalid install manifest"
         }
-        if ($c -notin @("managed", "merge", "seed")) {
+        $validCategory = $false
+        foreach ($known in @("managed", "merge", "seed")) {
+            if ($script:CategoryComparer.Equals($c, $known)) { $validCategory = $true; break }
+        }
+        if (-not $validCategory) {
             Write-Host "ERROR: install manifest line $lineNum has invalid category '$c' for '$p'."
             throw "invalid install manifest"
         }
@@ -795,17 +918,16 @@ function Assert-PreviousManifestValid {
             throw "invalid install manifest"
         }
         $norm = ConvertTo-PortablePath $p
-        if ($seen.ContainsKey($norm)) {
+        if (-not $seen.Add($norm)) {
             Write-Host "ERROR: install manifest line $lineNum has duplicate path '$p'."
             throw "invalid install manifest"
         }
-        $seen[$norm] = $true
         $expected = Test-ManifestCategory $p
         if (-not $expected) {
             Write-Host "ERROR: install manifest line $lineNum records path '$p', which is not a framework-managed path."
             throw "invalid install manifest"
         }
-        if ($c -ne $expected) {
+        if (-not $script:CategoryComparer.Equals($c, $expected)) {
             Write-Host "ERROR: install manifest line $lineNum records category '$c' for '$p'; expected '$expected'."
             throw "invalid install manifest"
         }
@@ -851,9 +973,9 @@ function Get-PreviousManifestEntries {
 function Test-DesiredFile {
     param([string] $RelativePath)
     $rel = ConvertTo-PortablePath $RelativePath
-    if ($rel -eq ".agentic/checks.tsv") { return $true }
+    if ($script:PathComparer.Equals($rel, ".agentic/checks.tsv")) { return $true }
     foreach ($r in @($ManagedFiles + $SeedFiles + $MergeFiles)) {
-        if ((ConvertTo-PortablePath $r) -eq $rel) { return $true }
+        if ($script:PathComparer.Equals((ConvertTo-PortablePath $r), $rel)) { return $true }
     }
     return $false
 }
@@ -899,7 +1021,7 @@ function Invoke-PruneEntry {
                         if ($script:Plan) { Write-Host "  prune  $RelativePath (empty file)"; return }
                         Snapshot-File $RelativePath
                         if ($Backup) { Backup-File $RelativePath }
-                        Remove-Item -LiteralPath $dst -Force
+                        if (-not (Remove-AgenticFile $RelativePath)) { throw "refusing to remove '$RelativePath': destination is not safely inside the project root" }
                         Write-Host "  prune  $RelativePath (empty file)"
                     }
                     "plain" {
@@ -922,7 +1044,7 @@ function Invoke-PruneEntry {
                             if (Test-BlankFile $dst) {
                                 Snapshot-File $RelativePath
                                 if ($Backup) { Backup-File $RelativePath }
-                                Remove-Item -LiteralPath $dst -Force
+                                if (-not (Remove-AgenticFile $RelativePath)) { throw "refusing to remove '$RelativePath': destination is not safely inside the project root" }
                                 Write-Host "  prune  $RelativePath (managed block removed; file removed)"
                             }
                             else {
@@ -943,7 +1065,7 @@ function Invoke-PruneEntry {
                 if ($script:Plan) { Write-Host "  prune  $RelativePath (unchanged since install)"; return }
                 Snapshot-File $RelativePath
                 if ($Backup) { Backup-File $RelativePath }
-                Remove-Item -LiteralPath $dst -Force
+                if (-not (Remove-AgenticFile $RelativePath)) { throw "refusing to remove '$RelativePath': destination is not safely inside the project root" }
                 Write-Host "  prune  $RelativePath (unchanged since install)"
             }
             else {
@@ -979,14 +1101,14 @@ function Invoke-PruneLegacy {
             if ($script:Plan) { Write-Host "  prune  $f (legacy v1.0 artifact)"; continue }
             Snapshot-File $f
             if ($Backup) { Backup-File $f }
-            Remove-Item -LiteralPath $path -Force
+            if (-not (Remove-AgenticFile $f)) { throw "refusing to remove '$f': destination is not safely inside the project root" }
             Write-Host "  prune  $f (legacy v1.0 artifact)"
         }
         elseif ($PruneUnverifiedLegacy) {
             if ($script:Plan) { Write-Host "  prune  $f (unverified legacy artifact; would back up to .agentic-backup first)"; continue }
             Snapshot-File $f
             Backup-File $f
-            Remove-Item -LiteralPath $path -Force
+            if (-not (Remove-AgenticFile $f)) { throw "refusing to remove '$f': destination is not safely inside the project root" }
             Write-Host "  prune  $f (unverified legacy artifact; backed up)"
         }
         else {
@@ -1053,7 +1175,7 @@ function Invoke-Uninstall {
     if (Test-Path -LiteralPath $mf) {
         if ($script:Plan) { Write-Host "  prune  .agentic/install-manifest.tsv"; return }
         Snapshot-File ".agentic/install-manifest.tsv"
-        Remove-Item -LiteralPath $mf -Force
+        if (-not (Remove-AgenticFile ".agentic/install-manifest.tsv")) { throw "refusing to remove '.agentic/install-manifest.tsv': destination is not safely inside the project root" }
         Write-Host "  prune  .agentic/install-manifest.tsv"
     }
     if ($script:Plan) {
@@ -1061,12 +1183,14 @@ function Invoke-Uninstall {
     }
     else {
         # Seed files keep .agentic/ and its project-owned contents alive; only
-        # directories emptied by managed-file removal are cleaned up. Remove
-        # deepest-first so nested empty directories are also cleaned.
-        Get-ChildItem -LiteralPath (Join-Path $TargetDir ".agentic") -Directory -Recurse -ErrorAction SilentlyContinue |
-            Where-Object { -not (Get-ChildItem -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue | Select-Object -First 1) } |
-            Sort-Object { $_.FullName.Length } -Descending |
-            ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -Recurse -ErrorAction SilentlyContinue }
+        # directories emptied by managed-file removal are cleaned up. The
+        # confinement guard rejects a linked .agentic so enumeration never
+        # descends into an external tree.
+        if (Assert-SafeDestination ".agentic") {
+            Get-ChildItem -LiteralPath (Join-Path $TargetDir ".agentic") -Directory -Recurse -ErrorAction SilentlyContinue |
+                Sort-Object { $_.FullName.Length } -Descending |
+                ForEach-Object { Remove-AgenticEmptyDirectory $_.FullName }
+        }
     }
 }
 
@@ -1086,6 +1210,65 @@ function Invoke-CheckedScript {
     }
 }
 
+# Runs stack detection and writes (or, when nothing is detected, removes)
+# .agentic/checks.generated.tsv through the confined destination-local atomic
+# primitives. The verifier's own -DetectChecks mode is deliberately not invoked
+# for the write: it uses New-Item/Remove-Item/Move-Item on system-temp paths
+# that are neither confined to the project root nor destination-local.
+# Detection output is captured on stdout (-EmitChecks) and staged next to the
+# candidate, validated, then renamed into place.
+function Write-GeneratedCandidate {
+    $genRel = ".agentic/checks.generated.tsv"
+    if (-not (Assert-SafeDestination $genRel)) {
+        Write-Host "ERROR: refusing to write '$genRel': destination is not safely inside the project root."
+        throw "unsafe destination"
+    }
+    $dst = Join-Path $TargetDir $genRel
+    $parent = Split-Path -Parent $dst
+    if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+    $tmp = New-Tmp $dst
+    $verify = Join-Path $SourceDir ".agentic\scripts\verify.ps1"
+    $detection = @()
+    $emitExit = 0
+    Push-Location $TargetDir
+    try {
+        $detection = @(& $verify -EmitChecks)
+        $emitExit = $LASTEXITCODE
+    }
+    finally {
+        Pop-Location
+    }
+    if ($emitExit -ne 0) {
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+        throw "verify.ps1 -EmitChecks failed with exit code $emitExit"
+    }
+    if ($detection.Count -gt 0) {
+        $lines = @(
+            "# .agentic/checks.generated.tsv — candidate verification contract."
+            "# Auto-generated by detection workflow. Review assumptions and promote to .agentic/checks.tsv"
+        ) + $detection
+        [System.IO.File]::WriteAllLines($tmp, $lines, [System.Text.UTF8Encoding]::new($false))
+        Push-Location $TargetDir
+        try {
+            Invoke-CheckedScript { & $verify -ValidateChecks $tmp } "verify.ps1 -ValidateChecks $tmp"
+        }
+        catch {
+            Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+            throw
+        }
+        finally {
+            Pop-Location
+        }
+        Move-TempIntoPlace $tmp $dst
+        Write-Host "Candidate contract written to $genRel"
+    }
+    else {
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+        Remove-AgenticFile $genRel | Out-Null
+        Write-Host "No stack detected. Removed stale candidate '$genRel'."
+    }
+}
+
 function New-Checks {
     $rel = ".agentic/checks.tsv"
     $dst = Join-Path $TargetDir $rel
@@ -1100,25 +1283,11 @@ function New-Checks {
     # it before detection so a failed install restores a reviewed candidate (or
     # removes a freshly generated one) exactly as it was before this run.
     Snapshot-File ".agentic/checks.generated.tsv"
-    $verify = Join-Path $SourceDir ".agentic\scripts\verify.ps1"
-    Push-Location $TargetDir
-    try {
-        Invoke-CheckedScript { & $verify -DetectChecks } "verify.ps1 -DetectChecks"
-    }
-    finally {
-        Pop-Location
-    }
+    Write-GeneratedCandidate
     $gen = Join-Path $TargetDir ".agentic/checks.generated.tsv"
     if (-not (Test-Path -LiteralPath $gen)) {
         Write-Host "  note   no stack detected; $rel not generated"
         return
-    }
-    Push-Location $TargetDir
-    try {
-        Invoke-CheckedScript { & $verify -ValidateChecks $gen } "verify.ps1 -ValidateChecks $gen"
-    }
-    finally {
-        Pop-Location
     }
     Snapshot-File $rel
     if ($Backup -and (Test-Path -LiteralPath $dst)) { Backup-File $rel }
@@ -1199,9 +1368,11 @@ try {
             Write-Host "  gen    .agentic/checks.generated.tsv (from detected stack)"
             exit 0
         }
-        $verify = Join-Path $SourceDir ".agentic\scripts\verify.ps1"
-        Push-Location $TargetDir
-        try { Invoke-CheckedScript { & $verify -DetectChecks } "verify.ps1 -DetectChecks" } finally { Pop-Location }
+        # Snapshot so a failed detection rolls the candidate back to its prior
+        # state (or removes a freshly created one) instead of leaving a partial
+        # file behind.
+        Snapshot-File ".agentic/checks.generated.tsv"
+        Write-GeneratedCandidate
         exit 0
     }
 

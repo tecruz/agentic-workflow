@@ -51,6 +51,22 @@ $script:RanRequired = $false
 $script:Blocked = $false
 $script:Detected = $false
 
+# Path semantics must match the underlying filesystem (case-insensitive on
+# Windows, case-sensitive on Unix), so confinement and duplicate-ID checks use
+# these instead of PowerShell's default case-insensitive operators.
+$script:VerifierPathComparison = if ($IsWindows) {
+    [System.StringComparison]::OrdinalIgnoreCase
+}
+else {
+    [System.StringComparison]::Ordinal
+}
+$script:VerifierPathComparer = if ($IsWindows) {
+    [System.StringComparer]::OrdinalIgnoreCase
+}
+else {
+    [System.StringComparer]::Ordinal
+}
+
 function Test-Command {
     param([string] $Name)
     return [bool](Get-Command $Name -ErrorAction SilentlyContinue)
@@ -392,16 +408,9 @@ function Resolve-PhysicalPath {
     $current = $root
     $parts = $full.Substring($root.Length) -split '[/\\]' | Where-Object { $_ -ne '' }
     $maxHops = 32
-    $winPlatform = [bool]$IsWindows -or ($env:OS -eq 'Windows_NT')
-    $pathComparer = if ($winPlatform) {
-        [System.StringComparer]::OrdinalIgnoreCase
-    }
-    else {
-        [System.StringComparer]::Ordinal
-    }
     foreach ($part in $parts) {
         $current = Join-Path $current $part
-        $seen = [System.Collections.Generic.HashSet[string]]::new($pathComparer)
+        $seen = [System.Collections.Generic.HashSet[string]]::new($script:VerifierPathComparer)
         $hops = 0
         while ($true) {
             $key = [System.IO.Path]::GetFullPath($current)
@@ -427,6 +436,38 @@ function Resolve-PhysicalPath {
         }
     }
     return [System.IO.Path]::GetFullPath($current)
+}
+
+# Write-confinement for the generated-candidate write (mirrors verify.sh's
+# safe_detect_destination). Returns $false when the final component exists as a
+# symlink/junction, or when the nearest existing ancestor resolves physically
+# outside the current directory (the project root the verifier runs from), so
+# an outside-pointing `.agentic` link can never redirect the candidate write,
+# replacement, or stale-candidate removal.
+function Assert-VerifierDestination {
+    param([string] $RelativePath)
+    $root = (Get-Location).Path
+    $full = Join-Path $root $RelativePath
+    $leaf = $full
+    while (-not (Test-Path -LiteralPath $leaf)) {
+        $parent = Split-Path -Parent $leaf
+        if ([string]::IsNullOrEmpty($parent) -or $parent.Equals($leaf, $script:VerifierPathComparison)) { break }
+        $leaf = $parent
+    }
+    $item = Get-Item -LiteralPath $leaf -Force -ErrorAction SilentlyContinue
+    if ($null -ne $item -and ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) { return $false }
+    try {
+        $resolved = Resolve-PhysicalPath $leaf
+        $resolvedRoot = Resolve-PhysicalPath $root
+    }
+    catch { return $false }
+    $rootTrimmed = $resolvedRoot.TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar
+    )
+    $rootPrefix = $rootTrimmed + [System.IO.Path]::DirectorySeparatorChar
+    return $resolved.Equals($rootTrimmed, $script:VerifierPathComparison) -or
+        $resolved.StartsWith($rootPrefix, $script:VerifierPathComparison)
 }
 
 function Test-ChecksTsvValidation {
@@ -481,16 +522,9 @@ function Test-ChecksTsvValidation {
             [System.IO.Path]::AltDirectorySeparatorChar
         )
         $rootPrefix = $resolvedRootTrimmed + [System.IO.Path]::DirectorySeparatorChar
-        $winPlatform = [bool]$IsWindows -or ($env:OS -eq 'Windows_NT')
-        $pathComparison = if ($winPlatform) {
-            [System.StringComparison]::OrdinalIgnoreCase
-        }
-        else {
-            [System.StringComparison]::Ordinal
-        }
         $insideRoot =
-            $resolvedCwd.Equals($resolvedRootTrimmed, $pathComparison) -or
-            $resolvedCwd.StartsWith($rootPrefix, $pathComparison)
+            $resolvedCwd.Equals($resolvedRootTrimmed, $script:VerifierPathComparison) -or
+            $resolvedCwd.StartsWith($rootPrefix, $script:VerifierPathComparison)
         if (-not $insideRoot) {
             Write-Host "ERROR: .agentic/checks.tsv line $lineNum working directory '$cwd' escapes project root."
             exit 1
@@ -527,6 +561,10 @@ if ($ExplainDetection) {
 
 if ($DetectChecks) {
     $genFile = ".agentic/checks.generated.tsv"
+    if (-not (Assert-VerifierDestination $genFile)) {
+        Write-Host "ERROR: refusing to write '$genFile': destination is not safely inside the project root."
+        exit 1
+    }
     $null = New-Item -ItemType Directory -Path ".agentic" -Force
     $checks = @(Get-DetectedChecks)
     if ($checks.Count -eq 0) {
@@ -534,7 +572,13 @@ if ($DetectChecks) {
         Write-Host "No stack detected. Removed stale candidate '$genFile'."
         exit 0
     }
-    $tmp = [System.IO.Path]::GetTempFileName()
+    # The scratch file is created next to the candidate (same filesystem), so
+    # the final Move-Item is a single atomic rename instead of a cross-device
+    # copy-and-delete from the system temp directory. The path must be absolute
+    # (resolved against the verifier's location) because .NET file APIs ignore
+    # PowerShell's current location.
+    $genDir = (Resolve-Path -LiteralPath ".agentic").Path
+    $tmp = Join-Path $genDir ("checks.generated.tsv." + [System.IO.Path]::GetRandomFileName())
     $content = @(
         "# .agentic/checks.generated.tsv — candidate verification contract.",
         "# Auto-generated by detection workflow. Review assumptions and promote to .agentic/checks.tsv"

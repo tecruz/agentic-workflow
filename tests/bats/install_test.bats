@@ -747,6 +747,97 @@ make_outside_dir() {
 }
 
 # ---------------------------------------------------------------------------
+# Review-mandated regression tests (PR #5 blockers):
+#   B1  atomic copies preserve the source's executable bits
+#   B2  candidate detection, legacy cleanup, and manifest removal are confined
+#   B3  Bash path registries stay case-sensitive (PowerShell is tested in Pester)
+#   B4  a failed final rename leaves the prior destination intact, no randomized
+#       temp remains, and rollback restores contents and the executable mode
+# ---------------------------------------------------------------------------
+
+@test "installed verifier keeps its executable bit and runs directly" {
+    bash "$INSTALL" . >/dev/null 2>&1
+    [ -x .agentic/scripts/verify.sh ]
+    run ./.agentic/scripts/verify.sh
+    [ "$status" -le 3 ]
+}
+
+@test "--detect-checks refuses an .agentic symlink to an outside directory" {
+    outside="$(make_outside_dir)"
+    printf 'PRECIOUS OUTSIDE\n' > "$outside/keep.txt"
+    ln -s "$outside" .agentic
+    run bash "$INSTALL" . --detect-checks --tools claude
+    [ "$status" -ne 0 ]
+    [ "$(cat "$outside/keep.txt")" = "PRECIOUS OUTSIDE" ]
+    [ ! -e "$outside/checks.generated.tsv" ]
+    [ -L .agentic ]
+}
+
+@test "--prune refuses to remove a legacy file through a linked .github" {
+    outside="$(make_outside_dir)"
+    printf 'PRECIOUS OUTSIDE\n' > "$outside/copilot-instructions.md"
+    mkdir -p .github
+    ln -s "$outside/copilot-instructions.md" .github/copilot-instructions.md
+    bash "$INSTALL" . >/dev/null 2>&1
+    run bash "$INSTALL" . --prune --prune-unverified-legacy
+    [ "$status" -ne 0 ]
+    [ "$(cat "$outside/copilot-instructions.md")" = "PRECIOUS OUTSIDE" ]
+    [ -L .github/copilot-instructions.md ]
+}
+
+@test "--prune refuses to rewrite a manifest reached through a linked .agentic" {
+    outside="$(make_outside_dir)"
+    printf '1.2.1\nAGENTS.md\tmerge\t0000000000000000000000000000000000000000000000000000000000000000\n' > "$outside/install-manifest.tsv"
+    ln -s "$outside" .agentic
+    run bash "$INSTALL" . --prune
+    [ "$status" -ne 0 ]
+    grep -q $'\tmerge\t' "$outside/install-manifest.tsv"
+    [ -L .agentic ]
+}
+
+@test "case-different framework path is distinct on a case-sensitive filesystem" {
+    printf 'probe\n' > .CaseProbe
+    if [ -e .caseprobe ]; then rm -f .CaseProbe; skip "case-insensitive filesystem"; fi
+    rm -f .CaseProbe
+    mkdir -p .agentic
+    printf 'lowercase custom\n' > .agentic/version
+    bash "$INSTALL" . >/dev/null 2>&1
+    [ -f .agentic/VERSION ]
+    [ "$(cat .agentic/VERSION)" = "1.2.1" ]
+    [ "$(cat .agentic/version)" = "lowercase custom" ]
+    [ ! -e .agentic/version.new ]
+}
+
+@test "a failed final rename leaves the prior destination intact and rollback restores contents and mode" {
+    bash "$INSTALL" . >/dev/null 2>&1
+    # Distinctive mode on the verifier: the update rewrites it (mode -> source
+    # 777), then a later rename fails and rollback must restore the 750.
+    chmod 750 .agentic/scripts/verify.sh
+    # Shim `mv` to refuse only the final rename onto CLAUDE.md, which happens
+    # after verify.sh has already been replaced, forcing a mid-transaction
+    # failure at the rename step rather than at temp creation or content copy.
+    mkdir -p shimbin
+    cat > shimbin/mv <<'SHIM'
+#!/usr/bin/env bash
+if [ "${@: -1}" = "$PWD/CLAUDE.md" ]; then
+    echo "shim: refusing rename to CLAUDE.md" >&2
+    exit 1
+fi
+exec /bin/mv "$@"
+SHIM
+    chmod +x shimbin/mv
+    run env PATH="$PWD/shimbin:$PATH" bash "$INSTALL" .
+    [ "$status" -ne 0 ]
+    # Rollback restored the prior destination's content and executable mode.
+    [ "$(stat -c '%a' .agentic/scripts/verify.sh)" = "750" ]
+    grep -q "Universal project verification script" .agentic/scripts/verify.sh
+    # The interrupted rename left the prior CLAUDE.md untouched and no
+    # randomized temp files behind anywhere in the project.
+    grep -q "AGENTIC-PROTOCOL-START" CLAUDE.md
+    [ -z "$(find . -maxdepth 3 \( -name 'verify.sh.*' -o -name 'CLAUDE.md.*' \) 2>/dev/null)" ]
+}
+
+# ---------------------------------------------------------------------------
 # Clean adopter bundle (scripts/build-bundle.sh) end-to-end tests.
 # ---------------------------------------------------------------------------
 
