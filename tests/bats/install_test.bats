@@ -829,7 +829,11 @@ SHIM
     run env PATH="$PWD/shimbin:$PATH" bash "$INSTALL" .
     [ "$status" -ne 0 ]
     # Rollback restored the prior destination's content and executable mode.
-    [ "$(stat -c '%a' 2>/dev/null || stat -f '%Lp' 2>/dev/null .agentic/scripts/verify.sh)" = "750" ]
+    if stat --version >/dev/null 2>&1; then
+        [ "$(stat -c '%a' .agentic/scripts/verify.sh)" = "750" ]
+    else
+        [ "$(stat -f '%Lp' .agentic/scripts/verify.sh)" = "750" ]
+    fi
     grep -q "Universal project verification script" .agentic/scripts/verify.sh
     # The interrupted rename left the prior CLAUDE.md untouched and no
     # randomized temp files behind anywhere in the project.
