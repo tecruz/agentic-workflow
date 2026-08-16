@@ -478,7 +478,7 @@ function Copy-AgenticFile {
     $tmp = New-Tmp $dst
     Copy-Item -LiteralPath $Source -Destination $tmp -Force
     if (-not $IsWindows) {
-        $mode = (Get-Item -LiteralPath $Source -Force).UnixMode
+        $mode = (Get-Item -LiteralPath $Source -Force).UnixFileMode
         if ($null -ne $mode) {
             [System.IO.File]::SetUnixFileMode($tmp, $mode)
         }
@@ -517,7 +517,7 @@ function Restore-AgenticFile {
     try {
         Copy-Item -LiteralPath $Snapshot -Destination $tmp -Force
         if (-not $IsWindows) {
-            $mode = (Get-Item -LiteralPath $Snapshot -Force).UnixMode
+            $mode = (Get-Item -LiteralPath $Snapshot -Force).UnixFileMode
             if ($null -ne $mode) {
                 [System.IO.File]::SetUnixFileMode($tmp, $mode)
             }
@@ -1432,6 +1432,7 @@ try {
     Assert-NotPartial
     Write-Host "Done. Review any '.new' conflict candidates, then commit the installed files."
     Write-Host "Next: fill in .agentic/ARCHITECTURE.md for this project, and run ./.agentic/scripts/verify.ps1."
+    exit 0
 }
 catch {
     Write-Host "ERROR: installation failed: $($_.Exception.Message)"

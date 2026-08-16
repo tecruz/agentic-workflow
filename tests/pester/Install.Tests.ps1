@@ -1086,9 +1086,9 @@ Describe 'install.ps1' {
             & $install -Target $tmp -DetectChecks -Tools claude *> $null
             $LASTEXITCODE | Should -Not -Be 0
             (Get-Content -Raw (Join-Path $outside 'keep.txt')) -match 'PRECIOUS OUTSIDE' | Should -Be $true
-            Test-Path (Join-Path $outside 'checks.generated.tsv') | Should -Be $false
-            (Get-Item -LiteralPath (Join-Path $tmp '.agentic')).LinkType | Should -Not -Be $null
-        }
+             Test-Path (Join-Path $outside 'checks.generated.tsv') | Should -Be $false
+             (Get-ChildItem -LiteralPath $tmp -Force | Where-Object Name -eq '.agentic').LinkType | Should -Not -Be $null
+         }
         finally {
             Remove-Item -LiteralPath (Join-Path $tmp '.agentic') -Force -ErrorAction SilentlyContinue
             Remove-Item -Recurse -Force $outside -ErrorAction SilentlyContinue
@@ -1112,9 +1112,9 @@ Describe 'install.ps1' {
             }
             & $install -Target $tmp -Prune -PruneUnverifiedLegacy *> $null
             $LASTEXITCODE | Should -Not -Be 0
-            (Get-Content -Raw (Join-Path $outside 'copilot-instructions.md')) -match 'PRECIOUS OUTSIDE' | Should -Be $true
-            (Get-Item -LiteralPath (Join-Path $tmp '.github')).LinkType | Should -Not -Be $null
-        }
+             (Get-Content -Raw (Join-Path $outside 'copilot-instructions.md')) -match 'PRECIOUS OUTSIDE' | Should -Be $true
+             (Get-ChildItem -LiteralPath $tmp -Force | Where-Object Name -eq '.github').LinkType | Should -Not -Be $null
+         }
         finally {
             Remove-Item -LiteralPath (Join-Path $tmp '.github') -Force -ErrorAction SilentlyContinue
             Remove-Item -Recurse -Force $outside -ErrorAction SilentlyContinue
@@ -1137,9 +1137,9 @@ Describe 'install.ps1' {
             }
             & $install -Target $tmp -Prune *> $null
             $LASTEXITCODE | Should -Not -Be 0
-            (Get-Content -Raw (Join-Path $outside 'install-manifest.tsv')) -match "`tmerge`t" | Should -Be $true
-            (Get-Item -LiteralPath (Join-Path $tmp '.agentic')).LinkType | Should -Not -Be $null
-        }
+             (Get-Content -Raw (Join-Path $outside 'install-manifest.tsv')) -match "`tmerge`t" | Should -Be $true
+             (Get-ChildItem -LiteralPath $tmp -Force | Where-Object Name -eq '.agentic').LinkType | Should -Not -Be $null
+         }
         finally {
             Remove-Item -LiteralPath (Join-Path $tmp '.agentic') -Force -ErrorAction SilentlyContinue
             Remove-Item -Recurse -Force $outside -ErrorAction SilentlyContinue
@@ -1181,7 +1181,7 @@ Describe 'install.ps1' {
                 # later write fails; rollback must restore content and this mode.
                 & chmod 750 $verifySh
                 if ($LASTEXITCODE -ne 0) { Set-ItResult -Skipped -Because 'chmod unavailable'; return }
-                $expectedMode = [int](Get-Item -LiteralPath $verifySh).UnixMode
+                $expectedMode = [int](Get-Item -LiteralPath $verifySh).UnixFileMode
             }
             try { Set-ProtectedDir $templates }
             catch { Set-ItResult -Skipped -Because "cannot protect a directory: $($_.Exception.Message)"; return }
@@ -1191,7 +1191,7 @@ Describe 'install.ps1' {
             # prior content (and its mode on Unix).
             (Get-Content -Raw (Join-Path $tmp '.agentic\scripts\verify.ps1')) -match 'Universal project verification script' | Should -Be $true
             if (-not $IsWindows) {
-                [int](Get-Item -LiteralPath $verifySh).UnixMode | Should -Be $expectedMode
+                [int](Get-Item -LiteralPath $verifySh).UnixFileMode | Should -Be $expectedMode
             }
             # The protected destination was never modified, and no randomized
             # scratch file was left behind anywhere in the project.
