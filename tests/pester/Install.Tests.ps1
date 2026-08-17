@@ -1270,4 +1270,149 @@ Describe 'install.ps1' {
             Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
         }
     }
+
+    # -----------------------------------------------------------------------
+    # Extracted-archive release tests: install from the final zip asset
+    # rather than the unarchived bundle directory.
+    # -----------------------------------------------------------------------
+
+    It 'end-to-end: extract zip and install from extracted archive' {
+        $bash = Get-Command bash -ErrorAction SilentlyContinue
+        if (-not $bash) { Set-ItResult -Skipped -Because 'bash (git-bash/WSL) is required to build the bundle' }
+        $version = (Get-Content -Raw (Join-Path $repoRoot '.agentic\VERSION')).Trim()
+        & $bash.Source "scripts/build-bundle.sh" *> $null
+        if ($LASTEXITCODE -ne 0) { throw 'build-bundle.sh failed' }
+        $archive = Join-Path $repoRoot "dist\agentic-workflow-$version.zip"
+        if (-not (Test-Path $archive)) { Set-ItResult -Skipped -Because 'zip archive was not created' }
+
+        $extractDir = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-extract-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
+        try {
+            Expand-Archive -LiteralPath $archive -DestinationPath $extractDir -Force
+            $bundleRoot = Join-Path $extractDir "agentic-workflow-$version"
+
+            $tmp = New-TestDir
+            try {
+                & (Join-Path $bundleRoot 'install.ps1') -Target $tmp *> $null
+                $LASTEXITCODE | Should -Be 0
+                Test-Path (Join-Path $tmp 'AGENTS.md') | Should -Be $true
+                Test-Path (Join-Path $tmp '.aider.conf.yml') | Should -Be $true
+                Test-Path (Join-Path $tmp '.agentic\VERSION') | Should -Be $true
+                (Get-Content -Raw (Join-Path $tmp '.agentic\install-manifest.tsv')) -match '\tseed\t' | Should -Be $true
+
+                # exercise update, plan, prune, uninstall
+                & (Join-Path $bundleRoot 'install.ps1') -Target $tmp *> $null
+                $LASTEXITCODE | Should -Be 0
+                & (Join-Path $bundleRoot 'install.ps1') -Target $tmp -Prune -Plan *> $null
+                $LASTEXITCODE | Should -Be 0
+                & (Join-Path $bundleRoot 'install.ps1') -Target $tmp -Uninstall -Plan *> $null
+                $LASTEXITCODE | Should -Be 0
+            }
+            finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+        }
+        finally { Remove-Item -Recurse -Force $extractDir -ErrorAction SilentlyContinue }
+    }
+
+    It 'release zip does not leak development-only files' {
+        $bash = Get-Command bash -ErrorAction SilentlyContinue
+        if (-not $bash) { Set-ItResult -Skipped -Because 'bash (git-bash/WSL) is required to build the bundle' }
+        $version = (Get-Content -Raw (Join-Path $repoRoot '.agentic\VERSION')).Trim()
+        & $bash.Source "scripts/build-bundle.sh" *> $null
+        if ($LASTEXITCODE -ne 0) { throw 'build-bundle.sh failed' }
+        $archive = Join-Path $repoRoot "dist\agentic-workflow-$version.zip"
+        if (-not (Test-Path $archive)) { Set-ItResult -Skipped -Because 'zip archive was not created' }
+
+        $extractDir = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-extract-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
+        try {
+            Expand-Archive -LiteralPath $archive -DestinationPath $extractDir -Force
+            $bundleRoot = Join-Path $extractDir "agentic-workflow-$version"
+
+            Test-Path (Join-Path $bundleRoot 'tests') | Should -Be $false
+            Test-Path (Join-Path $bundleRoot '.github') | Should -Be $false
+            Test-Path (Join-Path $bundleRoot 'docs') | Should -Be $false
+            Test-Path (Join-Path $bundleRoot '.agentic\checks.tsv') | Should -Be $false
+            Test-Path (Join-Path $bundleRoot 'CHANGELOG.md') | Should -Be $false
+            Test-Path (Join-Path $bundleRoot 'README.md') | Should -Be $false
+            Test-Path (Join-Path $bundleRoot 'CONTRIBUTING.md') | Should -Be $false
+            Test-Path (Join-Path $bundleRoot 'SECURITY.md') | Should -Be $false
+            Test-Path (Join-Path $bundleRoot '.agentic\templates\checks.tsv') | Should -Be $true
+            Test-Path (Join-Path $bundleRoot '.agentic\scripts\verify.ps1') | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $extractDir -ErrorAction SilentlyContinue }
+    }
+
+    # -----------------------------------------------------------------------
+    # Release-to-release upgrade test: install from a v1.2.1-like bundle,
+    # modify project state, then upgrade using the current (v1.2.2) bundle.
+    # -----------------------------------------------------------------------
+
+    It 'upgrade from v1.2.1 bundle to v1.2.2 preserves project state' {
+        $bash = Get-Command bash -ErrorAction SilentlyContinue
+        if (-not $bash) { Set-ItResult -Skipped -Because 'bash (git-bash/WSL) is required to build the bundle' }
+        $version = (Get-Content -Raw (Join-Path $repoRoot '.agentic\VERSION')).Trim()
+        & $bash.Source "scripts/build-bundle.sh" --no-archives *> $null
+        if ($LASTEXITCODE -ne 0) { throw 'build-bundle.sh failed' }
+        $currentBundle = Join-Path $repoRoot "dist\agentic-workflow-$version"
+
+        # Create a v1.2.1-like bundle by copying and rewriting VERSION
+        $v121Dir = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-v121-' + [guid]::NewGuid().ToString('N'))
+        Copy-Item -LiteralPath $currentBundle -Destination $v121Dir -Recurse -Force
+        Set-Content -LiteralPath (Join-Path $v121Dir '.agentic\VERSION') -Value '1.2.1'
+
+        $tmp = New-TestDir
+        try {
+            # Step 1: Install from v1.2.1 bundle
+            & (Join-Path $v121Dir 'install.ps1') -Target $tmp -Tools all *> $null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path (Join-Path $tmp 'AGENTS.md') | Should -Be $true
+            Test-Path (Join-Path $tmp 'CLAUDE.md') | Should -Be $true
+            Test-Path (Join-Path $tmp 'GEMINI.md') | Should -Be $true
+            Test-Path (Join-Path $tmp '.aider.conf.yml') | Should -Be $true
+            (Get-Content -Raw (Join-Path $tmp '.agentic\VERSION')).Trim() | Should -Be '1.2.1'
+
+            # Step 2: Add custom content outside merge blocks
+            Add-Content -LiteralPath (Join-Path $tmp 'AGENTS.md') -Value "`n## Team notes`nkeep this content"
+            Add-Content -LiteralPath (Join-Path $tmp '.aider.conf.yml') -Value '# custom aider config'
+
+            # Step 3: Modify a managed file
+            Add-Content -LiteralPath (Join-Path $tmp '.agentic\WORKFLOW.md') -Value '# adopter workflow override'
+
+            # Step 4: Add a reviewed candidate
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.generated.tsv') -Value "custom-check`trequired`t.`tnpm`ttest"
+
+            # Step 5: Upgrade using current bundle (v1.2.2)
+            & (Join-Path $currentBundle 'install.ps1') -Target $tmp -Tools all *> $null
+
+            # Step 6: Verify preservation
+            (Get-Content -Raw (Join-Path $tmp 'AGENTS.md')) -match 'keep this content' | Should -Be $true
+            (Get-Content -Raw (Join-Path $tmp 'AGENTS.md')) -match 'AGENTIC-PROTOCOL-START' | Should -Be $true
+            (Get-Content -Raw (Join-Path $tmp '.agentic\WORKFLOW.md')) -match '# adopter workflow override' | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\checks.generated.tsv') | Should -Be $true
+            (Get-Content -Raw (Join-Path $tmp '.agentic\checks.generated.tsv')) -match 'custom-check' | Should -Be $true
+
+            # Step 7: Exercise plan, prune, uninstall
+            & (Join-Path $currentBundle 'install.ps1') -Target $tmp -Prune -Plan -Tools claude *> $null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path (Join-Path $tmp 'GEMINI.md') | Should -Be $true
+            Test-Path (Join-Path $tmp '.aider.conf.yml') | Should -Be $true
+
+            & (Join-Path $currentBundle 'install.ps1') -Target $tmp -Uninstall -Plan *> $null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path (Join-Path $tmp 'AGENTS.md') | Should -Be $true
+
+            # Step 8: Uninstall removes managed files, preserves seeds
+            & (Join-Path $currentBundle 'install.ps1') -Target $tmp -Uninstall *> $null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path (Join-Path $tmp '.agentic\VERSION') | Should -Be $false
+            Test-Path (Join-Path $tmp '.agentic\scripts\verify.ps1') | Should -Be $false
+            Test-Path (Join-Path $tmp '.agentic\ARCHITECTURE.md') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\STATUS.md') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\checks.tsv') | Should -Be $true
+        }
+        finally {
+            Remove-Item -Recurse -Force $v121Dir -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+        }
+    }
 }

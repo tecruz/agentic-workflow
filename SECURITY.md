@@ -4,10 +4,12 @@
 
 | Version | Supported |
 | :------ | :-------- |
-| 1.x     | Yes       |
-| < 1.0   | No        |
+| Latest 1.x patch release | Yes |
+| Older 1.x releases | Upgrade required |
+| Pre-1.0 | No |
 
-Security fixes are backported to the latest 1.x release.
+Security fixes are delivered through the latest 1.x patch release. Older 1.x
+releases should upgrade to the current version.
 
 ## Reporting a vulnerability
 

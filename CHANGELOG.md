@@ -7,82 +7,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.2.1] - 2026-08-15
+## [1.2.2] - 2026-08-15
 
-Lifecycle hardening hotfix; addresses the `feedback (8).md` and `feedback (9).md` findings.
+Release-integrity hardfix; addresses the `feedback (12).md` review. Ensures
+the source, version number, changelog, release tag, and downloadable assets
+all represent the same product.
 
 ### Fixed
-- **Every installer write is physically confined and atomic.** All destinations
-  written by `install.sh` and `install.ps1` (managed, seed, merge, generated
-  checks, manifests, backups, rollback) now pass through a shared confinement
-  check plus an atomic copy: the write is staged as a temporary file next to
-  the destination and moved into place, so a failed write never leaves a
-  partial destination and a destination whose nearest existing ancestor
-  resolves outside the project root (e.g. a `.agentic` junction to an external
-  directory, or a symlinked framework file) is refused before anything is
-  touched. Manifest validation keeps the more permissive physical check
-  (`physical_within_root`) so in-project symlinked targets remain installable;
-  the write guard rejects any final-component symlink.
-- **Manifest categories are enforced against a canonical registry.** Each
-  path→category mapping (`AGENTS.md`/`CLAUDE.md`/`GEMINI.md`→merge,
-  `.aider.conf.yml` + managed files→managed, seed files→seed) is the single
-  source of truth shared by install and prune. A known path recorded under the
-  wrong valid category, or a non-registry path, is tampering and fails the run
-  before mutation; the manifest itself and legacy paths are not legitimate
-  entries.
-- **Legacy ownership no longer trusts a manifest row by itself.** The
-  manifest-only ownership branch was removed; legacy files must prove
-  ownership via byte-for-byte match with shipped v1.0 content or the framework
-  signature.
-- **Bash manifest parsing uses exact field counts.** Each manifest line is
-  pre-checked with `awk -F'\t' 'NF==3'` (which never collapses or trims
-  tabs) before field splitting, so leading, trailing, and adjacent empty
-  fields are rejected identically in both implementations.
-- **Adversarial regression coverage.** Twelve Bats tests and twelve Pester
-  tests exercise category tampering, forged legacy rows, symlinked/junctioned
-  destinations that point outside the project, write-blocked copies that must
-  leave no partial destination and no outside mutation, and every malformed
-  manifest field shape.
-- **`--plan` is byte-for-byte read-only.** Merge-block removal during planned
-  prune, uninstall, and ordinary updates is now a pure calculation: the shared
-  merge parser classifies the file, the would-be remainder is predicted, and
-  plan mode reports it without snapshotting, backing up, creating temporary
-  files, or writing. Prior plan tests only asserted that files still existed;
-  new byte-for-byte Bats and Pester tests hash the tree before and after
-  `--prune --plan` and `--uninstall --plan`.
-- **Previous-manifest paths are validated and physically confined before any
-  mutation** (in every mode, including `--plan`). Every manifest row is
-  checked: exactly three tab-separated fields, a known category
-  (`managed`/`merge`/`seed`), a valid SHA-256, no duplicate paths, a lexical
-  path with no empty / `.` / `..` segments, drive prefixes, backslashes, or
-  control characters, membership in the framework's known file registry, and
-  physical confinement (symlink/junction traversal cannot escape the project
-  root). A malformed or adversarial manifest hard-fails the run before any file
-  is created, modified, or removed.
-- **Legacy cleanup no longer deletes by filename.** v1.0 legacy files
-  (`.cursorrules`, `.windsurfrules`, `.clinerules`, `CONVENTIONS.md`,
-  `.github/copilot-instructions.md`) are removed only when ownership is proven:
-  byte-for-byte match with shipped v1.0 content, the framework signature, or a
-  previous-manifest record. Unprovable files are preserved and reported as
-  conflicts; the new `--prune-unverified-legacy` / `-PruneUnverifiedLegacy`
-  removes them only with an automatic backup to `.agentic-backup/`.
-- **Merge-marker validation is shared between install and prune.** Prune and
-  uninstall now reuse the same strict parser as installation
-  (`merge_state`: absent / empty / plain / valid / malformed); only a valid
-  single block is ever rewritten. Malformed files are reported as conflicts
-  and preserved untouched.
-- **Unpredictable temporary files.** Installers write every managed, merge,
-  seed, manifest, and promoted-checks file through a `mktemp`-generated (Bash)
-  or randomly named (PowerShell) scratch file created in the destination
-  directory, then atomically rename it. Predictable `.agentic-tmp` paths are
-  gone, so a pre-existing file or symlink at one of those names can never be
-  clobbered or written through. Scratch files are created only in non-plan
-  runs.
+- **Version bump to 1.2.2.** `.agentic/VERSION` updated to match the release
+  tag and published assets, resolving the mismatch where `master` contained
+  PR #5 fixes but the published v1.2.1 assets pointed to the earlier commit.
+- **Corrected changelog contradictions.** The previous `1.2.1` changelog
+  section contained contradictory statements about legacy ownership: one entry
+  correctly stated that a manifest row alone no longer proves ownership, while
+  a later entry still described a previous-manifest record as proof. The
+  `1.2.1` section now describes only the state at that release; all PR #5
+  hardening changes are recorded here in `1.2.2`.
+- **Consistent ownership policy across documentation.** `README.md`,
+  `CHANGELOG.md`, `SECURITY.md`, and release notes now agree: a previous
+  install manifest record is never sufficient by itself to prove legacy file
+  ownership.
+- **Tightened supported-version table.** `SECURITY.md` now clearly states that
+  only the latest 1.x patch release is supported; older 1.x releases require
+  an upgrade; pre-1.0 is unsupported.
+
+### Added
+- **Extracted-archive release tests.** Bats and Pester suites now extract the
+  final tar.gz and zip assets into a clean directory, install from the
+  extracted location, and assert that no development-only files leaked into
+  the distribution.
+- **Release-to-release upgrade test.** An automated scenario installs from
+  the v1.2.1 bundle, adds custom content, modifies a managed file, adds a
+  reviewed candidate, upgrades using the v1.2.2 bundle, and verifies exact
+  preservation and expected conflicts through plan/update/prune/uninstall.
+- **Release workflow** (`.github/workflows/release.yml`). Triggered by version
+  tags or manual dispatch. Validates that `.agentic/VERSION`, the CHANGELOG
+  section, and the tag all agree; runs all CI checks; builds the clean bundle;
+  extracts and tests both archives; verifies `SHA256SUMS`; and uploads assets
+  from the exact tagged commit.
+- **ADR-0007: Extension versioning.** Records the policy for how future
+  protocol extensions (risk profiles, skills, event logs, context modules)
+  version their schemas and are migrated.
+
+## [1.2.1] - 2026-08-15
+
+Lifecycle hardening hotfix; addresses the `feedback (8).md` and `feedback (9).md`
+findings.
+
+### Added
+- Installer lifecycle: `--prune` and `--uninstall` options for `install.sh` /
+  `install.ps1`, both supporting `--plan` dry runs.
+- Manifest-diff migration engine: an update removes files a previous install
+  recorded that are no longer part of the desired set (deselected adapters,
+  renamed framework files). Managed files matching their recorded checksum are
+  removed; modified ones are preserved and reported as conflicts; merge files
+  lose only the marker-delimited protocol block, keeping adopter content.
+- v1.0 legacy migration: installers report legacy artifacts (`.cursorrules`,
+  `.windsurfrules`, `.clinerules`, `CONVENTIONS.md`,
+  `.github/copilot-instructions.md`); `--prune`/`--uninstall` remove the files
+  while preserving `Memory/` and `.cursor/` user data.
+- `--prune-unverified-legacy` / `-PruneUnverifiedLegacy`: removes legacy files
+  whose ownership cannot be proven by content, with automatic backup to
+  `.agentic-backup/`.
+- Candidate lifecycle: `--detect-checks`, `--accept-detected-checks`, and
+  `--replace-checks` for a reviewable checks pipeline.
+- Clean adopter bundle: `scripts/build-bundle.sh` assembles
+  `dist/agentic-workflow-<version>/` plus tar.gz, zip, and SHA256SUMS.
+- End-to-end bundle install tests covering both installers.
 
 ### Changed
+- Every installer write is now physically confined and atomic: writes staged
+  as temporary files with atomic rename; destinations whose nearest existing
+  ancestor resolves outside the project root are refused.
+- Manifest categories enforced against a canonical registry; tampering fails
+  the run before any mutation.
+- Legacy ownership no longer trusts a manifest row by itself; files must prove
+  ownership via byte-for-byte match with shipped v1.0 content or the framework
+  signature.
+- `--plan` is byte-for-byte read-only in every mode (prune, uninstall,
+  update). No snapshotting, backup, temp-file creation, or writing occurs.
+- Manifest validation runs before any mutation in every mode including
+  `--plan`: field count, categories, checksums, duplicates, lexical path
+  safety, framework membership, and physical confinement.
+- Merge-marker validation shared between install and prune (absent / empty /
+  plain / valid / malformed); malformed files are preserved untouched.
+- Unpredictable temp files: all writes use `mktemp`/random scratch files with
+  atomic rename.
 - The README no longer advertises the development repository itself as the
-  adopter template; the clean bundle (`dist/agentic-workflow-<version>/`) is
-  the supported distribution for adopters.
+  adopter template; the clean bundle is the supported distribution for
+  adopters.
 
 ## [1.2.0] - 2026-08-14
 

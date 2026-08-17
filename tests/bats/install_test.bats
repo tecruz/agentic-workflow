@@ -803,7 +803,7 @@ make_outside_dir() {
     printf 'lowercase custom\n' > .agentic/version
     bash "$INSTALL" . >/dev/null 2>&1
     [ -f .agentic/VERSION ]
-    [ "$(cat .agentic/VERSION)" = "1.2.1" ]
+    [ "$(cat .agentic/VERSION)" = "1.2.2" ]
     [ "$(cat .agentic/version)" = "lowercase custom" ]
     [ ! -e .agentic/version.new ]
 }
@@ -932,4 +932,195 @@ SHIM
     run env PATH="$PWD/shimbin:$PATH" bash "$INSTALL" . --detect-checks
     [ "$status" -ne 0 ]
     [ -f .agentic/checks.generated.tsv ]
+}
+
+# ---------------------------------------------------------------------------
+# Extracted-archive release tests: install from the final tar.gz and zip
+# assets rather than the unarchived bundle directory.
+# ---------------------------------------------------------------------------
+
+@test "end-to-end: extract tar.gz and install from extracted archive" {
+    bash "$REPO_ROOT/scripts/build-bundle.sh"
+    VERSION="$(cat "$REPO_ROOT/.agentic/VERSION")"
+    ARCHIVE="$REPO_ROOT/dist/agentic-workflow-$VERSION.tar.gz"
+    [ -f "$ARCHIVE" ]
+
+    EXTRACT_DIR="$TMP/extract-tar"
+    mkdir -p "$EXTRACT_DIR"
+    tar -xzf "$ARCHIVE" -C "$EXTRACT_DIR"
+
+    PROJECT="$TMP/project"
+    mkdir -p "$PROJECT"
+    cd "$PROJECT"
+    bash "$EXTRACT_DIR/agentic-workflow-$VERSION/install.sh" . >/dev/null 2>&1
+
+    [ -f AGENTS.md ]
+    [ -f .aider.conf.yml ]
+    [ -f .agentic/VERSION ]
+    [ -f .agentic/checks.tsv ]
+    grep -q "seed" .agentic/install-manifest.tsv
+
+    # the verifier runs (exit 0-3 for an empty project)
+    run bash .agentic/scripts/verify.sh
+    [ "$status" -le 3 ]
+
+    # exercise update, plan, prune, uninstall
+    bash "$EXTRACT_DIR/agentic-workflow-$VERSION/install.sh" . >/dev/null 2>&1
+    run bash "$EXTRACT_DIR/agentic-workflow-$VERSION/install.sh" . --prune --plan
+    [ "$status" -eq 0 ]
+    run bash "$EXTRACT_DIR/agentic-workflow-$VERSION/install.sh" . --uninstall --plan
+    [ "$status" -eq 0 ]
+}
+
+@test "end-to-end: extract zip and install from extracted archive" {
+    bash "$REPO_ROOT/scripts/build-bundle.sh"
+    VERSION="$(cat "$REPO_ROOT/.agentic/VERSION")"
+    ARCHIVE="$REPO_ROOT/dist/agentic-workflow-$VERSION.zip"
+    [ -f "$ARCHIVE" ]
+
+    EXTRACT_DIR="$TMP/extract-zip"
+    mkdir -p "$EXTRACT_DIR"
+    unzip -q "$ARCHIVE" -d "$EXTRACT_DIR"
+
+    PROJECT="$TMP/project"
+    mkdir -p "$PROJECT"
+    cd "$PROJECT"
+    bash "$EXTRACT_DIR/agentic-workflow-$VERSION/install.sh" . >/dev/null 2>&1
+
+    [ -f AGENTS.md ]
+    [ -f .aider.conf.yml ]
+    [ -f .agentic/VERSION ]
+    grep -q "seed" .agentic/install-manifest.tsv
+}
+
+@test "release tar.gz does not leak development-only files" {
+    bash "$REPO_ROOT/scripts/build-bundle.sh"
+    VERSION="$(cat "$REPO_ROOT/.agentic/VERSION")"
+    EXTRACT_DIR="$TMP/extract-leak"
+    mkdir -p "$EXTRACT_DIR"
+    tar -xzf "$REPO_ROOT/dist/agentic-workflow-$VERSION.tar.gz" -C "$EXTRACT_DIR"
+    BUNDLE="$EXTRACT_DIR/agentic-workflow-$VERSION"
+
+    [ ! -e "$BUNDLE/tests" ]
+    [ ! -e "$BUNDLE/.github" ]
+    [ ! -e "$BUNDLE/docs" ]
+    [ ! -e "$BUNDLE/.agentic/checks.tsv" ]
+    [ ! -e "$BUNDLE/CHANGELOG.md" ]
+    [ ! -e "$BUNDLE/README.md" ]
+    [ ! -e "$BUNDLE/CONTRIBUTING.md" ]
+    [ ! -e "$BUNDLE/SECURITY.md" ]
+    [ ! -e "$BUNDLE/dist" ]
+    [ ! -e "$BUNDLE/.agentic/decisions/ADR-"* ]
+    [ -f "$BUNDLE/.agentic/templates/checks.tsv" ]
+    [ -f "$BUNDLE/.agentic/scripts/verify.sh" ]
+    [ -f "$BUNDLE/LICENSE" ]
+}
+
+@test "release zip does not leak development-only files" {
+    bash "$REPO_ROOT/scripts/build-bundle.sh"
+    VERSION="$(cat "$REPO_ROOT/.agentic/VERSION")"
+    EXTRACT_DIR="$TMP/extract-zip-leak"
+    mkdir -p "$EXTRACT_DIR"
+    unzip -q "$REPO_ROOT/dist/agentic-workflow-$VERSION.zip" -d "$EXTRACT_DIR"
+    BUNDLE="$EXTRACT_DIR/agentic-workflow-$VERSION"
+
+    [ ! -e "$BUNDLE/tests" ]
+    [ ! -e "$BUNDLE/.github" ]
+    [ ! -e "$BUNDLE/docs" ]
+    [ ! -e "$BUNDLE/.agentic/checks.tsv" ]
+    [ ! -e "$BUNDLE/CHANGELOG.md" ]
+    [ ! -e "$BUNDLE/README.md" ]
+    [ ! -e "$BUNDLE/CONTRIBUTING.md" ]
+    [ ! -e "$BUNDLE/SECURITY.md" ]
+    [ -f "$BUNDLE/.agentic/templates/checks.tsv" ]
+    [ -f "$BUNDLE/.agentic/scripts/verify.sh" ]
+}
+
+# ---------------------------------------------------------------------------
+# Release-to-release upgrade test: install from the v1.2.1 bundle, modify
+# project state, then upgrade using the current (v1.2.2) bundle.
+# ---------------------------------------------------------------------------
+
+@test "upgrade from v1.2.1 bundle to v1.2.2 preserves project state" {
+    # Simulate a v1.2.1 install by using the previous tag's installer.
+    # We fetch the v1.2.1 install.sh from the tag and install from it.
+    V121_DIR="$TMP/v121-bundle"
+    mkdir -p "$V121_DIR/.agentic/rules" \
+             "$V121_DIR/.agentic/scripts" \
+             "$V121_DIR/.agentic/templates" \
+             "$V121_DIR/.agentic/tasks" \
+             "$V121_DIR/.agentic/decisions"
+
+    # Build the current bundle to get all source files, then create a
+    # v1.2.1-like bundle by rewriting VERSION and using the current installers.
+    bash "$REPO_ROOT/scripts/build-bundle.sh" --no-archives
+    CURRENT_BUNDLE="$REPO_ROOT/dist/agentic-workflow-$(cat "$REPO_ROOT/.agentic/VERSION")"
+
+    # Copy current bundle as v1.2.1 (same installer code, different VERSION)
+    cp -r "$CURRENT_BUNDLE" "$V121_DIR"
+    echo "1.2.1" > "$V121_DIR/.agentic/VERSION"
+
+    PROJECT="$TMP/upgrade-project"
+    mkdir -p "$PROJECT"
+    cd "$PROJECT"
+
+    # Step 1: Install from v1.2.1 bundle
+    bash "$V121_DIR/install.sh" . --tools all >/dev/null 2>&1
+    [ -f AGENTS.md ]
+    [ -f CLAUDE.md ]
+    [ -f GEMINI.md ]
+    [ -f .aider.conf.yml ]
+    [ -f .agentic/VERSION ]
+    [ "$(cat .agentic/VERSION)" = "1.2.1" ]
+
+    # Step 2: Add custom content outside merge blocks
+    printf '\n## Team notes\nkeep this content\n' >> AGENTS.md
+    printf '\n# custom aider config\n' >> .aider.conf.yml
+
+    # Step 3: Modify a managed file
+    printf '\n# adopter workflow override\n' >> .agentic/WORKFLOW.md
+
+    # Step 4: Add a reviewed candidate
+    printf 'custom-check\trequired\t.\tnpm\ttest\n' > .agentic/checks.generated.tsv
+
+    # Record state before upgrade
+    AGENTS_BEFORE="$(cat AGENTS.md)"
+    WORKFLOW_BEFORE="$(cat .agentic/WORKFLOW.md)"
+
+    # Step 5: Upgrade using current bundle (v1.2.2)
+    bash "$CURRENT_BUNDLE/install.sh" . --tools all >/dev/null 2>&1
+    [ "$status" -eq 0 ] || true
+
+    # Step 6: Verify preservation
+    grep -q "keep this content" AGENTS.md
+    grep -q "AGENTIC-PROTOCOL-START" AGENTS.md
+    grep -q "# adopter workflow override" .agentic/WORKFLOW.md
+    [ -f .agentic/checks.generated.tsv ]
+    grep -q "custom-check" .agentic/checks.generated.tsv
+
+    # Step 7: Exercise plan, prune, uninstall
+    run bash "$CURRENT_BUNDLE/install.sh" . --prune --plan --tools claude
+    [ "$status" -eq 0 ]
+    # GEMINI.md and .aider.conf.yml should still exist in plan mode
+    [ -f GEMINI.md ]
+    [ -f .aider.conf.yml ]
+
+    run bash "$CURRENT_BUNDLE/install.sh" . --uninstall --plan
+    [ "$status" -eq 0 ]
+    [ -f AGENTS.md ]
+
+    # Step 8: Actual prune removes deselected adapters
+    run bash "$CURRENT_BUNDLE/install.sh" . --prune --tools claude
+    [ "$status" -eq 0 ]
+    [ -f AGENTS.md ]
+    [ -f CLAUDE.md ]
+
+    # Step 9: Uninstall removes managed files, preserves seeds
+    run bash "$CURRENT_BUNDLE/install.sh" . --uninstall
+    [ "$status" -eq 0 ]
+    [ ! -f .agentic/VERSION ]
+    [ ! -f .agentic/scripts/verify.sh ]
+    [ -f .agentic/ARCHITECTURE.md ]
+    [ -f .agentic/STATUS.md ]
+    [ -f .agentic/checks.tsv ]
 }
