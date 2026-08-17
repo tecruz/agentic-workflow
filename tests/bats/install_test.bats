@@ -960,9 +960,9 @@ SHIM
     [ -f .agentic/checks.tsv ]
     grep -q "seed" .agentic/install-manifest.tsv
 
-    # the verifier runs (exit 0-3 for an empty project)
+    # the verifier should report UNSUPPORTED (3) for an empty project
     run bash .agentic/scripts/verify.sh
-    [ "$status" -le 3 ]
+    [ "$status" -eq 3 ]
 
     # exercise update, plan, prune, uninstall
     bash "$EXTRACT_DIR/agentic-workflow-$VERSION/install.sh" . >/dev/null 2>&1
@@ -1050,21 +1050,27 @@ SHIM
 # ---------------------------------------------------------------------------
 
 @test "upgrade from v1.2.1 bundle to v1.2.2 preserves project state" {
-    # Build the current bundle to get all source files, then create a
-    # v1.2.1-like bundle by rewriting VERSION and using the current installers.
+    # Verify the v1.2.1 tag exists and has the expected VERSION
+    git -C "$REPO_ROOT" rev-parse v1.2.1 >/dev/null 2>&1 || skip "v1.2.1 tag not found"
+    V121_VERSION="$(git -C "$REPO_ROOT" show v1.2.1:.agentic/VERSION 2>/dev/null)"
+    [ "$V121_VERSION" = "1.2.1" ]
+
+    # Extract the actual v1.2.1 source tree and build its bundle
+    V121_SRC="$TMP/v121-src"
+    mkdir -p "$V121_SRC"
+    git -C "$REPO_ROOT" archive v1.2.1 | tar -x -C "$V121_SRC"
+    bash "$V121_SRC/scripts/build-bundle.sh" --no-archives
+    V121_DIR="$V121_SRC/dist/agentic-workflow-1.2.1"
+
+    # Build the current (v1.2.2) bundle
     bash "$REPO_ROOT/scripts/build-bundle.sh" --no-archives
     CURRENT_BUNDLE="$REPO_ROOT/dist/agentic-workflow-$(cat "$REPO_ROOT/.agentic/VERSION")"
-
-    # Copy current bundle as v1.2.1 (same installer code, different VERSION)
-    V121_DIR="$TMP/v121-bundle"
-    cp -r "$CURRENT_BUNDLE" "$V121_DIR"
-    echo "1.2.1" > "$V121_DIR/.agentic/VERSION"
 
     PROJECT="$TMP/upgrade-project"
     mkdir -p "$PROJECT"
     cd "$PROJECT"
 
-    # Step 1: Install from v1.2.1 bundle
+    # Step 1: Install from the real v1.2.1 bundle
     run bash "$V121_DIR/install.sh" . --tools all
     [ "$status" -eq 0 ]
     [ -f AGENTS.md ]

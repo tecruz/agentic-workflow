@@ -13,6 +13,11 @@ on:
   pull_request:
     branches: [main, master]
   workflow_call:
+    inputs:
+      ref:
+        description: 'Commit SHA to check out (for reusable workflow calls)'
+        required: false
+        type: string
 
 jobs:
   bash-verifier:
@@ -26,6 +31,7 @@ jobs:
       # actions/checkout@v5
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ inputs.ref || '' }}
           persist-credentials: false
 
       # actions/setup-node@v7.0.1
@@ -81,6 +87,7 @@ jobs:
       # actions/checkout@v5
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ inputs.ref || '' }}
           persist-credentials: false
 
       # actions/setup-node@v7.0.1

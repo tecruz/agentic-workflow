@@ -1311,6 +1311,10 @@ Describe 'install.ps1' {
                 Test-Path (Join-Path $tmp '.agentic\VERSION') | Should -Be $true
                 (Get-Content -Raw (Join-Path $tmp '.agentic\install-manifest.tsv')) -match '\tseed\t' | Should -Be $true
 
+                # the verifier should report UNSUPPORTED (3) for an empty project
+                & (Join-Path $tmp '.agentic\scripts\verify.ps1')
+                $LASTEXITCODE | Should -Be 3
+
                 # exercise update, plan, prune, uninstall
                 & (Join-Path $bundleRoot 'install.ps1') -Target $tmp *> $null
                 $LASTEXITCODE | Should -Be 0
@@ -1369,19 +1373,31 @@ Describe 'install.ps1' {
     It 'upgrade from v1.2.1 bundle to v1.2.2 preserves project state' {
         $bash = Get-Command bash -ErrorAction SilentlyContinue
         if (-not $bash) { Set-ItResult -Skipped -Because 'bash (git-bash/WSL) is required to build the bundle' }
+
+        # Verify the v1.2.1 tag exists and has the expected VERSION
+        $v121Version = & git -C $repoRoot show 'v1.2.1:.agentic/VERSION' 2>$null
+        if ($LASTEXITCODE -ne 0 -or $v121Version.Trim() -ne '1.2.1') {
+            Set-ItResult -Skipped -Because 'v1.2.1 tag not found or VERSION mismatch'
+        }
+
+        # Extract the actual v1.2.1 source tree and build its bundle
+        $v121Src = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-v121-src-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $v121Src -Force | Out-Null
+        & git -C $repoRoot archive v1.2.1 | tar -x -C $v121Src
+        if ($LASTEXITCODE -ne 0) { throw 'git archive v1.2.1 failed' }
+        & $bash.Source (Join-Path $v121Src 'scripts/build-bundle.sh') --no-archives *> $null
+        if ($LASTEXITCODE -ne 0) { throw 'v1.2.1 build-bundle.sh failed' }
+        $v121Dir = Join-Path $v121Src 'dist' 'agentic-workflow-1.2.1'
+
+        # Build the current (v1.2.2) bundle
         $version = (Get-Content -Raw (Join-Path $repoRoot '.agentic\VERSION')).Trim()
         & $bash.Source "scripts/build-bundle.sh" --no-archives *> $null
         if ($LASTEXITCODE -ne 0) { throw 'build-bundle.sh failed' }
         $currentBundle = Join-Path $repoRoot "dist\agentic-workflow-$version"
 
-        # Create a v1.2.1-like bundle by copying and rewriting VERSION
-        $v121Dir = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-v121-' + [guid]::NewGuid().ToString('N'))
-        Copy-Item -LiteralPath $currentBundle -Destination $v121Dir -Recurse -Force
-        Set-Content -LiteralPath (Join-Path $v121Dir '.agentic\VERSION') -Value '1.2.1'
-
         $tmp = New-TestDir
         try {
-            # Step 1: Install from v1.2.1 bundle
+            # Step 1: Install from the real v1.2.1 bundle
             & (Join-Path $v121Dir 'install.ps1') -Target $tmp -Tools all *> $null
             $LASTEXITCODE | Should -Be 0
             Test-Path (Join-Path $tmp 'AGENTS.md') | Should -Be $true
@@ -1436,7 +1452,7 @@ Describe 'install.ps1' {
             Test-Path (Join-Path $tmp '.agentic\checks.tsv') | Should -Be $true
         }
         finally {
-            Remove-Item -Recurse -Force $v121Dir -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force $v121Src -ErrorAction SilentlyContinue
             Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
         }
     }

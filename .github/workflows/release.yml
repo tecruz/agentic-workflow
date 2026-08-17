@@ -2,8 +2,9 @@ name: Release
 
 # Triggered by pushing a version tag (vX.Y.Z) or manually via workflow_dispatch.
 # Validates that .agentic/VERSION, the CHANGELOG section, and the tag all agree;
-# runs all CI checks; builds the clean bundle; extracts and tests both archives;
-# verifies SHA256SUMS; and uploads release assets from the exact tagged commit.
+# runs the canonical CI suite via reusable workflow; builds the clean bundle;
+# extracts and tests both archives; verifies SHA256SUMS; and uploads release
+# assets from the exact tagged commit.
 
 on:
   push:
@@ -36,6 +37,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Resolve tag
@@ -62,143 +64,77 @@ jobs:
             exit 1
           fi
 
-          # Verify the remote tag points to this SHA
-          REMOTE_SHA="$(git ls-remote --tags origin "$TAG" 2>/dev/null | head -1 | cut -f1)"
-          if [ -z "$REMOTE_SHA" ]; then
+          # Verify the remote tag object matches the local tag object.
+          # For lightweight tags both are the commit SHA; for annotated tags
+          # both are the tag-object SHA.  We compare like-with-like.
+          LOCAL_TAG_OBJECT="$(git rev-parse "$TAG")"
+          REMOTE_TAG_OBJECT="$(
+            git ls-remote --refs origin "refs/tags/$TAG" |
+            awk 'NR == 1 { print $1 }'
+          )"
+          if [ -z "$REMOTE_TAG_OBJECT" ]; then
             echo "::error Tag $TAG not found on remote"
             exit 1
           fi
-
-          # Handle annotated tags (SHA^{commit})
-          EXPECTED_SHA="$(git rev-parse "$TAG^{commit}" 2>/dev/null)"
-          if [ "$REMOTE_SHA" != "$EXPECTED_SHA" ] && [ "$REMOTE_SHA" != "$SHA" ]; then
-            echo "::error Tag $TAG remote SHA ($REMOTE_SHA) does not match resolved SHA ($SHA)"
+          if [ "$REMOTE_TAG_OBJECT" != "$LOCAL_TAG_OBJECT" ]; then
+            echo "::error Remote tag object ($REMOTE_TAG_OBJECT) does not match local ($LOCAL_TAG_OBJECT)"
             exit 1
           fi
 
+          # Output the peeled commit SHA for downstream jobs
+          TAG_COMMIT="$(git rev-parse "$TAG^{commit}")"
           VERSION="${TAG#v}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "sha=$TAG_COMMIT" >> "$GITHUB_OUTPUT"
 
-      - name: VERSION matches tag
+      - name: VERSION matches tag at resolved commit
+        env:
+          RESOLVED_SHA: ${{ steps.resolve.outputs.sha }}
         run: |
-          FILE_VERSION="$(cat .agentic/VERSION)"
+          FILE_VERSION="$(git show "$RESOLVED_SHA:.agentic/VERSION")"
           TAG_VERSION="${{ steps.resolve.outputs.version }}"
           if [ "$FILE_VERSION" != "$TAG_VERSION" ]; then
-            echo "::error .agentic/VERSION ($FILE_VERSION) does not match tag ($TAG_VERSION)"
+            echo "::error .agentic/VERSION ($FILE_VERSION) at $RESOLVED_SHA does not match tag ($TAG_VERSION)"
             exit 1
           fi
 
-      - name: CHANGELOG has matching section
+      - name: CHANGELOG has matching section at resolved commit
+        env:
+          RESOLVED_SHA: ${{ steps.resolve.outputs.sha }}
         run: |
           TAG_VERSION="${{ steps.resolve.outputs.version }}"
-          if ! grep -q "## \[$TAG_VERSION\]" CHANGELOG.md; then
-            echo "::error CHANGELOG.md has no section [$TAG_VERSION]"
+          if ! git show "$RESOLVED_SHA:CHANGELOG.md" | grep -q "## \[$TAG_VERSION\]"; then
+            echo "::error CHANGELOG.md at $RESOLVED_SHA has no section [$TAG_VERSION]"
             exit 1
           fi
 
-      - name: Release does not already exist
+      - name: Release does not already exist as published
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ steps.resolve.outputs.tag }}"
-          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            echo "::error Release $TAG already exists"
+          IS_DRAFT="$(
+            gh release view "$TAG" \
+              --repo "${{ github.repository }}" \
+              --json isDraft --jq '.isDraft' 2>/dev/null || echo "none"
+          )"
+          if [ "$IS_DRAFT" = "false" ]; then
+            echo "::error Published release $TAG already exists"
             exit 1
+          fi
+          if [ "$IS_DRAFT" = "true" ]; then
+            echo "::notice Draft release $TAG exists and will be reused"
           fi
 
   # -----------------------------------------------------------------------
-  # 2. Run the full CI suite on the exact tagged commit.
+  # 2. Run the canonical CI suite on the exact tagged commit.
   # -----------------------------------------------------------------------
   ci:
-    name: CI (${{ matrix.os }})
     needs: validate
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: ${{ needs.validate.outputs.sha }}
-          persist-credentials: false
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
-        with:
-          node-version: 24
-
-      - name: Install bats (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y bats shellcheck
-
-      - name: Install bats (macOS)
-        if: runner.os == 'macOS'
-        run: brew install bats-core shellcheck
-
-      - name: Install bats (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $tmp = Join-Path $env:RUNNER_TEMP 'bats'
-          New-Item -ItemType Directory -Force $tmp | Out-Null
-          Invoke-WebRequest -Uri 'https://github.com/bats-core/bats-core/archive/refs/tags/v1.11.1.tar.gz' -OutFile (Join-Path $tmp 'bats.tar.gz')
-          tar -xzf (Join-Path $tmp 'bats.tar.gz') -C $tmp
-          $dir = (Get-ChildItem -LiteralPath $tmp -Directory | Select-Object -First 1).FullName
-          Add-Content -LiteralPath $env:GITHUB_PATH -Value (Join-Path $dir 'bin')
-
-      - name: Install Pester + PSScriptAnalyzer
-        shell: pwsh
-        run: |
-          Install-Module Pester -RequiredVersion 5.6.0 -Scope CurrentUser -Force -SkipPublisherCheck
-          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force -SkipPublisherCheck
-
-      - name: Run framework checks (Unix)
-        if: runner.os != 'Windows'
-        run: bash .agentic/scripts/verify.sh
-
-      - name: Run framework checks (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: pwsh -NoProfile -File .agentic/scripts/verify.ps1
-
-      - name: Run Bats suites
-        if: runner.os != 'Windows'
-        run: bats tests/bats
-
-      - name: Run Bats suites (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $bats = Get-Command bats -ErrorAction SilentlyContinue
-          if ($bats) { bats tests/bats } else { Write-Warning 'bats not found; skipping Bats suites' }
-
-      - name: Run Pester suites
-        shell: pwsh
-        run: |
-          Import-Module Pester -MinimumVersion 5.0
-          $r = Invoke-Pester -Script tests/pester -PassThru
-          if ($r.FailedCount -gt 0) { exit 1 }
-
-      - name: PSScriptAnalyzer
-        shell: pwsh
-        run: |
-          $results = @()
-          foreach ($f in @('install.ps1', '.agentic/scripts/verify.ps1')) {
-            $results += Invoke-ScriptAnalyzer -Path $f -Severity Error
-          }
-          $results | Format-Table -AutoSize
-          if ($results) { exit 1 }
-
-      - name: Run fixture smoke harness (Unix)
-        if: runner.os != 'Windows'
-        run: bash tests/fixtures/run-fixtures.sh .agentic/scripts/verify.sh
-
-      - name: Run fixture smoke harness (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: pwsh -NoProfile -File tests/fixtures/run-fixtures.ps1 .agentic/scripts/verify.ps1
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.validate.outputs.sha }}
 
   # -----------------------------------------------------------------------
   # 3. Build the clean bundle, extract + test both archives, verify no
@@ -321,6 +257,16 @@ jobs:
           test -f .agentic/VERSION
           grep -q "seed" .agentic/install-manifest.tsv
 
+          # Run the verifier; an empty project should be UNSUPPORTED (exit 3)
+          set +e
+          ./.agentic/scripts/verify.sh
+          rc=$?
+          set -e
+          if [ "$rc" -ne 3 ]; then
+            echo "::error Expected UNSUPPORTED (3) for empty project from zip, got $rc"
+            exit 1
+          fi
+
           rm -rf "$EXTRACT_DIR" "$PROJECT"
 
       - name: Extract changelog section for release notes
@@ -338,7 +284,7 @@ jobs:
             echo "This release was built from commit ${{ needs.validate.outputs.sha }}."
           } >> /tmp/release-notes.md
 
-      - name: Create or update draft release with assets
+      - name: Publish release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -346,21 +292,43 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           TITLE="$(sed -n "/^## \[$VERSION\]/,/^## \[/p" CHANGELOG.md | head -1 | sed 's/^## //')"
 
-          # Delete any partially failed release (draft or incomplete)
-          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            gh release delete "$TAG" --repo "${{ github.repository }}" --yes --cleanup-tag 2>/dev/null || true
-          fi
+          # State machine: never delete the release tag.
+          IS_DRAFT="$(
+            gh release view "$TAG" \
+              --repo "${{ github.repository }}" \
+              --json isDraft --jq '.isDraft' 2>/dev/null || echo "none"
+          )"
 
-          # Create a draft release with all assets
-          gh release create "$TAG" \
-            --repo "${{ github.repository }}" \
-            --title "$TAG — $TITLE" \
-            --notes-file /tmp/release-notes.md \
-            --verify-tag \
-            --draft \
-            dist/agentic-workflow-"$VERSION".tar.gz \
-            dist/agentic-workflow-"$VERSION".zip \
-            dist/SHA256SUMS
+          case "$IS_DRAFT" in
+            true)
+              echo "Reusing existing draft release $TAG"
+              gh release upload "$TAG" \
+                --repo "${{ github.repository }}" \
+                --clobber \
+                dist/agentic-workflow-"$VERSION".tar.gz \
+                dist/agentic-workflow-"$VERSION".zip \
+                dist/SHA256SUMS
+              gh release edit "$TAG" \
+                --repo "${{ github.repository }}" \
+                --title "$TAG — $TITLE" \
+                --notes-file /tmp/release-notes.md
+              ;;
+            false)
+              echo "::error Published release $TAG already exists; cannot overwrite"
+              exit 1
+              ;;
+            none)
+              gh release create "$TAG" \
+                --repo "${{ github.repository }}" \
+                --title "$TAG — $TITLE" \
+                --notes-file /tmp/release-notes.md \
+                --verify-tag \
+                --draft \
+                dist/agentic-workflow-"$VERSION".tar.gz \
+                dist/agentic-workflow-"$VERSION".zip \
+                dist/SHA256SUMS
+              ;;
+          esac
 
           # Verify all assets uploaded correctly
           gh release view "$TAG" --repo "${{ github.repository }}" --json assets \
