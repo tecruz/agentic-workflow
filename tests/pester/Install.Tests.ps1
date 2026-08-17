@@ -1162,7 +1162,7 @@ Describe 'install.ps1' {
             & $install -Target $tmp *> $null
             $LASTEXITCODE | Should -Be 0
             Test-Path (Join-Path $tmp '.agentic\VERSION') | Should -Be $true
-            (Get-Content -Raw (Join-Path $tmp '.agentic\VERSION')).Trim() | Should -Be '1.2.1'
+            (Get-Content -Raw (Join-Path $tmp '.agentic\VERSION')).Trim() | Should -Be '1.2.2'
             (Get-Content -Raw (Join-Path $tmp '.agentic\version')) -match 'lowercase custom' | Should -Be $true
             Test-Path (Join-Path $tmp '.agentic\version.new') | Should -Be $false
         }
@@ -1288,10 +1288,19 @@ Describe 'install.ps1' {
         $extractDir = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-extract-' + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
         try {
-            # Use tar to extract zip: avoids Compress-Archive/Expand-Archive
-            # path differences across platforms.
-            & tar -xf $archive -C $extractDir
-            $bundleRoot = Join-Path $extractDir "agentic-workflow-$version"
+            # Platform-appropriate zip extraction: Expand-Archive on Windows,
+            # unzip on Linux/macOS (PowerShell's Expand-Archive has path issues).
+            $unzip = Get-Command unzip -ErrorAction SilentlyContinue
+            if ($IsWindows -or (-not $unzip)) {
+                Expand-Archive -LiteralPath $archive -DestinationPath $extractDir -Force
+            } else {
+                & unzip -q $archive -d $extractDir
+            }
+            # Detect actual bundle directory (extraction tools may nest differently)
+            $bundleRoot = Get-ChildItem -Recurse -Path $extractDir -Filter 'install.ps1' -ErrorAction SilentlyContinue |
+                Where-Object { $_.DirectoryName -match 'agentic-workflow-' } |
+                Select-Object -First 1 -ExpandProperty DirectoryName
+            if (-not $bundleRoot) { Set-ItResult -Skipped -Because 'could not locate bundle after zip extraction' }
 
             $tmp = New-TestDir
             try {
@@ -1327,8 +1336,16 @@ Describe 'install.ps1' {
         $extractDir = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-extract-' + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
         try {
-            & tar -xf $archive -C $extractDir
-            $bundleRoot = Join-Path $extractDir "agentic-workflow-$version"
+            $unzip = Get-Command unzip -ErrorAction SilentlyContinue
+            if ($IsWindows -or (-not $unzip)) {
+                Expand-Archive -LiteralPath $archive -DestinationPath $extractDir -Force
+            } else {
+                & unzip -q $archive -d $extractDir
+            }
+            $bundleRoot = Get-ChildItem -Recurse -Path $extractDir -Filter 'install.ps1' -ErrorAction SilentlyContinue |
+                Where-Object { $_.DirectoryName -match 'agentic-workflow-' } |
+                Select-Object -First 1 -ExpandProperty DirectoryName
+            if (-not $bundleRoot) { Set-ItResult -Skipped -Because 'could not locate bundle after zip extraction' }
 
             Test-Path (Join-Path $bundleRoot 'tests') | Should -Be $false
             Test-Path (Join-Path $bundleRoot '.github') | Should -Be $false

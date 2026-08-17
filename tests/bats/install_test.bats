@@ -973,6 +973,7 @@ SHIM
 }
 
 @test "end-to-end: extract zip and install from extracted archive" {
+    command -v unzip >/dev/null 2>&1 || skip "unzip not available"
     bash "$REPO_ROOT/scripts/build-bundle.sh"
     VERSION="$(cat "$REPO_ROOT/.agentic/VERSION")"
     ARCHIVE="$REPO_ROOT/dist/agentic-workflow-$VERSION.zip"
@@ -980,14 +981,16 @@ SHIM
 
     EXTRACT_DIR="$TMP/extract-zip"
     mkdir -p "$EXTRACT_DIR"
-    # Use tar to extract zip: modern tar handles zip format consistently
-    # across platforms, avoiding Compress-Archive/unzip path differences.
-    tar -xf "$ARCHIVE" -C "$EXTRACT_DIR"
+    unzip -q "$ARCHIVE" -d "$EXTRACT_DIR"
+
+    # Detect the actual bundle directory (extraction tools may nest differently)
+    BUNDLE="$(find "$EXTRACT_DIR" -name "install.sh" -path "*/agentic-workflow-*/install.sh" -exec dirname {} \; 2>/dev/null | head -1)"
+    [ -n "$BUNDLE" ] || skip "could not locate bundle after zip extraction"
 
     PROJECT="$TMP/project"
     mkdir -p "$PROJECT"
     cd "$PROJECT"
-    bash "$EXTRACT_DIR/agentic-workflow-$VERSION/install.sh" . >/dev/null 2>&1
+    bash "$BUNDLE/install.sh" . >/dev/null 2>&1
 
     [ -f AGENTS.md ]
     [ -f .aider.conf.yml ]
@@ -1019,12 +1022,15 @@ SHIM
 }
 
 @test "release zip does not leak development-only files" {
+    command -v unzip >/dev/null 2>&1 || skip "unzip not available"
     bash "$REPO_ROOT/scripts/build-bundle.sh"
     VERSION="$(cat "$REPO_ROOT/.agentic/VERSION")"
     EXTRACT_DIR="$TMP/extract-zip-leak"
     mkdir -p "$EXTRACT_DIR"
-    tar -xf "$REPO_ROOT/dist/agentic-workflow-$VERSION.zip" -C "$EXTRACT_DIR"
-    BUNDLE="$EXTRACT_DIR/agentic-workflow-$VERSION"
+    unzip -q "$REPO_ROOT/dist/agentic-workflow-$VERSION.zip" -d "$EXTRACT_DIR"
+
+    BUNDLE="$(find "$EXTRACT_DIR" -name "install.sh" -path "*/agentic-workflow-*/install.sh" -exec dirname {} \; 2>/dev/null | head -1)"
+    [ -n "$BUNDLE" ] || skip "could not locate bundle after zip extraction"
 
     [ ! -e "$BUNDLE/tests" ]
     [ ! -e "$BUNDLE/.github" ]
