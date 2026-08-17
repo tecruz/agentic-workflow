@@ -847,14 +847,26 @@ SHIM
 
 @test "bundle build produces archives and a SHA256SUMS file" {
     bash "$REPO_ROOT/scripts/build-bundle.sh"
-    BUNDLE="$REPO_ROOT/dist/agentic-workflow-$(cat "$REPO_ROOT/.agentic/VERSION")"
+    VERSION="$(cat "$REPO_ROOT/.agentic/VERSION")"
+    BUNDLE="$REPO_ROOT/dist/agentic-workflow-$VERSION"
     [ -f "$REPO_ROOT/dist/SHA256SUMS" ]
-    [ -f "$REPO_ROOT/dist/agentic-workflow-$(cat "$REPO_ROOT/.agentic/VERSION").tar.gz" ]
-    [ -f "$REPO_ROOT/dist/agentic-workflow-$(cat "$REPO_ROOT/.agentic/VERSION").zip" ]
+    [ -f "$REPO_ROOT/dist/agentic-workflow-$VERSION.tar.gz" ]
+    [ -f "$REPO_ROOT/dist/agentic-workflow-$VERSION.zip" ]
     [ -f "$BUNDLE/install.sh" ]
     [ -f "$BUNDLE/AGENTS.md" ]
-    grep -q "agentic-workflow-$(cat "$REPO_ROOT/.agentic/VERSION").tar.gz" "$REPO_ROOT/dist/SHA256SUMS"
-    grep -q "agentic-workflow-$(cat "$REPO_ROOT/.agentic/VERSION").zip" "$REPO_ROOT/dist/SHA256SUMS"
+    grep -q "agentic-workflow-$VERSION.tar.gz" "$REPO_ROOT/dist/SHA256SUMS"
+    grep -q "agentic-workflow-$VERSION.zip" "$REPO_ROOT/dist/SHA256SUMS"
+
+    # Verify the actual checksums match
+    cd "$REPO_ROOT/dist"
+    sha256sum -c SHA256SUMS
+}
+
+@test "release changelog section can be extracted" {
+    VERSION="$(cat "$REPO_ROOT/.agentic/VERSION")"
+    NOTES="$(sed -n "/^## \[$VERSION\]/,/^## \[/p" "$REPO_ROOT/CHANGELOG.md" | sed '$d')"
+    [ -n "$NOTES" ]
+    echo "$NOTES" | grep -q "## \[$VERSION\]"
 }
 
 @test "bundle excludes framework-only files" {
