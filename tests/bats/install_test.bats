@@ -996,6 +996,17 @@ SHIM
     [ -f .aider.conf.yml ]
     [ -f .agentic/VERSION ]
     grep -q "seed" .agentic/install-manifest.tsv
+
+    # the verifier should report UNSUPPORTED (3) for an empty project
+    run bash .agentic/scripts/verify.sh
+    [ "$status" -eq 3 ]
+
+    # exercise update, plan, prune, uninstall
+    bash "$BUNDLE/install.sh" . >/dev/null 2>&1
+    run bash "$BUNDLE/install.sh" . --prune --plan
+    [ "$status" -eq 0 ]
+    run bash "$BUNDLE/install.sh" . --uninstall --plan
+    [ "$status" -eq 0 ]
 }
 
 @test "release tar.gz does not leak development-only files" {
@@ -1135,4 +1146,86 @@ SHIM
     [ -f .agentic/ARCHITECTURE.md ]
     [ -f .agentic/STATUS.md ]
     [ -f .agentic/checks.tsv ]
+}
+
+# ---------------------------------------------------------------------------
+# Tag resolution tests: verify that the release workflow's tag validation
+# logic correctly handles both lightweight and annotated tags.
+# ---------------------------------------------------------------------------
+
+@test "lightweight tag resolves to a valid commit SHA" {
+    TAG_REPO="$TMP/tag-repo"
+    mkdir -p "$TAG_REPO"
+    git -C "$REPO_ROOT" archive HEAD | tar -x -C "$TAG_REPO"
+    cd "$TAG_REPO"
+
+    git init -q
+    git add -A
+    git commit -q -m "initial commit"
+    git tag v0.0.1
+
+    # Resolve the tag (mirrors release.yml:61)
+    SHA="$(git rev-list -n 1 "v0.0.1" 2>/dev/null)"
+    [ -n "$SHA" ]
+
+    # For a lightweight tag, tag object == commit SHA
+    TAG_OBJECT="$(git rev-parse "v0.0.1")"
+    TAG_COMMIT="$(git rev-parse "v0.0.1^{commit}")"
+    [ "$TAG_OBJECT" = "$TAG_COMMIT" ]
+    [ "$TAG_COMMIT" = "$SHA" ]
+}
+
+@test "annotated tag resolves to a valid commit SHA" {
+    TAG_REPO="$TMP/tag-repo-annotated"
+    mkdir -p "$TAG_REPO"
+    git -C "$REPO_ROOT" archive HEAD | tar -x -C "$TAG_REPO"
+    cd "$TAG_REPO"
+
+    git init -q
+    git add -A
+    git commit -q -m "initial commit"
+    git tag -a v0.0.2 -m "annotated release tag"
+
+    # Resolve the tag (mirrors release.yml:61)
+    SHA="$(git rev-list -n 1 "v0.0.2" 2>/dev/null)"
+    [ -n "$SHA" ]
+
+    # For an annotated tag, tag object != commit SHA
+    TAG_OBJECT="$(git rev-parse "v0.0.2")"
+    TAG_COMMIT="$(git rev-parse "v0.0.2^{commit}")"
+    [ "$TAG_OBJECT" != "$TAG_COMMIT" ]
+    [ "$TAG_COMMIT" = "$SHA" ]
+
+    # The peeled commit SHA must match rev-list output
+    [ "$TAG_COMMIT" = "$SHA" ]
+}
+
+@test "tag validation rejects SemVer pre-release suffix" {
+    TAG_REPO="$TMP/tag-repo-prerelease"
+    mkdir -p "$TAG_REPO"
+    git -C "$REPO_ROOT" archive HEAD | tar -x -C "$TAG_REPO"
+    cd "$TAG_REPO"
+
+    git init -q
+    git add -A
+    git commit -q -m "initial commit"
+    git tag v1.0.0-beta.1
+
+    # Pre-release tags must fail the SemVer check (mirrors release.yml:55)
+    [[ ! "v1.0.0-beta.1" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+}
+
+@test "tag validation rejects missing tag" {
+    TAG_REPO="$TMP/tag-repo-missing"
+    mkdir -p "$TAG_REPO"
+    git -C "$REPO_ROOT" archive HEAD | tar -x -C "$TAG_REPO"
+    cd "$TAG_REPO"
+
+    git init -q
+    git add -A
+    git commit -q -m "initial commit"
+
+    # Non-existent tag should fail to resolve
+    run git rev-list -n 1 "v9.9.9" 2>/dev/null
+    [ "$status" -ne 0 ]
 }
