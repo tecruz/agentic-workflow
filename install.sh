@@ -375,7 +375,8 @@ safe_atomic_restore() {
 }
 
 safe_remove_file() {
-    local rel="$1" dst="$TARGET_DIR/$rel"
+    local rel="$1"
+    local dst="$TARGET_DIR/$rel"
     if ! assert_safe_destination "$rel"; then
         echo "ERROR: refusing to remove '$rel': destination is not safely inside the project root." >&2
         return 1
@@ -606,7 +607,8 @@ MS_START=""
 MS_END=""
 
 merge_state() {
-    local rel="$1" dst="$TARGET_DIR/$rel"
+    local rel="$1"
+    local dst="$TARGET_DIR/$rel"
     local start_count end_count start_line end_line
     MERGE_STATE=""
     MS_START=""
@@ -639,7 +641,8 @@ merge_state() {
 # True when removing the managed block from $rel would leave no non-whitespace
 # content behind. Read-only: lets --plan report the would-be outcome.
 merge_remainder_blank() {
-    local rel="$1" dst="$TARGET_DIR/$rel"
+    local rel="$1"
+    local dst="$TARGET_DIR/$rel"
     merge_state "$rel"
     [ "$MERGE_STATE" = "valid" ] || return 1
     if {
@@ -1201,7 +1204,7 @@ generate_checks() {
     fi
     snapshot_file "$rel"
     [ "$BACKUP" -eq 1 ] && [ -e "$dst" ] && backup_file "$rel"
-    atomic_copy "$gen" "$rel"
+    atomic_copy "$gen" "$rel" || exit 1
     echo "  gen    $rel (from detected stack)"
 }
 
@@ -1304,7 +1307,7 @@ if [ "$ACCEPT_DETECTED_CHECKS" -eq 1 ]; then
 
     snapshot_file "$rel"
     [ "$BACKUP" -eq 1 ] && [ -e "$dst" ] && backup_file "$rel"
-    atomic_copy "$gen" "$rel"
+    atomic_copy "$gen" "$rel" || exit 1
     echo "  promoted '$gen' to '$rel'"
     exit 0
 fi

@@ -898,8 +898,8 @@ SHIM
     cat > shimbin/mv <<'SHIM'
 #!/usr/bin/env bash
 for arg in "$@"; do
-    if [[ "$arg" == *"checks.generated.tsv"* ]]; then
-        echo "shim: refusing mv for checks.generated.tsv" >&2
+    if [[ "$arg" == *"checks.tsv" ]]; then
+        echo "shim: refusing mv for checks.tsv" >&2
         exit 1
     fi
 done
@@ -908,7 +908,7 @@ SHIM
     chmod +x shimbin/mv
     run env PATH="$PWD/shimbin:$PATH" bash "$INSTALL" . --accept-detected-checks
     [ "$status" -ne 0 ]
-    ! grep -q "Candidate contract written" <<< "$output"
+    ! grep -q "promoted" <<< "$output"
     [ ! -f .agentic/checks.tsv ]
 }
 
