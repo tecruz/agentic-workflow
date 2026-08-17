@@ -759,7 +759,7 @@ make_outside_dir() {
     bash "$INSTALL" . >/dev/null 2>&1
     [ -x .agentic/scripts/verify.sh ]
     run ./.agentic/scripts/verify.sh
-    [ "$status" -le 3 ]
+    [ "$status" -eq 3 ]
 }
 
 @test "--detect-checks refuses an .agentic symlink to an outside directory" {
