@@ -84,8 +84,11 @@ jobs:
           # Output the peeled commit SHA for downstream jobs
           TAG_COMMIT="$(git rev-parse "$TAG^{commit}")"
           VERSION="${TAG#v}"
+          # Strip dry-run suffix for VERSION/CHANGELOG comparison
+          BASE_VERSION="${VERSION%%-dry-run*}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "base_version=$BASE_VERSION" >> "$GITHUB_OUTPUT"
           echo "sha=$TAG_COMMIT" >> "$GITHUB_OUTPUT"
 
       - name: VERSION matches tag at resolved commit
@@ -93,9 +96,9 @@ jobs:
           RESOLVED_SHA: ${{ steps.resolve.outputs.sha }}
         run: |
           FILE_VERSION="$(git show "$RESOLVED_SHA:.agentic/VERSION")"
-          TAG_VERSION="${{ steps.resolve.outputs.version }}"
-          if [ "$FILE_VERSION" != "$TAG_VERSION" ]; then
-            echo "::error .agentic/VERSION ($FILE_VERSION) at $RESOLVED_SHA does not match tag ($TAG_VERSION)"
+          BASE_VERSION="${{ steps.resolve.outputs.base_version }}"
+          if [ "$FILE_VERSION" != "$BASE_VERSION" ]; then
+            echo "::error .agentic/VERSION ($FILE_VERSION) at $RESOLVED_SHA does not match tag base ($BASE_VERSION)"
             exit 1
           fi
 
@@ -103,9 +106,9 @@ jobs:
         env:
           RESOLVED_SHA: ${{ steps.resolve.outputs.sha }}
         run: |
-          TAG_VERSION="${{ steps.resolve.outputs.version }}"
-          if ! git show "$RESOLVED_SHA:CHANGELOG.md" | grep -q "## \[$TAG_VERSION\]"; then
-            echo "::error CHANGELOG.md at $RESOLVED_SHA has no section [$TAG_VERSION]"
+          BASE_VERSION="${{ steps.resolve.outputs.base_version }}"
+          if ! git show "$RESOLVED_SHA:CHANGELOG.md" | grep -q "## \[$BASE_VERSION\]"; then
+            echo "::error CHANGELOG.md at $RESOLVED_SHA has no section [$BASE_VERSION]"
             exit 1
           fi
 
@@ -284,7 +287,19 @@ jobs:
             echo "This release was built from commit ${{ needs.validate.outputs.sha }}."
           } >> /tmp/release-notes.md
 
+      - name: Dry-run summary
+        if: contains(needs.validate.outputs.tag, 'dry-run')
+        env:
+          DRY_RUN_TAG: ${{ needs.validate.outputs.tag }}
+          DRY_RUN_SHA: ${{ needs.validate.outputs.sha }}
+        run: |
+          echo "::notice Dry-run mode — skipping publish for tag $DRY_RUN_TAG"
+          echo "Validation passed on commit $DRY_RUN_SHA"
+          echo "Build produced:"
+          ls -la dist/
+
       - name: Publish release
+        if: ${{ !contains(needs.validate.outputs.tag, 'dry-run') }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
