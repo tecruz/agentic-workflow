@@ -980,7 +980,9 @@ SHIM
 
     EXTRACT_DIR="$TMP/extract-zip"
     mkdir -p "$EXTRACT_DIR"
-    unzip -q "$ARCHIVE" -d "$EXTRACT_DIR"
+    # Use tar to extract zip: modern tar handles zip format consistently
+    # across platforms, avoiding Compress-Archive/unzip path differences.
+    tar -xf "$ARCHIVE" -C "$EXTRACT_DIR"
 
     PROJECT="$TMP/project"
     mkdir -p "$PROJECT"
@@ -1021,7 +1023,7 @@ SHIM
     VERSION="$(cat "$REPO_ROOT/.agentic/VERSION")"
     EXTRACT_DIR="$TMP/extract-zip-leak"
     mkdir -p "$EXTRACT_DIR"
-    unzip -q "$REPO_ROOT/dist/agentic-workflow-$VERSION.zip" -d "$EXTRACT_DIR"
+    tar -xf "$REPO_ROOT/dist/agentic-workflow-$VERSION.zip" -C "$EXTRACT_DIR"
     BUNDLE="$EXTRACT_DIR/agentic-workflow-$VERSION"
 
     [ ! -e "$BUNDLE/tests" ]
@@ -1042,21 +1044,13 @@ SHIM
 # ---------------------------------------------------------------------------
 
 @test "upgrade from v1.2.1 bundle to v1.2.2 preserves project state" {
-    # Simulate a v1.2.1 install by using the previous tag's installer.
-    # We fetch the v1.2.1 install.sh from the tag and install from it.
-    V121_DIR="$TMP/v121-bundle"
-    mkdir -p "$V121_DIR/.agentic/rules" \
-             "$V121_DIR/.agentic/scripts" \
-             "$V121_DIR/.agentic/templates" \
-             "$V121_DIR/.agentic/tasks" \
-             "$V121_DIR/.agentic/decisions"
-
     # Build the current bundle to get all source files, then create a
     # v1.2.1-like bundle by rewriting VERSION and using the current installers.
     bash "$REPO_ROOT/scripts/build-bundle.sh" --no-archives
     CURRENT_BUNDLE="$REPO_ROOT/dist/agentic-workflow-$(cat "$REPO_ROOT/.agentic/VERSION")"
 
     # Copy current bundle as v1.2.1 (same installer code, different VERSION)
+    V121_DIR="$TMP/v121-bundle"
     cp -r "$CURRENT_BUNDLE" "$V121_DIR"
     echo "1.2.1" > "$V121_DIR/.agentic/VERSION"
 

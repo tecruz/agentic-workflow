@@ -1288,7 +1288,9 @@ Describe 'install.ps1' {
         $extractDir = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-extract-' + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
         try {
-            Expand-Archive -LiteralPath $archive -DestinationPath $extractDir -Force
+            # Use tar to extract zip: avoids Compress-Archive/Expand-Archive
+            # path differences across platforms.
+            & tar -xf $archive -C $extractDir
             $bundleRoot = Join-Path $extractDir "agentic-workflow-$version"
 
             $tmp = New-TestDir
@@ -1325,7 +1327,7 @@ Describe 'install.ps1' {
         $extractDir = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-extract-' + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
         try {
-            Expand-Archive -LiteralPath $archive -DestinationPath $extractDir -Force
+            & tar -xf $archive -C $extractDir
             $bundleRoot = Join-Path $extractDir "agentic-workflow-$version"
 
             Test-Path (Join-Path $bundleRoot 'tests') | Should -Be $false
