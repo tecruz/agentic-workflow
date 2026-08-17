@@ -76,10 +76,13 @@ if [ "$NO_ARCHIVES" -eq 1 ]; then
     exit 0
 fi
 
-# Archives: tar.gz via tar; zip via pwsh (Compress-Archive works on every
-# supported platform and produces Windows-friendly archives).
+# Archives: tar.gz via tar; zip via zip or pwsh Compress-Archive.
+# Compress-Archive on Linux pwsh omits dotfiles (.agentic/), so prefer
+# the zip utility when available.
 tar -C "$DIST" -czf "$DIST/agentic-workflow-$VERSION.tar.gz" "agentic-workflow-$VERSION"
-if command -v pwsh >/dev/null 2>&1; then
+if command -v zip >/dev/null 2>&1; then
+    (cd "$DIST" && zip -qr "agentic-workflow-$VERSION.zip" "agentic-workflow-$VERSION")
+elif command -v pwsh >/dev/null 2>&1; then
     # Compress-Archive needs Windows paths even when launched from git-bash.
     bundle_win="$BUNDLE"
     dist_win="$DIST/agentic-workflow-$VERSION.zip"
@@ -89,7 +92,7 @@ if command -v pwsh >/dev/null 2>&1; then
     fi
     pwsh -NoProfile -Command "Compress-Archive -Path '$bundle_win' -DestinationPath '$dist_win' -Force"
 else
-    echo "WARNING: pwsh not found; skipping zip archive." >&2
+    echo "WARNING: neither zip nor pwsh found; skipping zip archive." >&2
 fi
 
 # Checksums for every archive in dist/ (the bundle directory is a build output).
