@@ -1205,4 +1205,69 @@ Describe 'install.ps1' {
             Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
         }
     }
+
+    It 'stale candidate removal failure (locked checks.generated.tsv) aborts with nonzero exit and preserves prior candidate' {
+        $tmp = New-TestDir
+        $gen = Join-Path $tmp '.agentic\checks.generated.tsv'
+        $fs = $null
+        try {
+            New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic') -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $tmp 'package.json') -Value '{"name":"x","scripts":{"test":"true"}}'
+            & $install -Target $tmp -DetectChecks *> $null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path $gen | Should -Be $true
+            $candidateBefore = Get-Content -Raw $gen
+            $fs = [System.IO.FileStream]::new($gen, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+            Remove-Item -LiteralPath (Join-Path $tmp 'package.json') -Force
+            & $install -Target $tmp -GenerateChecks *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            # Release the lock before verifying file contents.
+            $fs.Dispose(); $fs = $null
+            # Prior candidate preserved: the locked file was never removed.
+            Test-Path $gen | Should -Be $true
+            (Get-Content -Raw $gen) | Should -Be $candidateBefore
+            # No stale content promoted to checks.tsv.
+            Test-Path (Join-Path $tmp '.agentic\checks.tsv') | Should -Be $false
+            # No randomized temp files remain in the .agentic directory.
+            $strays = @(Get-ChildItem -LiteralPath (Join-Path $tmp '.agentic') -Force -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -match '\.[0-9A-Za-z_-]{6,}$' })
+            $strays | Should -HaveCount 0
+        }
+        finally {
+            if ($fs) { $fs.Dispose() }
+            Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'uninstall failure (locked managed file) aborts with nonzero exit and preserves manifest and locked file' {
+        $tmp = New-TestDir
+        $ver = Join-Path $tmp '.agentic\VERSION'
+        $mf = Join-Path $tmp '.agentic\install-manifest.tsv'
+        $fs = $null
+        try {
+            & $install -Target $tmp *> $null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path $ver | Should -Be $true
+            Test-Path $mf | Should -Be $true
+            $verBefore = Get-Content -Raw $ver
+            $fs = [System.IO.FileStream]::new($ver, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+            & $install -Target $tmp -Uninstall *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            # Release the lock before verifying file contents.
+            $fs.Dispose(); $fs = $null
+            # Rollback: the locked file is restored (or still present).
+            Test-Path $ver | Should -Be $true
+            (Get-Content -Raw $ver) | Should -Be $verBefore
+            # Manifest preserved: never removed because uninstall aborted first.
+            Test-Path $mf | Should -Be $true
+            # No randomized temp files remain in the .agentic directory.
+            $strays = @(Get-ChildItem -LiteralPath (Join-Path $tmp '.agentic') -Force -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -match '\.[0-9A-Za-z_-]{6,}$' })
+            $strays | Should -HaveCount 0
+        }
+        finally {
+            if ($fs) { $fs.Dispose() }
+            Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+        }
+    }
 }

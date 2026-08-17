@@ -889,3 +889,47 @@ SHIM
     run bash .agentic/scripts/verify.sh
     [ "$status" -eq 3 ]
 }
+
+@test "Bash candidate rename failure aborts with nonzero exit and outputs no success message" {
+    printf '{"name":"x","scripts":{"test":"true"}}\n' > package.json
+    bash "$INSTALL" . --detect-checks >/dev/null 2>&1
+    [ -f .agentic/checks.generated.tsv ]
+    mkdir -p shimbin
+    cat > shimbin/mv <<'SHIM'
+#!/usr/bin/env bash
+for arg in "$@"; do
+    if [[ "$arg" == *"checks.generated.tsv"* ]]; then
+        echo "shim: refusing mv for checks.generated.tsv" >&2
+        exit 1
+    fi
+done
+exec /bin/mv "$@"
+SHIM
+    chmod +x shimbin/mv
+    run env PATH="$PWD/shimbin:$PATH" bash "$INSTALL" . --accept-detected-checks
+    [ "$status" -ne 0 ]
+    ! grep -q "Candidate contract written" <<< "$output"
+    [ ! -f .agentic/checks.tsv ]
+}
+
+@test "Bash stale-candidate removal failure aborts with nonzero exit and preserves stale candidate" {
+    printf '{"name":"x","scripts":{"test":"true"}}\n' > package.json
+    bash "$INSTALL" . --detect-checks >/dev/null 2>&1
+    [ -f .agentic/checks.generated.tsv ]
+    rm package.json
+    mkdir -p shimbin
+    cat > shimbin/rm <<'SHIM'
+#!/usr/bin/env bash
+for arg in "$@"; do
+    if [[ "$arg" == *"checks.generated.tsv"* ]]; then
+        echo "shim: refusing rm for checks.generated.tsv" >&2
+        exit 1
+    fi
+done
+exec /bin/rm "$@"
+SHIM
+    chmod +x shimbin/rm
+    run env PATH="$PWD/shimbin:$PATH" bash "$INSTALL" . --detect-checks
+    [ "$status" -ne 0 ]
+    [ -f .agentic/checks.generated.tsv ]
+}

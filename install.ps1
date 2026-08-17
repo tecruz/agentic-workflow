@@ -499,8 +499,14 @@ function Remove-AgenticFile {
     }
     $path = Join-Path $TargetDir $RelativePath
     if (-not (Test-Path -LiteralPath $path)) { return $true }
-    Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
-    return $true
+    try {
+        Remove-Item -LiteralPath $path -Force -ErrorAction Stop
+    }
+    catch {
+        Write-Host "ERROR: failed to remove '$RelativePath': $($_.Exception.Message)"
+        return $false
+    }
+    return -not (Test-Path -LiteralPath $path)
 }
 
 # Atomic rollback restore: stages the snapshot next to the destination and
@@ -1264,7 +1270,9 @@ function Write-GeneratedCandidate {
     }
     else {
         Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
-        Remove-AgenticFile $genRel | Out-Null
+        if (-not (Remove-AgenticFile $genRel)) {
+            throw "Failed to remove stale generated candidate '$genRel'."
+        }
         Write-Host "No stack detected. Removed stale candidate '$genRel'."
     }
 }
