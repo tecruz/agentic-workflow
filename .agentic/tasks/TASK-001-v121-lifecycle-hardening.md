@@ -56,15 +56,15 @@ Implement the 7 hotfix items from `feedback (8).md` for the v1.2.1 release:
 - Baseline before changes: Pester 80/80 pass; Bats 93 pass + 1 skip
   (`--detect-checks` parity skips because pwsh is unavailable under WSL);
   `bash -n` and `ps-syntax` pass; `bats`/`shellcheck` binaries absent from host PATH.
-- Final (v1.2.1):
+- Final (v1.2.1, including the write-confinement follow-up):
   - `bash -n install.sh` and `bash -n .agentic/scripts/verify.sh` — OK.
   - PowerShell parse of `install.ps1`, `Install.Tests.ps1`, `Verify.Tests.ps1`,
     `.agentic/scripts/verify.ps1` — all SYNTAX OK.
-  - Bats (WSL): 105 total, 0 failures, 1 skip (pwsh parity — runs only in CI).
-  - Pester 5.6.0: 91/91 pass (55 install + 36 verify), 0 failed.
+  - Bats (WSL): 123 total, 0 failures, 1 skip (pwsh parity — runs only in CI).
+  - Pester 5.6.0: 106 passed, 0 failed, 2 platform skips.
   - Bundle: `dist/agentic-workflow-1.2.1/` + tar.gz + zip assembled; stale
     1.1.0/1.2.0 build artifacts removed; `sha256sum -c dist/SHA256SUMS` OK.
-  - End-to-end bundle install verified by bats 60 and pester "bundle
+  - End-to-end bundle install verified by bats 78 and pester "bundle
     end-to-end" tests.
 - Full history in Handoff section of `.agentic/STATUS.md`.
 

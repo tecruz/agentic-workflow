@@ -14,6 +14,44 @@ Describe 'install.ps1' {
             New-Item -ItemType Directory -Path $d -Force | Out-Null
             return $d
         }
+
+        function Set-ProtectedDir {
+            param([string] $Path)
+            if ($IsWindows) {
+                # Deny only the Write rights (creating files/children), leaving
+                # reads intact so assertions below can still inspect the tree.
+                $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+                $acl = Get-Acl -LiteralPath $Path
+                $deny = [System.Security.AccessControl.FileSystemAccessRule]::new(
+                    $identity, 'Write', 'ContainerInherit,ObjectInherit', 'None', 'Deny')
+                $acl.AddAccessRule($deny)
+                Set-Acl -LiteralPath $Path $acl
+            }
+            else {
+                if ((& id -u) -eq '0') { throw 'running as root; cannot protect a directory via chmod' }
+                & chmod 555 $Path
+                if ($LASTEXITCODE -ne 0) { throw "chmod failed with exit code $LASTEXITCODE" }
+            }
+        }
+
+        function Restore-ProtectedDir {
+            param([string] $Path)
+            if ($IsWindows) {
+                try {
+                    $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+                    $acl = Get-Acl -LiteralPath $Path
+                    $denyRules = $acl.Access | Where-Object {
+                        $_.AccessControlType -eq 'Deny' -and $_.IdentityReference -eq $identity
+                    }
+                    foreach ($rule in $denyRules) { $acl.RemoveAccessRule($rule) | Out-Null }
+                    Set-Acl -LiteralPath $Path $acl
+                }
+                catch { }
+            }
+            else {
+                & chmod 755 $Path 2>$null
+            }
+        }
     }
 
     It 'fresh install creates the core file set and manifest' {
@@ -774,6 +812,212 @@ Describe 'install.ps1' {
     }
 
     # -----------------------------------------------------------------------
+    # Canonical category-registry and write-confinement adversarial tests.
+    # Every test asserts the run FAILS before modifying the project or any
+    # external target, and that no partial destination is ever left behind.
+    # -----------------------------------------------------------------------
+
+    It 'manifest category enforcement: CLAUDE.md recorded as managed is rejected' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp -Tools all *> $null
+            Add-Content -LiteralPath (Join-Path $tmp '.agentic\install-manifest.tsv') -Value "`nCLAUDE.md`tmanaged`t0000000000000000000000000000000000000000000000000000000000000000"
+            & $install -Target $tmp -Prune *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            Test-Path (Join-Path $tmp 'CLAUDE.md') | Should -Be $true
+            (Get-Content -Raw (Join-Path $tmp 'CLAUDE.md')) -match 'AGENTIC-PROTOCOL-START' | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'manifest category enforcement: .aider.conf.yml recorded as merge is rejected' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp -Tools all *> $null
+            Add-Content -LiteralPath (Join-Path $tmp '.agentic\install-manifest.tsv') -Value "`n.aider.conf.yml`tmerge`t0000000000000000000000000000000000000000000000000000000000000000"
+            & $install -Target $tmp -Prune *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            Test-Path (Join-Path $tmp '.aider.conf.yml') | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'manifest category enforcement: a seed path recorded as managed is rejected' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp *> $null
+            Add-Content -LiteralPath (Join-Path $tmp '.agentic\install-manifest.tsv') -Value "`n.agentic/ARCHITECTURE.md`tmanaged`t0000000000000000000000000000000000000000000000000000000000000000"
+            & $install -Target $tmp -Prune *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            Test-Path (Join-Path $tmp '.agentic\ARCHITECTURE.md') | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'a forged legacy manifest row (.clinerules) is rejected before any mutation' {
+        $tmp = New-TestDir
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp '.clinerules') -Value 'my custom claude rules'
+            & $install -Target $tmp *> $null
+            Add-Content -LiteralPath (Join-Path $tmp '.agentic\install-manifest.tsv') -Value "`n.clinerules`tmanaged`t0000000000000000000000000000000000000000000000000000000000000000"
+            & $install -Target $tmp -Prune -PruneUnverifiedLegacy *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            Test-Path (Join-Path $tmp '.clinerules') | Should -Be $true
+            (Get-Content -Raw (Join-Path $tmp '.clinerules')) -match 'my custom claude rules' | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic-backup') | Should -Be $false
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'a merge destination that is a symlink to an outside file is refused' {
+        $tmp = New-TestDir
+        $outside = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-out-' + [guid]::NewGuid().ToString('N'))
+        try {
+            Set-Content -LiteralPath $outside -Value 'PRECIOUS OUTSIDE CONTENT'
+            if ($IsWindows) {
+                try {
+                    New-Item -ItemType Symlink -Path (Join-Path $tmp 'AGENTS.md') -Target $outside | Out-Null
+                }
+                catch {
+                    Set-ItResult -Skipped -Because 'creating a file symlink requires elevated privileges on Windows'
+                    return
+                }
+            }
+            else {
+                & ln -s $outside (Join-Path $tmp 'AGENTS.md')
+                if ($LASTEXITCODE -ne 0) { Set-ItResult -Skipped -Because 'symlink creation unavailable'; return }
+            }
+            & $install -Target $tmp *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            (Get-Content -Raw $outside) -match 'PRECIOUS OUTSIDE CONTENT' | Should -Be $true
+            (Get-Item -LiteralPath (Join-Path $tmp 'AGENTS.md')).LinkType | Should -Not -Be $null
+        }
+        finally {
+            Remove-Item -LiteralPath $outside -Force -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'an .agentic directory linked outside is refused without writing there' {
+        $tmp = New-TestDir
+        $outside = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-out-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $outside -Force | Out-Null
+        try {
+            Set-Content -LiteralPath (Join-Path $outside 'keep.txt') -Value 'PRECIOUS OUTSIDE'
+            if ($IsWindows) {
+                # Junction: directory links work without elevated privileges.
+                New-Item -ItemType Junction -Path (Join-Path $tmp '.agentic') -Target $outside | Out-Null
+            }
+            else {
+                & ln -s $outside (Join-Path $tmp '.agentic')
+                if ($LASTEXITCODE -ne 0) { Set-ItResult -Skipped -Because 'symlink creation unavailable'; return }
+            }
+            & $install -Target $tmp *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            (Get-Content -Raw (Join-Path $outside 'keep.txt')) -match 'PRECIOUS OUTSIDE' | Should -Be $true
+            Test-Path (Join-Path $outside 'VERSION') | Should -Be $false
+        }
+        finally {
+            # Remove the link itself first so the recursive temp cleanup never
+            # traverses into the external target.
+            Remove-Item -LiteralPath (Join-Path $tmp '.agentic') -Force -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force $outside -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'a failed managed copy leaves no partial destination and nothing outside is touched' {
+        $tmp = New-TestDir
+        $agentic = Join-Path $tmp '.agentic'
+        $outside = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-evil-' + [guid]::NewGuid().ToString('N'))
+        try {
+            New-Item -ItemType Directory -Path $agentic -Force | Out-Null
+            Set-Content -LiteralPath $outside -Value 'PRECIOUS SIBLING'
+            try { Set-ProtectedDir $agentic }
+            catch { Set-ItResult -Skipped -Because "cannot protect a directory: $($_.Exception.Message)"; return }
+            & $install -Target $tmp *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            Test-Path (Join-Path $agentic 'VERSION') | Should -Be $false
+            (Get-Content -Raw $outside) -match 'PRECIOUS SIBLING' | Should -Be $true
+        }
+        finally {
+            if (Test-Path -LiteralPath $agentic) { Restore-ProtectedDir $agentic }
+            Remove-Item -LiteralPath $outside -Force -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'a failed seed copy leaves no partial destination' {
+        $tmp = New-TestDir
+        $agentic = Join-Path $tmp '.agentic'
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'package.json') -Value '{"name":"x","scripts":{"test":"true"}}'
+            & $install -Target $tmp -DetectChecks -Tools claude *> $null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path (Join-Path $agentic 'checks.generated.tsv') | Should -Be $true
+            Test-Path (Join-Path $agentic 'checks.tsv') | Should -Be $false
+            try { Set-ProtectedDir $agentic }
+            catch { Set-ItResult -Skipped -Because "cannot protect a directory: $($_.Exception.Message)"; return }
+            & $install -Target $tmp -AcceptDetectedChecks -Tools claude *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            Test-Path (Join-Path $agentic 'checks.tsv') | Should -Be $false
+            Test-Path (Join-Path $agentic 'checks.generated.tsv') | Should -Be $true
+        }
+        finally {
+            if (Test-Path -LiteralPath $agentic) { Restore-ProtectedDir $agentic }
+            Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'a manifest row with a leading empty field is rejected' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp *> $null
+            Add-Content -LiteralPath (Join-Path $tmp '.agentic\install-manifest.tsv') -Value "`n`tmanaged`t0000000000000000000000000000000000000000000000000000000000000000"
+            & $install -Target $tmp -Prune *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            Test-Path (Join-Path $tmp 'AGENTS.md') | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'a manifest row with a trailing empty field is rejected' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp *> $null
+            Add-Content -LiteralPath (Join-Path $tmp '.agentic\install-manifest.tsv') -Value "`nAGENTS.md`tmanaged`t"
+            & $install -Target $tmp -Prune *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            Test-Path (Join-Path $tmp 'AGENTS.md') | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'a manifest row with an adjacent empty field is rejected' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp *> $null
+            Add-Content -LiteralPath (Join-Path $tmp '.agentic\install-manifest.tsv') -Value "`nAGENTS.md`t`t0000000000000000000000000000000000000000000000000000000000000000"
+            & $install -Target $tmp -Prune *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            Test-Path (Join-Path $tmp 'AGENTS.md') | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'a manifest row with an excess (4th) field is rejected' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp *> $null
+            Add-Content -LiteralPath (Join-Path $tmp '.agentic\install-manifest.tsv') -Value "`nAGENTS.md`tmanaged`t0000000000000000000000000000000000000000000000000000000000000000`textra"
+            & $install -Target $tmp -Prune *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            Test-Path (Join-Path $tmp 'AGENTS.md') | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    # -----------------------------------------------------------------------
     # Clean adopter bundle end-to-end (scripts/build-bundle.sh). The build
     # script itself is bash; this test only exercises it when bash is present,
     # so the suite still runs on Windows without git-bash.
@@ -818,5 +1062,212 @@ Describe 'install.ps1' {
             (Get-ChildItem -LiteralPath $tmp -Force -ErrorAction SilentlyContinue) | Should -HaveCount 0
         }
         finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    # -----------------------------------------------------------------------
+    # Write-confinement and atomicity regression tests (PR #5 review). These
+    # mirror the Bats tests so Bash and PowerShell lock in the same behavior;
+    # on Windows the directory links are junctions (no elevation required).
+    # -----------------------------------------------------------------------
+
+    It 'detect mode refuses a linked .agentic without writing outside' {
+        $tmp = New-TestDir
+        $outside = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-out-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $outside -Force | Out-Null
+        try {
+            Set-Content -LiteralPath (Join-Path $outside 'keep.txt') -Value 'PRECIOUS OUTSIDE'
+            if ($IsWindows) {
+                New-Item -ItemType Junction -Path (Join-Path $tmp '.agentic') -Target $outside | Out-Null
+            }
+            else {
+                & ln -s $outside (Join-Path $tmp '.agentic')
+                if ($LASTEXITCODE -ne 0) { Set-ItResult -Skipped -Because 'symlink creation unavailable'; return }
+            }
+            & $install -Target $tmp -DetectChecks -Tools claude *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            (Get-Content -Raw (Join-Path $outside 'keep.txt')) -match 'PRECIOUS OUTSIDE' | Should -Be $true
+             Test-Path (Join-Path $outside 'checks.generated.tsv') | Should -Be $false
+             (Get-ChildItem -LiteralPath $tmp -Force | Where-Object Name -eq '.agentic').LinkType | Should -Not -Be $null
+         }
+        finally {
+            Remove-Item -LiteralPath (Join-Path $tmp '.agentic') -Force -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force $outside -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'prune refuses to remove a legacy file through a linked .github' {
+        $tmp = New-TestDir
+        $outside = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-out-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $outside -Force | Out-Null
+        try {
+            & $install -Target $tmp *> $null
+            Set-Content -LiteralPath (Join-Path $outside 'copilot-instructions.md') -Value 'PRECIOUS OUTSIDE'
+            if ($IsWindows) {
+                New-Item -ItemType Junction -Path (Join-Path $tmp '.github') -Target $outside | Out-Null
+            }
+            else {
+                & ln -s $outside (Join-Path $tmp '.github')
+                if ($LASTEXITCODE -ne 0) { Set-ItResult -Skipped -Because 'symlink creation unavailable'; return }
+            }
+            & $install -Target $tmp -Prune -PruneUnverifiedLegacy *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+             (Get-Content -Raw (Join-Path $outside 'copilot-instructions.md')) -match 'PRECIOUS OUTSIDE' | Should -Be $true
+             (Get-ChildItem -LiteralPath $tmp -Force | Where-Object Name -eq '.github').LinkType | Should -Not -Be $null
+         }
+        finally {
+            Remove-Item -LiteralPath (Join-Path $tmp '.github') -Force -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force $outside -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'prune refuses to rewrite a manifest reached through a linked .agentic' {
+        $tmp = New-TestDir
+        $outside = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-out-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $outside -Force | Out-Null
+        try {
+            Set-Content -LiteralPath (Join-Path $outside 'install-manifest.tsv') -Value "1.2.1`nAGENTS.md`tmerge`t0000000000000000000000000000000000000000000000000000000000000000"
+            if ($IsWindows) {
+                New-Item -ItemType Junction -Path (Join-Path $tmp '.agentic') -Target $outside | Out-Null
+            }
+            else {
+                & ln -s $outside (Join-Path $tmp '.agentic')
+                if ($LASTEXITCODE -ne 0) { Set-ItResult -Skipped -Because 'symlink creation unavailable'; return }
+            }
+            & $install -Target $tmp -Prune *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+             (Get-Content -Raw (Join-Path $outside 'install-manifest.tsv')) -match "`tmerge`t" | Should -Be $true
+             (Get-ChildItem -LiteralPath $tmp -Force | Where-Object Name -eq '.agentic').LinkType | Should -Not -Be $null
+         }
+        finally {
+            Remove-Item -LiteralPath (Join-Path $tmp '.agentic') -Force -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force $outside -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'case-different framework path is distinct on a case-sensitive filesystem' {
+        $tmp = New-TestDir
+        try {
+            # Probe: on a case-insensitive filesystem the two names collide.
+            Set-Content -LiteralPath (Join-Path $tmp '.CaseProbe') -Value 'probe'
+            if (Test-Path -LiteralPath (Join-Path $tmp '.caseprobe')) {
+                Set-ItResult -Skipped -Because 'case-insensitive filesystem'
+                return
+            }
+            Remove-Item -LiteralPath (Join-Path $tmp '.CaseProbe') -Force
+            New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic') -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\version') -Value 'lowercase custom'
+            & $install -Target $tmp *> $null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path (Join-Path $tmp '.agentic\VERSION') | Should -Be $true
+            (Get-Content -Raw (Join-Path $tmp '.agentic\VERSION')).Trim() | Should -Be '1.2.1'
+            (Get-Content -Raw (Join-Path $tmp '.agentic\version')) -match 'lowercase custom' | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\version.new') | Should -Be $false
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'a mid-transaction failure after a managed replacement restores prior content and mode' {
+        $tmp = New-TestDir
+        $templates = Join-Path $tmp '.agentic\templates'
+        $expectedMode = $null
+        try {
+            & $install -Target $tmp *> $null
+            $verifySh = Join-Path $tmp '.agentic\scripts\verify.sh'
+            if (-not $IsWindows) {
+                # Distinctive mode: the update rewrites the verifier, then a
+                # later write fails; rollback must restore content and this mode.
+                & chmod 750 $verifySh
+                if ($LASTEXITCODE -ne 0) { Set-ItResult -Skipped -Because 'chmod unavailable'; return }
+                $expectedMode = [int](Get-Item -LiteralPath $verifySh).UnixFileMode
+            }
+            try { Set-ProtectedDir $templates }
+            catch { Set-ItResult -Skipped -Because "cannot protect a directory: $($_.Exception.Message)"; return }
+            & $install -Target $tmp *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            # The verifier was replaced mid-transaction and rolled back to its
+            # prior content (and its mode on Unix).
+            (Get-Content -Raw (Join-Path $tmp '.agentic\scripts\verify.ps1')) -match 'Universal project verification script' | Should -Be $true
+            if (-not $IsWindows) {
+                [int](Get-Item -LiteralPath $verifySh).UnixFileMode | Should -Be $expectedMode
+            }
+            # The protected destination was never modified, and no randomized
+            # scratch file was left behind anywhere in the project.
+            Test-Path (Join-Path $templates 'FEATURE_SPEC.md') | Should -Be $true
+            $strays = @(Get-ChildItem -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -match '^[^/\\]+\.(md|yml|tsv|sh|ps1)\.[0-9A-Za-z_-]{2,}$' })
+            $strays | Should -HaveCount 0
+        }
+        finally {
+            if (Test-Path -LiteralPath $templates) { Restore-ProtectedDir $templates }
+            Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'stale candidate removal failure (locked checks.generated.tsv) aborts with nonzero exit and preserves prior candidate' {
+        $tmp = New-TestDir
+        $gen = Join-Path $tmp '.agentic\checks.generated.tsv'
+        $fs = $null
+        try {
+            New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic') -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $tmp 'package.json') -Value '{"name":"x","scripts":{"test":"true"}}'
+            & $install -Target $tmp -DetectChecks *> $null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path $gen | Should -Be $true
+            $candidateBefore = Get-Content -Raw $gen
+            $fs = [System.IO.FileStream]::new($gen, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+            Remove-Item -LiteralPath (Join-Path $tmp 'package.json') -Force
+            & $install -Target $tmp -GenerateChecks *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            # Release the lock before verifying file contents.
+            $fs.Dispose(); $fs = $null
+            # Prior candidate preserved: the locked file was never removed.
+            Test-Path $gen | Should -Be $true
+            (Get-Content -Raw $gen) | Should -Be $candidateBefore
+            # No stale content promoted to checks.tsv.
+            Test-Path (Join-Path $tmp '.agentic\checks.tsv') | Should -Be $false
+            # No randomized temp files remain in the .agentic directory.
+            $strays = @(Get-ChildItem -LiteralPath (Join-Path $tmp '.agentic') -Force -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -match '\.[0-9A-Za-z_-]{6,}$' })
+            $strays | Should -HaveCount 0
+        }
+        finally {
+            if ($fs) { $fs.Dispose() }
+            Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'uninstall failure (locked managed file) aborts with nonzero exit and preserves manifest and locked file' {
+        $tmp = New-TestDir
+        $ver = Join-Path $tmp '.agentic\VERSION'
+        $mf = Join-Path $tmp '.agentic\install-manifest.tsv'
+        $fs = $null
+        try {
+            & $install -Target $tmp *> $null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path $ver | Should -Be $true
+            Test-Path $mf | Should -Be $true
+            $verBefore = Get-Content -Raw $ver
+            $fs = [System.IO.FileStream]::new($ver, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+            & $install -Target $tmp -Uninstall *> $null
+            $LASTEXITCODE | Should -Not -Be 0
+            # Release the lock before verifying file contents.
+            $fs.Dispose(); $fs = $null
+            # Rollback: the locked file is restored (or still present).
+            Test-Path $ver | Should -Be $true
+            (Get-Content -Raw $ver) | Should -Be $verBefore
+            # Manifest preserved: never removed because uninstall aborted first.
+            Test-Path $mf | Should -Be $true
+            # No randomized temp files remain in the .agentic directory.
+            $strays = @(Get-ChildItem -LiteralPath (Join-Path $tmp '.agentic') -Force -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -match '\.[0-9A-Za-z_-]{6,}$' })
+            $strays | Should -HaveCount 0
+        }
+        finally {
+            if ($fs) { $fs.Dispose() }
+            Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+        }
     }
 }

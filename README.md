@@ -73,12 +73,12 @@ The installer also manages the lifecycle of what it installed:
   uninstall they are kept and reported as conflicts. Both `--prune` and
   `--uninstall` support `--plan` (`-Plan`) dry runs that are byte-for-byte
   read-only: nothing is snapshotted, backed up, or written.
-- Legacy v1.0 files are removed only when ownership can be proven — their
-  content matches a known v1.0 file, carries the framework signature, or was
-  recorded by the previous install manifest. Unprovable files are preserved
-  and reported as conflicts; pass `--prune-unverified-legacy`
-  (`-PruneUnverifiedLegacy`) to remove them anyway, which always backs each
-  one up to `.agentic-backup/` first.
+- Legacy v1.0 files are removed only when ownership can be proven from their
+  content — a match against a known v1.0 file, or a recognizable framework
+  signature. A previous install manifest record is never sufficient on its own.
+  Unprovable files are preserved and reported as conflicts; pass
+  `--prune-unverified-legacy` (`-PruneUnverifiedLegacy`) to remove them anyway,
+  which always backs each one up to `.agentic-backup/` first.
 - The previous install manifest is validated before anything runs, in every
   mode including `--plan`: a malformed, tampered, or path-escaping manifest
   aborts the run before any file is created, modified, or removed.

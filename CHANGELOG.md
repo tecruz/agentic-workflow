@@ -9,9 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.2.1] - 2026-08-15
 
-Lifecycle hardening hotfix; addresses the `feedback (8).md` findings.
+Lifecycle hardening hotfix; addresses the `feedback (8).md` and `feedback (9).md` findings.
 
 ### Fixed
+- **Every installer write is physically confined and atomic.** All destinations
+  written by `install.sh` and `install.ps1` (managed, seed, merge, generated
+  checks, manifests, backups, rollback) now pass through a shared confinement
+  check plus an atomic copy: the write is staged as a temporary file next to
+  the destination and moved into place, so a failed write never leaves a
+  partial destination and a destination whose nearest existing ancestor
+  resolves outside the project root (e.g. a `.agentic` junction to an external
+  directory, or a symlinked framework file) is refused before anything is
+  touched. Manifest validation keeps the more permissive physical check
+  (`physical_within_root`) so in-project symlinked targets remain installable;
+  the write guard rejects any final-component symlink.
+- **Manifest categories are enforced against a canonical registry.** Each
+  path→category mapping (`AGENTS.md`/`CLAUDE.md`/`GEMINI.md`→merge,
+  `.aider.conf.yml` + managed files→managed, seed files→seed) is the single
+  source of truth shared by install and prune. A known path recorded under the
+  wrong valid category, or a non-registry path, is tampering and fails the run
+  before mutation; the manifest itself and legacy paths are not legitimate
+  entries.
+- **Legacy ownership no longer trusts a manifest row by itself.** The
+  manifest-only ownership branch was removed; legacy files must prove
+  ownership via byte-for-byte match with shipped v1.0 content or the framework
+  signature.
+- **Bash manifest parsing uses exact field counts.** Each manifest line is
+  pre-checked with `awk -F'\t' 'NF==3'` (which never collapses or trims
+  tabs) before field splitting, so leading, trailing, and adjacent empty
+  fields are rejected identically in both implementations.
+- **Adversarial regression coverage.** Twelve Bats tests and twelve Pester
+  tests exercise category tampering, forged legacy rows, symlinked/junctioned
+  destinations that point outside the project, write-blocked copies that must
+  leave no partial destination and no outside mutation, and every malformed
+  manifest field shape.
 - **`--plan` is byte-for-byte read-only.** Merge-block removal during planned
   prune, uninstall, and ordinary updates is now a pure calculation: the shared
   merge parser classifies the file, the would-be remainder is predicted, and
