@@ -1377,6 +1377,9 @@ Describe 'install.ps1' {
         # Verify the v1.2.1 tag exists and has the expected VERSION
         $v121Version = & git -C $repoRoot show 'v1.2.1:.agentic/VERSION' 2>$null
         if ($LASTEXITCODE -ne 0 -or $v121Version.Trim() -ne '1.2.1') {
+            if ($env:CI -eq 'true') {
+                throw 'required migration tag v1.2.1 is unavailable in CI'
+            }
             Set-ItResult -Skipped -Because 'v1.2.1 tag not found or VERSION mismatch'
         }
 

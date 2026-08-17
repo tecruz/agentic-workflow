@@ -179,7 +179,14 @@ jobs:
       - name: Verify SHA256SUMS
         run: |
           cd dist
-          sha256sum -c SHA256SUMS
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum -c SHA256SUMS
+          elif command -v shasum >/dev/null 2>&1; then
+            shasum -a 256 -c SHA256SUMS
+          else
+            echo "::error No SHA-256 utility found"
+            exit 1
+          fi
 
       - name: No development-only files in bundle
         run: |
@@ -232,7 +239,14 @@ jobs:
 
           # Verify archive checksum
           cd "$DIST_DIR"
-          sha256sum -c SHA256SUMS
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum -c SHA256SUMS
+          elif command -v shasum >/dev/null 2>&1; then
+            shasum -a 256 -c SHA256SUMS
+          else
+            echo "::error No SHA-256 utility found"
+            exit 1
+          fi
 
           rm -rf "$EXTRACT_DIR" "$PROJECT"
 
@@ -332,16 +346,51 @@ jobs:
               ;;
           esac
 
-          # Verify all assets uploaded correctly
-          gh release view "$TAG" --repo "${{ github.repository }}" --json assets \
-            | python3 -c "import sys, json; assets = json.load(sys.stdin)['assets']; names = [a['name'] for a in assets]; print('\n'.join(names))" \
-            | grep -q "agentic-workflow-$VERSION.tar.gz"
-          gh release view "$TAG" --repo "${{ github.repository }}" --json assets \
-            | python3 -c "import sys, json; assets = json.load(sys.stdin)['assets']; names = [a['name'] for a in assets]; print('\n'.join(names))" \
-            | grep -q "agentic-workflow-$VERSION.zip"
-          gh release view "$TAG" --repo "${{ github.repository }}" --json assets \
-            | python3 -c "import sys, json; assets = json.load(sys.stdin)['assets']; names = [a['name'] for a in assets]; print('\n'.join(names))" \
-            | grep -q "SHA256SUMS"
+          # Verify exact asset set — reject stale or unexpected files from
+          # prior failed/manual draft attempts.
+          EXPECTED="$(
+              printf '%s\n' \
+                "SHA256SUMS" \
+                "agentic-workflow-$VERSION.tar.gz" \
+                "agentic-workflow-$VERSION.zip" |
+              sort
+          )"
+
+          ACTUAL="$(
+            gh release view "$TAG" \
+              --repo "${{ github.repository }}" \
+              --json assets \
+              --jq '.assets[].name' |
+            sort
+          )"
+
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+              echo "::error Draft release asset set is not exact"
+              echo "Expected:"
+              printf '%s\n' "$EXPECTED"
+              echo "Actual:"
+              printf '%s\n' "$ACTUAL"
+              exit 1
+          fi
+
+          # Download and verify checksums of uploaded assets
+          REMOTE_DIR="$(mktemp -d)"
+          gh release download "$TAG" \
+            --repo "${{ github.repository }}" \
+            --dir "$REMOTE_DIR"
+
+          (
+              cd "$REMOTE_DIR"
+              if command -v sha256sum >/dev/null 2>&1; then
+                sha256sum -c SHA256SUMS
+              elif command -v shasum >/dev/null 2>&1; then
+                shasum -a 256 -c SHA256SUMS
+              else
+                echo "::error No SHA-256 utility found"
+                exit 1
+              fi
+          )
+          rm -rf "$REMOTE_DIR"
 
           # Publish the draft
           gh release edit "$TAG" --repo "${{ github.repository }}" --draft=false

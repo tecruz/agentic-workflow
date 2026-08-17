@@ -24,6 +24,14 @@ make_outside_dir() {
     printf '%s' "$OUTSIDE_DIR"
 }
 
+# Configure a local Git identity for tests that create temporary repositories.
+# Clean CI environments have no inherited Git config, so commits and annotated
+# tags fail with "Author identity unknown" without this.
+configure_test_git_identity() {
+    git config user.name "agentic-workflow-tests"
+    git config user.email "agentic-workflow-tests@example.invalid"
+}
+
 @test "fresh install creates the core file set and manifest" {
     bash "$INSTALL" . >/dev/null 2>&1
     [ -f AGENTS.md ]
@@ -1074,7 +1082,13 @@ SHIM
 
 @test "upgrade from v1.2.1 bundle to v1.2.2 preserves project state" {
     # Verify the v1.2.1 tag exists and has the expected VERSION
-    git -C "$REPO_ROOT" rev-parse v1.2.1 >/dev/null 2>&1 || skip "v1.2.1 tag not found"
+    if [ "${CI:-}" = "true" ]; then
+        git -C "$REPO_ROOT" rev-parse v1.2.1 >/dev/null 2>&1 ||
+            fail "required migration tag v1.2.1 is unavailable in CI"
+    else
+        git -C "$REPO_ROOT" rev-parse v1.2.1 >/dev/null 2>&1 ||
+            skip "v1.2.1 tag not found"
+    fi
     V121_VERSION="$(git -C "$REPO_ROOT" show v1.2.1:.agentic/VERSION 2>/dev/null)"
     [ "$V121_VERSION" = "1.2.1" ]
 
@@ -1172,6 +1186,7 @@ SHIM
     cd "$TAG_REPO"
 
     git init -q
+    configure_test_git_identity
     git add -A
     git commit -q -m "initial commit"
     git tag v0.0.1
@@ -1194,6 +1209,7 @@ SHIM
     cd "$TAG_REPO"
 
     git init -q
+    configure_test_git_identity
     git add -A
     git commit -q -m "initial commit"
     git tag -a v0.0.2 -m "annotated release tag"
@@ -1219,6 +1235,7 @@ SHIM
     cd "$TAG_REPO"
 
     git init -q
+    configure_test_git_identity
     git add -A
     git commit -q -m "initial commit"
     git tag v1.0.0-beta.1
@@ -1234,6 +1251,7 @@ SHIM
     cd "$TAG_REPO"
 
     git init -q
+    configure_test_git_identity
     git add -A
     git commit -q -m "initial commit"
 

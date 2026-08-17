@@ -29,6 +29,30 @@ DIST="$ROOT/dist"
 BUNDLE="$DIST/agentic-workflow-$VERSION"
 NO_ARCHIVES=0
 
+# Portable SHA-256 helpers: detect GNU coreutils or BSD shasum.
+sha256_generate() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$@"
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$@"
+    else
+        echo "ERROR: no SHA-256 utility found" >&2
+        return 1
+    fi
+}
+
+sha256_verify() {
+    local checksum_file="$1"
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum -c "$checksum_file"
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 -c "$checksum_file"
+    else
+        echo "ERROR: no SHA-256 utility found" >&2
+        return 1
+    fi
+}
+
 while [ $# -gt 0 ]; do
     case "$1" in
         --no-archives) NO_ARCHIVES=1 ;;
@@ -99,7 +123,7 @@ fi
 {
     cd "$DIST"
     for f in agentic-workflow-$VERSION.tar.gz agentic-workflow-$VERSION.zip; do
-        [ -e "$f" ] && sha256sum "$f"
+        [ -e "$f" ] && sha256_generate "$f"
     done
 } > "$DIST/SHA256SUMS"
 
