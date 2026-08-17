@@ -1065,7 +1065,8 @@ SHIM
     cd "$PROJECT"
 
     # Step 1: Install from v1.2.1 bundle
-    bash "$V121_DIR/install.sh" . --tools all >/dev/null 2>&1
+    run bash "$V121_DIR/install.sh" . --tools all
+    [ "$status" -eq 0 ]
     [ -f AGENTS.md ]
     [ -f CLAUDE.md ]
     [ -f GEMINI.md ]
@@ -1080,16 +1081,16 @@ SHIM
     # Step 3: Modify a managed file
     printf '\n# adopter workflow override\n' >> .agentic/WORKFLOW.md
 
-    # Step 4: Add a reviewed candidate
-    printf 'custom-check\trequired\t.\tnpm\ttest\n' > .agentic/checks.generated.tsv
+    # Step 4: Add a reviewed candidate (correct field order: requirement, check-id, dir, shell, command)
+    printf 'required\tcustom-check\t.\tnpm\ttest\n' > .agentic/checks.generated.tsv
 
     # Record state before upgrade
     AGENTS_BEFORE="$(cat AGENTS.md)"
     WORKFLOW_BEFORE="$(cat .agentic/WORKFLOW.md)"
 
     # Step 5: Upgrade using current bundle (v1.2.2)
-    bash "$CURRENT_BUNDLE/install.sh" . --tools all >/dev/null 2>&1
-    [ "$status" -eq 0 ] || true
+    run bash "$CURRENT_BUNDLE/install.sh" . --tools all
+    [ "$status" -eq 0 ]
 
     # Step 6: Verify preservation
     grep -q "keep this content" AGENTS.md
@@ -1097,6 +1098,11 @@ SHIM
     grep -q "# adopter workflow override" .agentic/WORKFLOW.md
     [ -f .agentic/checks.generated.tsv ]
     grep -q "custom-check" .agentic/checks.generated.tsv
+    # Verify the reviewed candidate is preserved exactly (byte-for-byte)
+    [ "$(cat .agentic/checks.generated.tsv)" = "required"$'\t'"custom-check"$'\t'"."$'\t'"npm"$'\t'"test" ]
+
+    # Verify .aider.conf.yml custom content is preserved
+    grep -q "# custom aider config" .aider.conf.yml
 
     # Step 7: Exercise plan, prune, uninstall
     run bash "$CURRENT_BUNDLE/install.sh" . --prune --plan --tools claude

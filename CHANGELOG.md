@@ -7,11 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.2.2] - 2026-08-15
+## [1.2.2] - 2026-08-17
 
-Release-integrity hardfix; addresses the `feedback (12).md` review. Ensures
-the source, version number, changelog, release tag, and downloadable assets
-all represent the same product.
+Release-integrity hardfix; addresses the `feedback (12).md` and `feedback (13).md`
+reviews. Ensures the source, version number, changelog, release tag, and
+downloadable assets all represent the same product. Includes the PR #5 write
+confinement and atomicity hardening that was not present in the published
+v1.2.1 assets.
 
 ### Fixed
 - **Version bump to 1.2.2.** `.agentic/VERSION` updated to match the release
@@ -30,6 +32,14 @@ all represent the same product.
 - **Tightened supported-version table.** `SECURITY.md` now clearly states that
   only the latest 1.x patch release is supported; older 1.x releases require
   an upgrade; pre-1.0 is unsupported.
+- **Release workflow fixes.** Fixed invalid Bats `run` helper invocation in
+  tar.gz archive test; corrected `cd dist` path resolution; added Bats
+  installation on Windows CI; resolved immutable commit SHA for manual
+  dispatch; added `--verify-tag` to `gh release create`; passed manual input
+  through environment variable instead of direct shell interpolation; applied
+  least-privilege permissions; used changelog-derived release notes instead of
+  auto-generated notes; added draft/release lifecycle with retry; cleaned
+  archives before rebuild.
 
 ### Added
 - **Extracted-archive release tests.** Bats and Pester suites now extract the
@@ -48,6 +58,30 @@ all represent the same product.
 - **ADR-0007: Extension versioning.** Records the policy for how future
   protocol extensions (risk profiles, skills, event logs, context modules)
   version their schemas and are migrated.
+
+### Changed
+- Every installer write is now physically confined and atomic: writes staged
+  as temporary files with atomic rename; destinations whose nearest existing
+  ancestor resolves outside the project root are refused.
+- Manifest categories enforced against a canonical registry; tampering fails
+  the run before any mutation.
+- Legacy ownership no longer trusts a manifest row by itself; files must prove
+  ownership via byte-for-byte match with shipped v1.0 content or the framework
+  signature.
+- `--plan` is byte-for-byte read-only in every mode (prune, uninstall,
+  update). No snapshotting, backup, temp-file creation, or writing occurs.
+- Manifest validation runs before any mutation in every mode including
+  `--plan`: field count, categories, checksums, duplicates, lexical path
+  safety, framework membership, and physical confinement.
+- Merge-marker validation shared between install and prune (absent / empty /
+  plain / valid / malformed); malformed files are preserved untouched.
+- Unpredictable temp files: all writes use `mktemp`/random scratch files with
+  atomic rename.
+- The README no longer advertises the development repository itself as the
+  adopter template; the clean bundle is the supported distribution for
+  adopters.
+- CI workflow (`.github/workflows/ci.yml`) is now reusable via
+  `workflow_call`; release workflow calls it as a gate before publication.
 
 ## [1.2.1] - 2026-08-15
 
@@ -74,28 +108,6 @@ findings.
 - Clean adopter bundle: `scripts/build-bundle.sh` assembles
   `dist/agentic-workflow-<version>/` plus tar.gz, zip, and SHA256SUMS.
 - End-to-end bundle install tests covering both installers.
-
-### Changed
-- Every installer write is now physically confined and atomic: writes staged
-  as temporary files with atomic rename; destinations whose nearest existing
-  ancestor resolves outside the project root are refused.
-- Manifest categories enforced against a canonical registry; tampering fails
-  the run before any mutation.
-- Legacy ownership no longer trusts a manifest row by itself; files must prove
-  ownership via byte-for-byte match with shipped v1.0 content or the framework
-  signature.
-- `--plan` is byte-for-byte read-only in every mode (prune, uninstall,
-  update). No snapshotting, backup, temp-file creation, or writing occurs.
-- Manifest validation runs before any mutation in every mode including
-  `--plan`: field count, categories, checksums, duplicates, lexical path
-  safety, framework membership, and physical confinement.
-- Merge-marker validation shared between install and prune (absent / empty /
-  plain / valid / malformed); malformed files are preserved untouched.
-- Unpredictable temp files: all writes use `mktemp`/random scratch files with
-  atomic rename.
-- The README no longer advertises the development repository itself as the
-  adopter template; the clean bundle is the supported distribution for
-  adopters.
 
 ## [1.2.0] - 2026-08-14
 

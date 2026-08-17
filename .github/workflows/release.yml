@@ -5,9 +5,6 @@ name: Release
 # runs all CI checks; builds the clean bundle; extracts and tests both archives;
 # verifies SHA256SUMS; and uploads release assets from the exact tagged commit.
 
-permissions:
-  contents: write
-
 on:
   push:
     tags: ['v*']
@@ -17,34 +14,77 @@ on:
         description: 'Release tag (e.g. v1.2.2) — must already exist as a pushed tag'
         required: true
 
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   # -----------------------------------------------------------------------
-  # 1. Validate that VERSION, CHANGELOG, and the tag all agree.
+  # 1. Validate that VERSION, CHANGELOG, and the tag all agree; resolve one
+  #    immutable commit SHA used by every downstream job.
   # -----------------------------------------------------------------------
   validate:
     name: Validate release metadata
     runs-on: ubuntu-latest
     outputs:
-      tag: ${{ steps.tag.outputs.tag }}
-      version: ${{ steps.tag.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+      sha: ${{ steps.resolve.outputs.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
 
       - name: Resolve tag
-        id: tag
+        id: resolve
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG="${{ github.event.inputs.tag }}"
+            TAG="$INPUT_TAG"
           else
             TAG="${GITHUB_REF#refs/tags/}"
           fi
+
+          # Validate SemVer tag format
+          if [[ ! "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error Invalid release tag: $TAG"
+            exit 1
+          fi
+
+          # Resolve the exact commit SHA for the tag
+          SHA="$(git rev-list -n 1 "$TAG" 2>/dev/null)"
+          if [ -z "$SHA" ]; then
+            echo "::error Tag $TAG does not exist in the repository"
+            exit 1
+          fi
+
+          # Verify the remote tag points to this SHA
+          REMOTE_SHA="$(git ls-remote --tags origin "$TAG" 2>/dev/null | head -1 | cut -f1)"
+          if [ -z "$REMOTE_SHA" ]; then
+            echo "::error Tag $TAG not found on remote"
+            exit 1
+          fi
+
+          # Handle annotated tags (SHA^{commit})
+          EXPECTED_SHA="$(git rev-parse "$TAG^{commit}" 2>/dev/null)"
+          if [ "$REMOTE_SHA" != "$EXPECTED_SHA" ] && [ "$REMOTE_SHA" != "$SHA" ]; then
+            echo "::error Tag $TAG remote SHA ($REMOTE_SHA) does not match resolved SHA ($SHA)"
+            exit 1
+          fi
+
+          VERSION="${TAG#v}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
 
       - name: VERSION matches tag
         run: |
           FILE_VERSION="$(cat .agentic/VERSION)"
-          TAG_VERSION="${{ steps.tag.outputs.version }}"
+          TAG_VERSION="${{ steps.resolve.outputs.version }}"
           if [ "$FILE_VERSION" != "$TAG_VERSION" ]; then
             echo "::error .agentic/VERSION ($FILE_VERSION) does not match tag ($TAG_VERSION)"
             exit 1
@@ -52,7 +92,7 @@ jobs:
 
       - name: CHANGELOG has matching section
         run: |
-          TAG_VERSION="${{ steps.tag.outputs.version }}"
+          TAG_VERSION="${{ steps.resolve.outputs.version }}"
           if ! grep -q "## \[$TAG_VERSION\]" CHANGELOG.md; then
             echo "::error CHANGELOG.md has no section [$TAG_VERSION]"
             exit 1
@@ -62,14 +102,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ steps.tag.outputs.tag }}"
+          TAG="${{ steps.resolve.outputs.tag }}"
           if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             echo "::error Release $TAG already exists"
             exit 1
           fi
 
   # -----------------------------------------------------------------------
-  # 2. Run the full CI suite on the tagged commit.
+  # 2. Run the full CI suite on the exact tagged commit.
   # -----------------------------------------------------------------------
   ci:
     name: CI (${{ matrix.os }})
@@ -81,6 +121,9 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+          persist-credentials: false
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
@@ -93,6 +136,17 @@ jobs:
       - name: Install bats (macOS)
         if: runner.os == 'macOS'
         run: brew install bats-core shellcheck
+
+      - name: Install bats (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $tmp = Join-Path $env:RUNNER_TEMP 'bats'
+          New-Item -ItemType Directory -Force $tmp | Out-Null
+          Invoke-WebRequest -Uri 'https://github.com/bats-core/bats-core/archive/refs/tags/v1.11.1.tar.gz' -OutFile (Join-Path $tmp 'bats.tar.gz')
+          tar -xzf (Join-Path $tmp 'bats.tar.gz') -C $tmp
+          $dir = (Get-ChildItem -LiteralPath $tmp -Directory | Select-Object -First 1).FullName
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value (Join-Path $dir 'bin')
 
       - name: Install Pester + PSScriptAnalyzer
         shell: pwsh
@@ -113,6 +167,13 @@ jobs:
         if: runner.os != 'Windows'
         run: bats tests/bats
 
+      - name: Run Bats suites (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $bats = Get-Command bats -ErrorAction SilentlyContinue
+          if ($bats) { bats tests/bats } else { Write-Warning 'bats not found; skipping Bats suites' }
+
       - name: Run Pester suites
         shell: pwsh
         run: |
@@ -130,6 +191,15 @@ jobs:
           $results | Format-Table -AutoSize
           if ($results) { exit 1 }
 
+      - name: Run fixture smoke harness (Unix)
+        if: runner.os != 'Windows'
+        run: bash tests/fixtures/run-fixtures.sh .agentic/scripts/verify.sh
+
+      - name: Run fixture smoke harness (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: pwsh -NoProfile -File tests/fixtures/run-fixtures.ps1 .agentic/scripts/verify.ps1
+
   # -----------------------------------------------------------------------
   # 3. Build the clean bundle, extract + test both archives, verify no
   #    development-only files leaked, and upload release assets.
@@ -138,8 +208,13 @@ jobs:
     name: Build & publish release
     needs: [validate, ci]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+          persist-credentials: false
 
       - name: Resolve version
         run: |
@@ -151,6 +226,14 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 24
+
+      - name: Clean previous archives
+        run: |
+          VERSION="$(cat .agentic/VERSION)"
+          rm -f \
+            "dist/agentic-workflow-$VERSION.tar.gz" \
+            "dist/agentic-workflow-$VERSION.zip" \
+            "dist/SHA256SUMS"
 
       - name: Build bundle
         run: bash scripts/build-bundle.sh
@@ -181,11 +264,12 @@ jobs:
       - name: Extract and test tar.gz
         run: |
           VERSION="$(cat .agentic/VERSION)"
+          DIST_DIR="$GITHUB_WORKSPACE/dist"
           EXTRACT_DIR="$(mktemp -d)"
-          tar -xzf "dist/agentic-workflow-$VERSION.tar.gz" -C "$EXTRACT_DIR"
-
-          # Install from extracted archive into a clean project
           PROJECT="$(mktemp -d)"
+
+          tar -xzf "$DIST_DIR/agentic-workflow-$VERSION.tar.gz" -C "$EXTRACT_DIR"
+
           cd "$PROJECT"
           bash "$EXTRACT_DIR/agentic-workflow-$VERSION/install.sh" . >/dev/null 2>&1
 
@@ -197,10 +281,19 @@ jobs:
 
           # Verify verifier is executable
           test -x .agentic/scripts/verify.sh
-          run bash .agentic/scripts/verify.sh
 
-          # Verify SHA256SUMS for the archive
-          cd dist
+          # Run the verifier; an empty project should be UNSUPPORTED (exit 3)
+          set +e
+          ./.agentic/scripts/verify.sh
+          rc=$?
+          set -e
+          if [ "$rc" -ne 3 ]; then
+            echo "::error Expected UNSUPPORTED (3) for empty project, got $rc"
+            exit 1
+          fi
+
+          # Verify archive checksum
+          cd "$DIST_DIR"
           sha256sum -c SHA256SUMS
 
           rm -rf "$EXTRACT_DIR" "$PROJECT"
@@ -208,12 +301,21 @@ jobs:
       - name: Extract and test zip
         run: |
           VERSION="$(cat .agentic/VERSION)"
+          DIST_DIR="$GITHUB_WORKSPACE/dist"
           EXTRACT_DIR="$(mktemp -d)"
-          unzip -q "dist/agentic-workflow-$VERSION.zip" -d "$EXTRACT_DIR"
-
           PROJECT="$(mktemp -d)"
+
+          unzip -q "$DIST_DIR/agentic-workflow-$VERSION.zip" -d "$EXTRACT_DIR"
+
+          # Detect bundle directory
+          BUNDLE="$(find "$EXTRACT_DIR" -name "install.sh" -path "*/agentic-workflow-*/install.sh" -exec dirname {} \; 2>/dev/null | head -1)"
+          if [ -z "$BUNDLE" ]; then
+            echo "::error Could not locate bundle after zip extraction"
+            exit 1
+          fi
+
           cd "$PROJECT"
-          bash "$EXTRACT_DIR/agentic-workflow-$VERSION/install.sh" . >/dev/null 2>&1
+          bash "$BUNDLE/install.sh" . >/dev/null 2>&1
 
           test -f AGENTS.md
           test -f .agentic/VERSION
@@ -221,17 +323,55 @@ jobs:
 
           rm -rf "$EXTRACT_DIR" "$PROJECT"
 
-      - name: Upload release assets
+      - name: Extract changelog section for release notes
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          # Extract the section for this version, stopping before the next ## heading
+          sed -n "/^## \[$VERSION\]/,/^## \[/p" CHANGELOG.md | sed '$d' > /tmp/release-notes.md
+          # Append generated contributor notes
+          {
+            echo ""
+            echo "---"
+            echo ""
+            echo "### Contributors"
+            echo ""
+            echo "This release was built from commit ${{ needs.validate.outputs.sha }}."
+          } >> /tmp/release-notes.md
+
+      - name: Create or update draft release with assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ needs.validate.outputs.tag }}"
           VERSION="${{ steps.version.outputs.version }}"
           TITLE="$(sed -n "/^## \[$VERSION\]/,/^## \[/p" CHANGELOG.md | head -1 | sed 's/^## //')"
+
+          # Delete any partially failed release (draft or incomplete)
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release delete "$TAG" --repo "${{ github.repository }}" --yes --cleanup-tag 2>/dev/null || true
+          fi
+
+          # Create a draft release with all assets
           gh release create "$TAG" \
             --repo "${{ github.repository }}" \
             --title "$TAG — $TITLE" \
-            --generate-notes \
+            --notes-file /tmp/release-notes.md \
+            --verify-tag \
+            --draft \
             dist/agentic-workflow-"$VERSION".tar.gz \
             dist/agentic-workflow-"$VERSION".zip \
             dist/SHA256SUMS
+
+          # Verify all assets uploaded correctly
+          gh release view "$TAG" --repo "${{ github.repository }}" --json assets \
+            | python3 -c "import sys, json; assets = json.load(sys.stdin)['assets']; names = [a['name'] for a in assets]; print('\n'.join(names))" \
+            | grep -q "agentic-workflow-$VERSION.tar.gz"
+          gh release view "$TAG" --repo "${{ github.repository }}" --json assets \
+            | python3 -c "import sys, json; assets = json.load(sys.stdin)['assets']; names = [a['name'] for a in assets]; print('\n'.join(names))" \
+            | grep -q "agentic-workflow-$VERSION.zip"
+          gh release view "$TAG" --repo "${{ github.repository }}" --json assets \
+            | python3 -c "import sys, json; assets = json.load(sys.stdin)['assets']; names = [a['name'] for a in assets]; print('\n'.join(names))" \
+            | grep -q "SHA256SUMS"
+
+          # Publish the draft
+          gh release edit "$TAG" --repo "${{ github.repository }}" --draft=false

@@ -1397,11 +1397,12 @@ Describe 'install.ps1' {
             # Step 3: Modify a managed file
             Add-Content -LiteralPath (Join-Path $tmp '.agentic\WORKFLOW.md') -Value '# adopter workflow override'
 
-            # Step 4: Add a reviewed candidate
-            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.generated.tsv') -Value "custom-check`trequired`t.`tnpm`ttest"
+            # Step 4: Add a reviewed candidate (correct field order: requirement, check-id, dir, shell, command)
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.generated.tsv') -Value "required`tcustom-check`t.`tnpm`ttest"
 
             # Step 5: Upgrade using current bundle (v1.2.2)
             & (Join-Path $currentBundle 'install.ps1') -Target $tmp -Tools all *> $null
+            $LASTEXITCODE | Should -Be 0
 
             # Step 6: Verify preservation
             (Get-Content -Raw (Join-Path $tmp 'AGENTS.md')) -match 'keep this content' | Should -Be $true
@@ -1409,6 +1410,11 @@ Describe 'install.ps1' {
             (Get-Content -Raw (Join-Path $tmp '.agentic\WORKFLOW.md')) -match '# adopter workflow override' | Should -Be $true
             Test-Path (Join-Path $tmp '.agentic\checks.generated.tsv') | Should -Be $true
             (Get-Content -Raw (Join-Path $tmp '.agentic\checks.generated.tsv')) -match 'custom-check' | Should -Be $true
+            # Verify the reviewed candidate is preserved exactly (byte-for-byte)
+            (Get-Content -Raw (Join-Path $tmp '.agentic\checks.generated.tsv')).Trim() | Should -Be "required`tcustom-check`t.`tnpm`ttest"
+
+            # Verify .aider.conf.yml custom content is preserved
+            (Get-Content -Raw (Join-Path $tmp '.aider.conf.yml')) -match '# custom aider config' | Should -Be $true
 
             # Step 7: Exercise plan, prune, uninstall
             & (Join-Path $currentBundle 'install.ps1') -Target $tmp -Prune -Plan -Tools claude *> $null
