@@ -84,9 +84,11 @@ jobs:
           # Output the peeled commit SHA for downstream jobs
           TAG_COMMIT="$(git rev-parse "$TAG^{commit}")"
           VERSION="${TAG#v}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "sha=$TAG_COMMIT" >> "$GITHUB_OUTPUT"
+          {
+            echo "tag=$TAG"
+            echo "version=$VERSION"
+            echo "sha=$TAG_COMMIT"
+          } >> "$GITHUB_OUTPUT"
 
       - name: VERSION matches tag at resolved commit
         env:
