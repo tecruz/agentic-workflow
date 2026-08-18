@@ -214,7 +214,10 @@ Describe 'validate-task.ps1 risk-profile validator' {
         bash $bashValidator $probeFixture *> $null
         if ($LASTEXITCODE -notin 0, 1, 2) { return }
         Get-ChildItem -LiteralPath $fixtures -Filter *.md | ForEach-Object {
-            $psOut = (& $validate (Join-Path $fixtures $_.Name) 2>&1 | Out-String)
+            # Run both validators as subprocesses so their stderr is captured:
+            # the PowerShell validator writes failures via [Console]::Error,
+            # which PowerShell stream redirection does not capture in-process.
+            $psOut = (pwsh -NoProfile -File $validate (Join-Path $fixtures $_.Name) 2>&1 | Out-String)
             $psCode = $LASTEXITCODE
             $bashOut = (bash $bashValidator $_.FullName 2>&1 | Out-String)
             $bashCode = $LASTEXITCODE
