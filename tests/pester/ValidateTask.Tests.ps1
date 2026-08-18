@@ -214,10 +214,12 @@ Describe 'validate-task.ps1 risk-profile validator' {
         bash $bashValidator $probeFixture *> $null
         if ($LASTEXITCODE -notin 0, 1, 2) { return }
         Get-ChildItem -LiteralPath $fixtures -Filter *.md | ForEach-Object {
-            $psCode = Invoke-Validator $_.Name
-            bash $bashValidator $_.FullName *> $null
+            $psOut = (& $validate (Join-Path $fixtures $_.Name) 2>&1 | Out-String)
+            $psCode = $LASTEXITCODE
+            $bashOut = (bash $bashValidator $_.FullName 2>&1 | Out-String)
             $bashCode = $LASTEXITCODE
             $psCode | Should -Be $bashCode
+            $psOut.Trim() | Should -Be $bashOut.Trim()
         }
     }
 }

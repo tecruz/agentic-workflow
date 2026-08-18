@@ -293,14 +293,14 @@ function Test-Table {
         $res = $parts[3].Trim()
         if ($id -notmatch "^$IdPattern$") { continue }
         $idLower = $id.ToLowerInvariant()
-        if (-not $ev) { Write-Invalid "$Label row '$id' has an empty evidence description." }
-        if (-not $res) { Write-Invalid "$Label row '$id' has an empty result." }
+        if (-not $ev) { Write-Invalid "$Label row '$idLower' has an empty evidence description." }
+        if (-not $res) { Write-Invalid "$Label row '$idLower' has an empty result." }
         $lres = $res.ToLowerInvariant()
         if ($AllowedResults -notcontains $lres) {
-            Write-Invalid "$Label row '$id' has unrecognized result '$res' (allowed: passed, satisfied, n/a, pending, partial, blocked, missing, not-run)."
+            Write-Invalid "$Label row '$idLower' has unrecognized result '$res' (allowed: passed, satisfied, n/a, pending, partial, blocked, missing, not-run)."
         }
         if ($lres -eq 'n/a' -and $ev -notmatch 'n/a') {
-            Write-Invalid "$Label row '$id' uses 'n/a' without an 'n/a' rationale in the evidence description."
+            Write-Invalid "$Label row '$idLower' uses 'n/a' without an 'n/a' rationale in the evidence description."
         }
         if (-not $seen.Add($idLower)) { $script:TableDup = $true }
         if (-not $ids.Contains($idLower)) { $ids.Add($idLower) }

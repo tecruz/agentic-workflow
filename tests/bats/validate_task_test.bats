@@ -77,14 +77,22 @@ classify() {  # classify <fixture>
 
 @test "Bash and PowerShell classifiers agree on every fixture" {
     have pwsh || skip "pwsh not available"
-    local f bash_code ps_code
+    local f bash_code ps_code bash_out ps_out
     for f in "$FIXTURES"/*.md; do
         run bash "$VALIDATE" "$f"
         bash_code=$status
+        bash_out="$output"
         run pwsh -NoProfile -File "$REPO_ROOT/.agentic/scripts/validate-task.ps1" "$f"
         ps_code=$status
+        ps_out="$output"
         if [ "$bash_code" -ne "$ps_code" ]; then
             echo "classification mismatch for '$(basename "$f")': bash=$bash_code ps=$ps_code" >&2
+            return 1
+        fi
+        if [ "$bash_out" != "$ps_out" ]; then
+            echo "message mismatch for '$(basename "$f")'." >&2
+            echo "  bash: $bash_out" >&2
+            echo "  ps:   $ps_out" >&2
             return 1
         fi
     done
