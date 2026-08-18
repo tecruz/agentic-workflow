@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.2.2] - 2026-08-17
+## [1.2.2] - 2026-08-18
 
 Release-integrity hardfix; addresses the `feedback (12).md` and `feedback (13).md`
 reviews. Ensures the source, version number, changelog, release tag, and
