@@ -1,9 +1,9 @@
-# TASK-030: Unchecked gate fixture
+# TASK-065: Year zero update date invalid fixture
 
 ## Status
 
 Status: done
-Updated: 2026-08-18
+Updated: 0000-01-01
 ## Risk profile
 
 Profile: standard
@@ -22,7 +22,7 @@ Standard product/maintenance work with no elevated risk signals.
 | AC-2 | Bench `asset_list_bench_test.go` | Passed |
 ## Approval gates
 
-- [ ] AG-1: Approval required from security reviewer
+- [x] AG-1: Approved by alice@example.com on 2026-08-18
 ## Verification
 
 ### Baseline
@@ -35,7 +35,6 @@ Standard product/maintenance work with no elevated risk signals.
 ## Files changed
 
 - `internal/assets/url.go`
-- `internal/assets/url_test.go`
 ## Remaining risks
 
 - None identified.

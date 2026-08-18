@@ -1,4 +1,4 @@
-# TASK-030: Unchecked gate fixture
+# TASK-064: None identified substring invalid fixture
 
 ## Status
 
@@ -22,7 +22,7 @@ Standard product/maintenance work with no elevated risk signals.
 | AC-2 | Bench `asset_list_bench_test.go` | Passed |
 ## Approval gates
 
-- [ ] AG-1: Approval required from security reviewer
+- None identified yet; security approval is still pending.
 ## Verification
 
 ### Baseline
@@ -35,7 +35,6 @@ Standard product/maintenance work with no elevated risk signals.
 ## Files changed
 
 - `internal/assets/url.go`
-- `internal/assets/url_test.go`
 ## Remaining risks
 
 - None identified.

@@ -32,7 +32,8 @@ Explain why this level applies and identify any escalation signals.
 
 ## Approval gates
 
-- [ ] AG-1: Approved by <approver> on YYYY-MM-DD
+- [ ] AG-1: Approval required from <role>
+- [x] AG-2: Approved by <approver> on YYYY-MM-DD
 
 ## Context modules
 

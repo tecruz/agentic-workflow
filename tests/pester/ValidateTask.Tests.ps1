@@ -204,6 +204,58 @@ Describe 'validate-task.ps1 risk-profile validator' {
         Invoke-Validator 'duplicate-evidence-reordered.md' | Should -Be 1
     }
 
+    It 'INVALID (1) when the Status section is missing' {
+        Invoke-Validator 'missing-status-section-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when the Updated declaration is duplicated' {
+        Invoke-Validator 'duplicate-updated-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when Updated is declared outside the Status section' {
+        Invoke-Validator 'updated-outside-status-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) for a checked approval gate with an invalid date' {
+        Invoke-Validator 'invalid-approval-date-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when an approval gate identifier is declared more than once' {
+        Invoke-Validator 'duplicate-gate-invalid.md' | Should -Be 1
+    }
+
+    It 'VALID (0) for lowercase table, matrix, and approval identifiers' {
+        Invoke-Validator 'lowercase-identifiers-valid.md' | Should -Be 0
+    }
+
+    It 'INVALID (1) for a completed task with an empty Baseline' {
+        Invoke-Validator 'done-empty-baseline-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) for a completed task with an empty Final' {
+        Invoke-Validator 'done-empty-final-invalid.md' | Should -Be 1
+    }
+
+    It 'BLOCKED (2) for a completed task whose Final is only a placeholder' {
+        Invoke-Validator 'done-placeholder-final-blocked.md' | Should -Be 2
+    }
+
+    It 'INVALID (1) for a completed prototype with an empty Smoke verification' {
+        Invoke-Validator 'prototype-empty-smoke-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) for a malformed approval entry in the gates list' {
+        Invoke-Validator 'malformed-approval-entry-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when None identified is used as a substring, not a sentinel' {
+        Invoke-Validator 'none-identified-substring-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) for an Updated date with year 0000' {
+        Invoke-Validator 'invalid-year-zero.md' | Should -Be 1
+    }
+
     It 'PowerShell and Bash classifiers agree on every fixture' {
         if (-not (Get-Command bash -ErrorAction SilentlyContinue)) { return }
         # Probe: bash must be able to invoke the validator and read the

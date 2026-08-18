@@ -1,28 +1,31 @@
-# TASK-030: Unchecked gate fixture
-
-## Status
+# TASK-053: Missing Status section invalid fixture
 
 Status: done
-Updated: 2026-08-18
+
 ## Risk profile
 
 Profile: standard
+
 ## Profile rationale
 
 Standard product/maintenance work with no elevated risk signals.
+
 ## Acceptance criteria
 
 - AC-1: Asset URLs include a `v=` query parameter.
 - AC-2: The asset list renders in under 500 ms.
+
 ## Required evidence
 
 | AC ID | Evidence | Result |
 | --- | --- | --- |
 | AC-1 | Unit test `asset_url_test.go` | Passed |
 | AC-2 | Bench `asset_list_bench_test.go` | Passed |
+
 ## Approval gates
 
-- [ ] AG-1: Approval required from security reviewer
+- None identified
+
 ## Verification
 
 ### Baseline
@@ -32,10 +35,11 @@ Standard product/maintenance work with no elevated risk signals.
 ### Final
 
 - `go test ./...` → 42 passed, 0 failed.
+
 ## Files changed
 
 - `internal/assets/url.go`
-- `internal/assets/url_test.go`
+
 ## Remaining risks
 
 - None identified.

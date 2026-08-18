@@ -262,3 +262,68 @@ classify() {  # classify <fixture>
     classify duplicate-evidence-reordered.md
     [ "$status" -eq 1 ]
 }
+
+@test "INVALID (1) when the Status section is missing" {
+    classify missing-status-section-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when the Updated declaration is duplicated" {
+    classify duplicate-updated-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when Updated is declared outside the Status section" {
+    classify updated-outside-status-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a checked approval gate with an invalid date" {
+    classify invalid-approval-date-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when an approval gate identifier is declared more than once" {
+    classify duplicate-gate-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "VALID (0) for lowercase table, matrix, and approval identifiers" {
+    classify lowercase-identifiers-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "INVALID (1) for a completed task with an empty Baseline" {
+    classify done-empty-baseline-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a completed task with an empty Final" {
+    classify done-empty-final-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "BLOCKED (2) for a completed task whose Final is only a placeholder" {
+    classify done-placeholder-final-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "INVALID (1) for a completed prototype with an empty Smoke verification" {
+    classify prototype-empty-smoke-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a malformed approval entry in the gates list" {
+    classify malformed-approval-entry-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when None identified is used as a substring, not a sentinel" {
+    classify none-identified-substring-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for an Updated date with year 0000" {
+    classify invalid-year-zero.md
+    [ "$status" -eq 1 ]
+}

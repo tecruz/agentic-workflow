@@ -1,4 +1,4 @@
-# TASK-038: High assurance completed missing approval fixture
+# TASK-058: Lowercase identifiers valid fixture
 
 ## Status
 
@@ -27,8 +27,8 @@ five failed attempts.
 
 | Requirement ID | Evidence | Result |
 | --- | --- | --- |
-| R-1 | Security unit test `crypto_at_rest_test.go` | Passed |
-| R-2 | Integration test `rate_limit_test.go` | Passed |
+| r-1 | Security unit test `crypto_at_rest_test.go` | Passed |
+| r-2 | Integration test `rate_limit_test.go` | Passed |
 
 ## Negative-path and boundary tests
 
@@ -45,7 +45,7 @@ five failed attempts.
 
 ## Approval gates
 
-- [ ] AG-1: Approval required from security reviewer
+- [x] ag-1: APPROVED BY Alice Example ON 2026-08-18
 
 ## Independent review
 
@@ -60,8 +60,8 @@ five failed attempts.
 
 | AC ID | Evidence | Result |
 | --- | --- | --- |
-| AC-1 | Security unit test `crypto_at_rest_test.go` | Passed |
-| AC-2 | Integration test `rate_limit_test.go` | Passed |
+| ac-1 | Security unit test `crypto_at_rest_test.go` | Passed |
+| ac-2 | Integration test `rate_limit_test.go` | Passed |
 
 ## Verification
 

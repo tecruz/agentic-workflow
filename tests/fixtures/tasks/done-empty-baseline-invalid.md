@@ -1,4 +1,4 @@
-# TASK-030: Unchecked gate fixture
+# TASK-059: Done with empty Baseline invalid fixture
 
 ## Status
 
@@ -22,12 +22,10 @@ Standard product/maintenance work with no elevated risk signals.
 | AC-2 | Bench `asset_list_bench_test.go` | Passed |
 ## Approval gates
 
-- [ ] AG-1: Approval required from security reviewer
+- [x] AG-1: Approved by alice@example.com on 2026-08-18
 ## Verification
 
 ### Baseline
-
-- `go test ./...` → 42 passed, 0 failed.
 
 ### Final
 
@@ -35,7 +33,6 @@ Standard product/maintenance work with no elevated risk signals.
 ## Files changed
 
 - `internal/assets/url.go`
-- `internal/assets/url_test.go`
 ## Remaining risks
 
 - None identified.

@@ -86,6 +86,7 @@ $SECTIONS = [System.Collections.Generic.List[string]]::new()
 $SECTION_START = [System.Collections.Generic.List[int]]::new()
 $SUBSECTIONS = [System.Collections.Generic.List[string]]::new()
 $SUB_SECTION = [System.Collections.Generic.List[string]]::new()
+$SUB_SECTION_START = [System.Collections.Generic.List[int]]::new()
 $ProfileDecl = 0
 $ProfileName = ''
 $ProfileInRisk = $false
@@ -121,6 +122,7 @@ foreach ($line in $fileLines) {
         $h = Normalize-Heading $line.Substring(4)
         $SUBSECTIONS.Add($h)
         $SUB_SECTION.Add($cur)
+        $SUB_SECTION_START.Add($contentLines.Count)
         $contentLines.Add($line)
         continue
     }
@@ -161,7 +163,7 @@ function Test-IsoDate {
     if ($Value -notmatch '^\d{4}-\d{2}-\d{2}$') { return $false }
     $parts = $Value -split '-'
     $y = [int]$parts[0]; $m = [int]$parts[1]; $d = [int]$parts[2]
-    if ($m -lt 1 -or $m -gt 12 -or $d -lt 1) { return $false }
+    if ($y -lt 1 -or $m -lt 1 -or $m -gt 12 -or $d -lt 1) { return $false }
     $leap = ([DateTime]::IsLeapYear($y))
     $max = switch ($m) {
         1 { 31 } 3 { 31 } 5 { 31 } 7 { 31 } 8 { 31 } 10 { 31 } 12 { 31 }
@@ -236,25 +238,68 @@ function Get-SectionContent {
     return , $result.ToArray()
 }
 
-function Test-SectionContent {
-    param([string]$Name)
-    foreach ($l in (Get-SectionContent $Name)) {
-        if ($l -match '\S') { return $true }
+function Get-SubsectionContent {
+    param([string]$Name, [string]$Section)
+    for ($i = 0; $i -lt $SUBSECTIONS.Count; $i++) {
+        if ($SUBSECTIONS[$i] -eq $Name -and $SUB_SECTION[$i] -eq $Section) {
+            $begin = $SUB_SECTION_START[$i] + 1
+            $result = [System.Collections.Generic.List[string]]::new()
+            for ($j = $begin; $j -lt $contentLines.Count; $j++) {
+                if ($contentLines[$j] -match '^##\s' -or $contentLines[$j] -match '^###\s') { break }
+                $result.Add($contentLines[$j])
+            }
+            return , $result.ToArray()
+        }
     }
-    return $false
+    return @()
+}
+
+# Get-ContentClass — classifies authoritative content lines as 'content'
+# (real evidence), 'placeholder' (lines exist but none are real), or 'empty'.
+# Headings, table separators, blank bullets, and placeholder text such as
+# TBD / TODO / Pending / None provided do not count as content. A table counts
+# only once a data row follows its header.
+function Get-ContentClass {
+    param([string[]]$Content)
+    $tableHeaderSeen = $false
+    $sawLines = $false
+    foreach ($line in $Content) {
+        if ($line -notmatch '\S') { continue }
+        if ($line -match '^\s*#') { continue }
+        if ($line -match '---') { continue }
+        $sawLines = $true
+        if ($line -match '^\s*\|.*\|.*\|\s*$') {
+            if ($tableHeaderSeen) { return 'content' }
+            $tableHeaderSeen = $true
+            continue
+        }
+        $text = ($line -replace '^\s*[-*+]\s+', '').Trim()
+        if (-not $text) { continue }
+        if ($text -match '^(tbd|todo|pending|none\s+provided|none\s+identified)(\s*:.*)?$|^[^:]+:\s*(tbd|todo|pending|none\s+provided|none\s+identified)\s*$') { continue }
+        return 'content'
+    }
+    if (-not $sawLines) { return 'empty' }
+    return 'placeholder'
 }
 
 function Test-SectionRealContent {
     param([string]$Name)
-    foreach ($l in (Get-SectionContent $Name)) {
-        if ($l -match '^\s*#') { continue }
-        if ($l -match '---') { continue }
-        $text = ($l -replace '^\s*[-*+]\s+', '').TrimEnd()
-        if (-not $text) { continue }
-        if ($text -match '^(tbd|todo|pending|none\s+provided|none\s+identified)\s*$') { continue }
-        return $true
-    }
-    return $false
+    return ((Get-ContentClass (Get-SectionContent $Name)) -eq 'content')
+}
+
+function Test-SubsectionRealContent {
+    param([string]$Name, [string]$Section)
+    return ((Get-ContentClass (Get-SubsectionContent $Name $Section)) -eq 'content')
+}
+
+# Assert-VerificationEvidence — a completed task must carry real verification
+# evidence. Missing evidence is INVALID; placeholder-only evidence is BLOCKED.
+function Assert-VerificationEvidence {
+    param([string]$Kind, [string[]]$Content)
+    $cls = Get-ContentClass $Content
+    if ($cls -eq 'content') { return }
+    if ($cls -eq 'empty') { Write-Invalid "completed task must record verification evidence under '$Kind'." }
+    Write-Blocked "completed task verification under '$Kind' is still a placeholder (TBD, TODO, Pending, or similar)."
 }
 
 function Get-Ids {
@@ -345,6 +390,13 @@ foreach ($s in $requiredSubsections) {
     if (-not $found) { Write-Invalid "missing '### $s' subsection under '## Verification' for profile '$ProfileName'." }
 }
 
+# Completed standard and high-assurance tasks must record real verification
+# evidence under Baseline and Final, not merely the headings.
+if ($ProfileName -ne 'prototype' -and $Completed) {
+    Assert-VerificationEvidence '### Baseline' (Get-SubsectionContent 'baseline' 'verification')
+    Assert-VerificationEvidence '### Final' (Get-SubsectionContent 'final' 'verification')
+}
+
 # ---------------------------------------------------------------------------
 # Prototype contract.
 # ---------------------------------------------------------------------------
@@ -356,6 +408,9 @@ if ($ProfileName -eq 'prototype') {
     }
     if ($handoffText -notmatch 'no\s+production\s+deployment\s+or\s+irreversible\s+operation\s*:\s*confirmed') {
         Write-Invalid "prototype handoff must declare 'No production deployment or irreversible operation: confirmed'."
+    }
+    if ($Completed) {
+        Assert-VerificationEvidence '## Smoke verification' (Get-SectionContent 'smoke verification')
     }
 }
 
@@ -407,21 +462,28 @@ if ($ProfileName -ne 'prototype') {
     $checked = 0
     $unchecked = 0
     $gateSeen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($gl in (Get-SectionContent 'approval gates')) {
-        if ($gl -match 'none\s+identified') { $hasNone = $true }
-        if ($gl -match '^\s*-\s*\[[ xX]\]\s*AG-\d+\s*:') {
-            $gateCount++
-            $m = [regex]::Match($gl, '^\s*-\s*\[([ xX])\]\s*(AG-\d+)\s*:\s*(.*?)\s*$')
-            $gid = $m.Groups[2].Value.ToLowerInvariant()
+    foreach ($rawLine in (Get-SectionContent 'approval gates')) {
+        $gl = $rawLine.Trim()
+        if (-not $gl) { continue }
+        $glLow = $gl.ToLowerInvariant()
+        $bodyLow = ($glLow -replace '^[-*]\s+', '')
+        if ($bodyLow -eq 'none identified') { $hasNone = $true; continue }
+        if ($glLow -match '^[-*]\s*\[[ xX]\]') {
+            if ($glLow -notmatch '^[-*]\s*\[[ xX]\]\s*ag-\d+\s*:') {
+                Write-Invalid "malformed approval entry in '## Approval gates': '$gl'."
+            }
+            $m = [regex]::Match($glLow, '^[-*]\s*\[([ xX])\]\s*(ag-\d+)\s*:\s*(.*?)\s*$')
+            $gid = $m.Groups[2].Value
             $gbox = $m.Groups[1].Value
             $gdet = $m.Groups[3].Value.Trim()
+            $gateCount++
             if (-not $gateSeen.Add($gid)) { Write-Invalid "approval gate '$gid' is declared more than once." }
-            if ($gbox -match '[xX]') { $checked++ } else { $unchecked++ }
-            if ($gdet -notmatch '^approved\s+by\s+.+\s+on\s+\d{4}-\d{2}-\d{2}\s*$') {
-                Write-Invalid "approval gate '$gid' must be in the form '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'."
-            }
-            if ($gbox -match '[xX]') {
-                if ($gdet -match '<approver>|TBD|pending|unknown|n/a|not\s+approved|approval\s+not\s+granted') {
+            if ($gbox -eq 'x') {
+                $checked++
+                if ($gdet -notmatch '^approved\s+by\s+.+\s+on\s+\d{4}-\d{2}-\d{2}\s*$') {
+                    Write-Invalid "approval gate '$gid' must be in the form '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'."
+                }
+                if ($gdet -match '<approver>|tbd|pending|unknown|n/a|not\s+approved|approval\s+not\s+granted') {
                     Write-Invalid "approval gate '$gid' must not use placeholder values."
                 }
                 $dateMatch = [regex]::Match($gdet, '\d{4}-\d{2}-\d{2}')
@@ -431,6 +493,17 @@ if ($ProfileName -ne 'prototype') {
                 if (-not $approver) { Write-Invalid "approval gate '$gid' must record an approver." }
                 if ($approver -match '[<>]') { Write-Invalid "approval gate '$gid' must not use template placeholders." }
             }
+            else {
+                $unchecked++
+                if (-not $gdet) { Write-Invalid "approval gate '$gid' must describe the required approval." }
+                if ($gdet -match '^approved\s+by\s+.+\s+on\s+\d{4}-\d{2}-\d{2}\s*$') {
+                    Write-Invalid "unchecked approval gate '$gid' cannot record an approval; describe the requirement instead."
+                }
+            }
+            continue
+        }
+        if ($glLow -match '^[-*]\s+') {
+            Write-Invalid "malformed approval entry in '## Approval gates': '$gl'."
         }
     }
 

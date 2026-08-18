@@ -199,7 +199,9 @@ validate_table() {
             gsub(/^[ \t]+|[ \t]+$/, "", c)
             gsub(/^[ \t]+|[ \t]+$/, "", e)
             gsub(/^[ \t]+|[ \t]+$/, "", r)
-            if (c ~ "^" pat "$") print c "\t" e "\t" r
+            lc = tolower(c)
+            lp = tolower(pat)
+            if (lc ~ "^" lp "$") print lc "\t" e "\t" r
         }
     ')
     printf -v "$outvar" '%s' "$ids"
@@ -218,6 +220,7 @@ validate_date() {
     printf '%s' "$d" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' || return 1
     y="${d%%-*}"; rest="${d#*-}"; m="${rest%%-*}"; day="${rest#*-}"
     y=$((10#$y)); m=$((10#$m)); day=$((10#$day))
+    [ "$y" -ge 1 ] || return 1
     [ "$m" -ge 1 ] && [ "$m" -le 12 ] || return 1
     [ "$day" -ge 1 ] || return 1
     leap=0
@@ -233,24 +236,94 @@ validate_date() {
     return 0
 }
 
-# section_has_real_content <name> — returns 0 when the section has at least one
-# authoritative content line that is not a heading, a table separator, an empty
-# bullet, or a placeholder such as TBD / TODO / Pending / None provided.
-section_has_real_content() {
-    local content line text
-    content="$(section_content "$1" || true)"
+# content_class <content> — classifies authoritative content lines as
+# "content" (real evidence), "placeholder" (lines exist but none are real),
+# or "empty" (no lines at all). Headings, table separators, blank bullets,
+# and placeholder text such as TBD / TODO / Pending / None provided do not
+# count as content. A table counts only once a data row follows its header.
+content_class() {
+    local line text table_header_seen saw_lines
+    table_header_seen=0
+    saw_lines=0
     while IFS= read -r line || [ -n "$line" ]; do
+        printf '%s' "$line" | grep -q '[^[:space:]]' || continue
         printf '%s' "$line" | grep -qE '^[[:space:]]*#' && continue
         case "$line" in
             *'---'*) continue ;;
         esac
+        saw_lines=1
+        if printf '%s' "$line" | grep -qE '^[[:space:]]*\|.*\|.*\|[[:space:]]*$'; then
+            if [ "$table_header_seen" -eq 1 ]; then
+                echo content
+                return 0
+            fi
+            table_header_seen=1
+            continue
+        fi
         text="$(printf '%s' "$line" | sed -E 's/^[[:space:]]*[-*+][[:space:]]+//; s/[[:space:]]+$//')"
         [ -n "$text" ] || continue
-        printf '%s' "$text" | grep -qiE '^(tbd|todo|pending|none[[:space:]]+provided|none[[:space:]]+identified)[[:space:]]*$' \
+        printf '%s' "$text" | grep -qiE '^(tbd|todo|pending|none[[:space:]]+provided|none[[:space:]]+identified)([[:space:]]*:.*)?$|^[^:]+:[[:space:]]*(tbd|todo|pending|none[[:space:]]+provided|none[[:space:]]+identified)[[:space:]]*$' \
             && continue
+        echo content
         return 0
-    done <<< "$content"
+    done <<< "$1"
+    if [ "$saw_lines" -eq 0 ]; then
+        echo empty
+    else
+        echo placeholder
+    fi
     return 1
+}
+
+content_has_real_text() {
+    [ "$(content_class "$1")" = "content" ]
+}
+
+# section_has_real_content <name> — returns 0 when the section has at least one
+# authoritative content line that is not a heading, a table separator, an empty
+# bullet, or a placeholder such as TBD / TODO / Pending / None provided.
+section_has_real_content() {
+    content_has_real_text "$(section_content "$1" || true)"
+}
+
+# subsection_content <name> <section> — prints the content lines between that
+# `### ` heading and the next heading (empty when absent or empty).
+subsection_content() {
+    local name="$1" section="$2" i j k n
+    [ "${#SUBSECTIONS[@]}" -gt 0 ] || return 1
+    for i in "${!SUBSECTIONS[@]}"; do
+        if [ "${SUBSECTIONS[$i]}" = "$name" ] && [ "${SUB_SECTION[$i]}" = "$section" ]; then
+            j=$(( SUB_SECTION_START[i] + 1 ))
+            n=${#CONTENT_LINES[@]}
+            k=$j
+            while [ $k -lt $n ]; do
+                case "${CONTENT_LINES[$k]}" in
+                    '## '*|'### '*) break ;;
+                esac
+                printf '%s\n' "${CONTENT_LINES[$k]}"
+                k=$(( k + 1 ))
+            done
+            return 0
+        fi
+    done
+    return 1
+}
+
+subsection_has_real_content() {
+    content_has_real_text "$(subsection_content "$1" "$2" || true)"
+}
+
+# verify_completion_evidence <kind> <content> — a completed task must carry real
+# verification evidence. Missing evidence is INVALID; placeholder-only evidence
+# is BLOCKED at completion.
+verify_completion_evidence() {
+    local kind="$1" content="$2" cls
+    cls="$(content_class "$content")"
+    case "$cls" in
+        content) return 0 ;;
+        empty) fail_invalid "completed task must record verification evidence under '$kind'." ;;
+        *) fail_blocked "completed task verification under '$kind' is still a placeholder (TBD, TODO, Pending, or similar)." ;;
+    esac
 }
 
 # ---------------------------------------------------------------------------
@@ -262,6 +335,7 @@ SECTIONS=()
 SECTION_START=()
 SUBSECTIONS=()
 SUB_SECTION=()
+SUB_SECTION_START=()
 PROFILE_DECL=0
 PROFILE=""
 PROFILE_IN_RISK=0
@@ -308,6 +382,7 @@ while IFS= read -r line || [ -n "$line" ]; do
             h="$(normalize_heading "${line#'### '}")"
             SUBSECTIONS+=("$h")
             SUB_SECTION+=("$cur")
+            SUB_SECTION_START+=( "${#CONTENT_LINES[@]}" )
             CONTENT_LINES+=("$line")
             continue
             ;;
@@ -416,6 +491,13 @@ for s in ${REQUIRED_SUBSECTIONS[@]+"${REQUIRED_SUBSECTIONS[@]}"}; do
         || fail_invalid "missing '### $s' subsection under '## Verification' for profile '$PROFILE'."
 done
 
+# Completed standard and high-assurance tasks must record real verification
+# evidence under Baseline and Final, not merely the headings.
+if [ "$PROFILE" != "prototype" ] && [ "$COMPLETED" -eq 1 ]; then
+    verify_completion_evidence "### Baseline" "$(subsection_content "baseline" "verification" || true)"
+    verify_completion_evidence "### Final" "$(subsection_content "final" "verification" || true)"
+fi
+
 # ---------------------------------------------------------------------------
 # Prototype contract.
 # ---------------------------------------------------------------------------
@@ -425,6 +507,9 @@ if [ "$PROFILE" = "prototype" ]; then
         || fail_invalid "prototype handoff must state 'Production readiness: not established'."
     printf '%s\n' "$handoff" | grep -qiE 'no[[:space:]]+production[[:space:]]+deployment[[:space:]]+or[[:space:]]+irreversible[[:space:]]+operation[[:space:]]*:[[:space:]]*confirmed' \
         || fail_invalid "prototype handoff must declare 'No production deployment or irreversible operation: confirmed'."
+    if [ "$COMPLETED" -eq 1 ]; then
+        verify_completion_evidence "## Smoke verification" "$(section_content "smoke verification" || true)"
+    fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -483,37 +568,51 @@ if [ "$PROFILE" != "prototype" ]; then
     unchecked=0
     gate_seen=""
     while IFS= read -r gl || [ -n "$gl" ]; do
-        if printf '%s' "$gl" | grep -qiE 'none[[:space:]]+identified'; then
+        gl="$(printf '%s' "$gl" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+        [ -n "$gl" ] || continue
+        gl_low="$(printf '%s' "$gl" | lower)"
+        body_low="$(printf '%s\n' "$gl_low" | sed -E 's/^[-*][[:space:]]+//')"
+        if [ "$body_low" = "none identified" ]; then
             has_none=1
+            continue
         fi
-        if printf '%s' "$gl" | grep -qE '^[[:space:]]*-[[:space:]]*\[[ xX]\][[:space:]]*AG-[0-9]+[[:space:]]*:'; then
+        if printf '%s' "$gl_low" | grep -qE '^[-*][[:space:]]*\[[ xX]\]'; then
+            printf '%s' "$gl_low" | grep -qE '^[-*][[:space:]]*\[[ xX]\][[:space:]]*ag-[0-9]+[[:space:]]*:' \
+                || fail_invalid "malformed approval entry in '## Approval gates': '$gl'."
             gate_count=$(( gate_count + 1 ))
-            gid="$(printf '%s\n' "$gl" | sed -nE 's/^[[:space:]]*-[[:space:]]*\[([ xX])\][[:space:]]*(AG-[0-9]+)[[:space:]]*:[[:space:]]*(.*)[[:space:]]*$/\2/p' | lower)"
-            gbox="$(printf '%s\n' "$gl" | sed -nE 's/^[[:space:]]*-[[:space:]]*\[([ xX])\][[:space:]]*(AG-[0-9]+)[[:space:]]*:[[:space:]]*(.*)[[:space:]]*$/\1/p')"
-            gdet="$(printf '%s\n' "$gl" | sed -nE 's/^[[:space:]]*-[[:space:]]*\[([ xX])\][[:space:]]*(AG-[0-9]+)[[:space:]]*:[[:space:]]*(.*)[[:space:]]*$/\3/p' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+            gid="$(printf '%s\n' "$gl_low" | sed -nE 's/^[-*][[:space:]]*\[([ xX])\][[:space:]]*(ag-[0-9]+)[[:space:]]*:[[:space:]]*(.*)[[:space:]]*$/\2/p')"
+            gbox="$(printf '%s\n' "$gl_low" | sed -nE 's/^[-*][[:space:]]*\[([ xX])\][[:space:]]*(ag-[0-9]+)[[:space:]]*:[[:space:]]*(.*)[[:space:]]*$/\1/p')"
+            gdet="$(printf '%s\n' "$gl_low" | sed -nE 's/^[-*][[:space:]]*\[([ xX])\][[:space:]]*(ag-[0-9]+)[[:space:]]*:[[:space:]]*(.*)[[:space:]]*$/\3/p' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
             case " $gate_seen " in
                 *" $gid "*) fail_invalid "approval gate '$gid' is declared more than once." ;;
             esac
             gate_seen="$gate_seen $gid"
             case "$gbox" in
-                [xX]) checked=$(( checked + 1 )) ;;
-                *) unchecked=$(( unchecked + 1 )) ;;
-            esac
-            printf '%s' "$gdet" | grep -qiE '^approved[[:space:]]+by[[:space:]]+.+[[:space:]]+on[[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]*$' \
-                || fail_invalid "approval gate '$gid' must be in the form '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'."
-            case "$gbox" in
-                [xX])
-                    printf '%s' "$gdet" | grep -qiE '<approver>|TBD|pending|unknown|n/a|not[[:space:]]+approved|approval[[:space:]]+not[[:space:]]+granted' \
+                x)
+                    checked=$(( checked + 1 ))
+                    printf '%s' "$gdet" | grep -qE '^approved[[:space:]]+by[[:space:]]+.+[[:space:]]+on[[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]*$' \
+                        || fail_invalid "approval gate '$gid' must be in the form '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'."
+                    printf '%s' "$gdet" | grep -qE '<approver>|tbd|pending|unknown|n/a|not[[:space:]]+approved|approval[[:space:]]+not[[:space:]]+granted' \
                         && fail_invalid "approval gate '$gid' must not use placeholder values."
                     adate="$(printf '%s\n' "$gdet" | sed -nE 's/^.*[[:space:]]+on[[:space:]]+([0-9]{4}-[0-9]{2}-[0-9]{2})[[:space:]]*$/\1/p')"
                     [ -n "$adate" ] || fail_invalid "approval gate '$gid' must record an ISO date YYYY-MM-DD."
                     validate_date "$adate" || fail_invalid "approval gate '$gid' has an invalid ISO date '$adate'."
-                    approver="$(printf '%s\n' "$gdet" | awk '{ sub(/^Approved[[:space:]]+by[[:space:]]+/, ""); sub(/[[:space:]]+on[[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]*$/, ""); print }')"
+                    approver="$(printf '%s\n' "$gdet" | awk '{ sub(/^approved[[:space:]]+by[[:space:]]+/, ""); sub(/[[:space:]]+on[[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]*$/, ""); print }')"
                     [ -n "$approver" ] || fail_invalid "approval gate '$gid' must record an approver."
                     printf '%s' "$approver" | grep -q '[<>]' \
                         && fail_invalid "approval gate '$gid' must not use template placeholders."
                     ;;
+                *)
+                    unchecked=$(( unchecked + 1 ))
+                    [ -n "$gdet" ] || fail_invalid "approval gate '$gid' must describe the required approval."
+                    printf '%s' "$gdet" | grep -qE '^approved[[:space:]]+by[[:space:]]+.+[[:space:]]+on[[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]*$' \
+                        && fail_invalid "unchecked approval gate '$gid' cannot record an approval; describe the requirement instead."
+                    ;;
             esac
+            continue
+        fi
+        if printf '%s' "$gl_low" | grep -qE '^[-*][[:space:]]+'; then
+            fail_invalid "malformed approval entry in '## Approval gates': '$gl'."
         fi
     done <<< "$gates"
 

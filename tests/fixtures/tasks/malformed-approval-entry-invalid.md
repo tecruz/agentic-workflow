@@ -1,4 +1,4 @@
-# TASK-030: Unchecked gate fixture
+# TASK-063: Malformed approval entry invalid fixture
 
 ## Status
 
@@ -22,7 +22,8 @@ Standard product/maintenance work with no elevated risk signals.
 | AC-2 | Bench `asset_list_bench_test.go` | Passed |
 ## Approval gates
 
-- [ ] AG-1: Approval required from security reviewer
+- [x] AG-1: Approved by alice@example.com on 2026-08-18
+- [ ] SECURITY: Security approval pending
 ## Verification
 
 ### Baseline
@@ -35,7 +36,6 @@ Standard product/maintenance work with no elevated risk signals.
 ## Files changed
 
 - `internal/assets/url.go`
-- `internal/assets/url_test.go`
 ## Remaining risks
 
 - None identified.
