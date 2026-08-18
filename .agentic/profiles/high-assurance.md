@@ -39,21 +39,26 @@ required_evidence:
 
 A high-assurance task file must include:
 
-- **Requirements** — explicit, verifiable requirements with identifiers
+- **Risk profile** - the `Profile: high-assurance` declaration.
+- **Profile rationale** - why this level applies.
+- **Requirements** - explicit, verifiable requirements with identifiers
   (`R-N`).
-- **Risk analysis** — the threat model, blast radius, and mitigations.
-- **Requirement-to-evidence mapping** — a matrix connecting each requirement to
-  the evidence that proves it.
-- **Negative-path and boundary tests** — tests for failure modes, invalid
+- **Risk analysis** - the threat model, blast radius, and mitigations.
+- **Requirement-to-evidence** - a matrix mapping each requirement to the
+  evidence that proves it.
+- **Negative-path and boundary tests** - tests for failure modes, invalid
   input, and boundary conditions.
-- **Integration verification** — verification against real integrations and
+- **Integration verification** - verification against real integrations and
   dependent systems.
-- **Recovery plan** — rollback or recovery steps if the change must be undone.
-- **Approval gates** — explicit human approval records.
-- **Independent review** — review by someone other than the implementer.
-- **Baseline verification** — the verification result before changes began.
-- **Final verification** — the verification result after the final
-  modification, with no unresolved required check.
+- **Recovery plan** - rollback or recovery steps if the change must be undone.
+- **Approval gates** - explicit human approval records.
+- **Independent review** - review by someone other than the implementer.
+- **Acceptance criteria** - observable, testable conditions with identifiers
+  (`AC-N`).
+- **Required evidence** - a table mapping each criterion to evidence with a
+  result token.
+- **Verification** - `### Baseline` and `### Final` scoped under it.
+- **Files changed** and **Remaining risks**.
 
 ## Rules
 
@@ -62,16 +67,12 @@ A high-assurance task file must include:
   approval constraints.
 - No unresolved required check may remain at handoff.
 - Required approvals must be recorded **before** the task is marked complete.
+- `None identified` is not permitted in the approval gates of a high-assurance
+  task; explicit `AG-N` gates are required.
 
 ## Handoff
 
-```text
-Profile: high-assurance
-Requirement-to-evidence matrix:
-Threat/risk findings:
-Approval records:
-Recovery plan:
-Independent review:
-Final verification:
-Unresolved risks:
-```
+Mark the task `done` under `## Status` and run the validator with
+`--handoff` (Bash) / `-Handoff` (PowerShell) as the final gate before
+handing off. Handoff requires `Status: done`, resolved evidence, and checked
+approval gates.

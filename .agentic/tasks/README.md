@@ -15,11 +15,16 @@ short and kebab-case.
 ## Template
 
 Start from `.agentic/templates/task.md`. It declares the task's risk profile
-(`prototype` | `standard` | `high-assurance` — see `.agentic/profiles/`), the
-evidence required by that profile, and its approval gates.
+(`prototype` | `standard` | `high-assurance` - see `.agentic/profiles/`), its
+status, the evidence required by that profile, and its approval gates.
 
 ```markdown
-# TASK-NNN — <short description>
+# TASK-NNN - <short description>
+
+## Status
+
+Status: planned
+Updated: YYYY-MM-DD
 
 ## Risk profile
 
@@ -32,12 +37,12 @@ Profile: standard
 - AC-1: [observable, testable condition]
 
 ## Required evidence
-| Criterion | Evidence required | Result |
+| AC ID | Evidence | Result |
 |---|---|---|
 | AC-1 | Unit test | Pending |
 
 ## Approval gates
-- None identified
+- [ ] AG-1: Approved by <approver> on YYYY-MM-DD
 
 ## Files changed
 - [modules/files]
@@ -58,5 +63,10 @@ Profile: standard
   progresses.
 - Mark tasks `done` only after verification evidence exists and no required
   evidence remains `Pending`; `.agentic/scripts/validate-task.sh` /
-  `validate-task.ps1` will otherwise report the task as BLOCKED (exit `2`).
+  `validate-task.ps1` refuse a completed task with unresolved evidence or an
+  unchecked approval gate.
+- Before handoff, run the validator with `--handoff` (Bash) / `-Handoff`
+  (PowerShell); it requires `Status: done`. Marking a task `done` with
+  unresolved evidence or an unchecked gate makes the validator report it as
+  BLOCKED (exit `2`).
 - Do not delete task files; they are the project's history.

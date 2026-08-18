@@ -89,3 +89,108 @@ classify() {  # classify <fixture>
         fi
     done
 }
+
+@test "INVALID (1) for a prototype task missing the no-production-deployment declaration" {
+    classify prototype-missing-production-declaration.md
+    [ "$status" -eq 1 ]
+}
+
+@test "VALID (0) for an in-progress standard task" {
+    classify standard-in-progress.md
+    [ "$status" -eq 0 ]
+}
+
+@test "BLOCKED (2) for --handoff on a task that is not done" {
+    run bash "$VALIDATE" --handoff "$FIXTURES/standard-in-progress.md" >/dev/null 2>&1
+    [ "$status" -eq 2 ]
+}
+
+@test "VALID (0) for --handoff on a done standard task" {
+    run bash "$VALIDATE" --handoff "$FIXTURES/standard-valid.md" >/dev/null 2>&1
+    [ "$status" -eq 0 ]
+}
+
+@test "BLOCKED (2) for a completed task with Partial required evidence" {
+    classify completed-with-partial-evidence.md
+    [ "$status" -eq 2 ]
+}
+
+@test "INVALID (1) for a completed task with a blank evidence result" {
+    classify completed-with-blank-result.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when required evidence does not map every criterion" {
+    classify unmapped-evidence.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when acceptance criteria repeat an identifier" {
+    classify duplicate-ac.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for an unrecognized status value" {
+    classify unknown-status.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when Status is declared more than once" {
+    classify duplicate-status.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when Profile is declared more than once" {
+    classify duplicate-profile.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when all required words live in a single heading" {
+    classify single-heading-all-words.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when the profile heading is split" {
+    classify split-headings.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when Baseline is not scoped under Verification" {
+    classify baseline-outside-verification.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when required headings are inside a fenced code block" {
+    classify headings-in-fenced-code.md
+    [ "$status" -eq 1 ]
+}
+
+@test "BLOCKED (2) for a completed task with an unchecked approval gate" {
+    classify unchecked-gate.md
+    [ "$status" -eq 2 ]
+}
+
+@test "INVALID (1) when approval is negated rather than granted" {
+    classify negated-approval.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when approval is recorded as not granted" {
+    classify approval-not-granted.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when high-assurance evidence mapping omits a requirement" {
+    classify high-assurance-unmapped-matrix.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for an empty high-assurance risk analysis" {
+    classify high-assurance-empty-risk-analysis.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when a high-assurance task declares None identified approvals" {
+    classify high-assurance-none-identified.md
+    [ "$status" -eq 1 ]
+}

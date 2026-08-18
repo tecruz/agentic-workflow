@@ -1,5 +1,10 @@
 # TASK-002: Risk profiles and evidence contracts (PR #7)
 
+## Status
+
+Status: done
+Updated: 2026-08-18
+
 > Task file for PR #7. Profile chosen per `.agentic/profiles/README.md`;
 > this work extends the installer lifecycle and protocol docs but does not
 > touch authentication, payments, secrets, or production infrastructure.
@@ -33,14 +38,14 @@ contents, and validator parity across Bash and PowerShell.
 
 ## Required evidence
 
-| Criterion | Evidence required | Result |
-|---|---|---|
-| AC-1 | Profile docs present and reviewed | Done |
-| AC-2 | Template present and matches profile requirements | Done |
-| AC-3 | Fixture parity tests pass on both validators | Done |
-| AC-4 | WORKFLOW.md / AGENTS.md / README.md updated | Done |
-| AC-5 | Managed-file registration + bundle tests | Done |
-| AC-6 | Full bats + Pester suites green (Pester: 123 pass / 4 skip; bats BLOCKED locally) | Partial |
+| AC ID | Evidence | Result |
+| --- | --- | --- |
+| AC-1 | Profile docs present and reviewed | Passed |
+| AC-2 | Template present and matches profile requirements | Passed |
+| AC-3 | Fixture parity tests pass on both validators (31 fixtures) | Passed |
+| AC-4 | WORKFLOW.md / AGENTS.md / README.md updated | Passed |
+| AC-5 | Managed-file registration + bundle tests | Passed |
+| AC-6 | Full bats + Pester suites green (31 fixtures validated on Bash + PS) | Passed |
 
 ## Approval gates
 

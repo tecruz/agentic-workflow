@@ -79,23 +79,67 @@ required_evidence:
   - final_verification
 ```
 
+## Task status
+
+Every task file declares exactly one `Status:` under a `## Status` section,
+plus an `Updated: YYYY-MM-DD` field. The status enum is:
+
+- `planned` — defined and queued.
+- `in-progress` — implementation started, evidence may be `Pending`.
+- `blocked` — work paused on a blocker.
+- `done` — verification evidence exists and nothing required is unresolved.
+
+`Status: done` requires every required-evidence row to be `passed`,
+`satisfied`, or `n/a` and every approval gate to be checked. The
+`--handoff` / `-Handoff` flag enforces the *handoff* gate: validation then
+requires `Status: done` (run it immediately before handing off a task).
+
+## Evidence results
+
+Evidence rows use one of the following result tokens:
+
+- **resolved**: `passed`, `satisfied`, `n/a`
+- **unresolved**: `pending`, `partial`, `blocked`, `missing`, `not-run`
+
+`n/a` is resolved only when the evidence description itself states an `n/a`
+rationale. A task marked `done` with any unresolved evidence or unchecked
+approval gate is **BLOCKED** (exit `2`), not INVALID.
+
+## Approval gates
+
+Structured approval gates are recorded as:
+
+```text
+- [x] AG-1: Approved by <approver> on YYYY-MM-DD
+```
+
+Prose such as "Approved by Alice" or "Not approved" is not a gate. Negated
+statements never count as approval. `None identified` is permitted only for
+non-high-assurance profiles; high-assurance tasks must declare explicit
+`AG-N` gates.
+
 ## Validation
 
 `.agentic/scripts/validate-task.sh` / `validate-task.ps1` check a task file's
 **structural** contract only:
 
-- A recognized profile is declared.
-- Required sections exist for that profile.
-- Acceptance criteria carry identifiers (`AC-N`).
-- Required evidence entries are present.
-- A task marked complete has no `Pending` required evidence.
-- Required approvals are recorded before completion.
+- Exactly one recognized profile and exactly one valid `Status:` are declared.
+- Required sections exist for that profile; `### Baseline`/`### Final` must
+  live inside `## Verification`.
+- Acceptance criteria and high-assurance requirements carry identifiers
+  (`AC-N`, `R-N`), are unique, and are mapped exactly to the required
+  evidence / requirement-to-evidence tables.
+- A task marked complete has no unresolved required evidence and no unchecked
+  approval gate.
+- Prototype tasks declare `Production readiness: not established` and
+  `No production deployment or irreversible operation: confirmed` in their
+  `## Handoff` section.
 
 The validator never judges whether the prose is intellectually sufficient.
 That belongs to human or behavioral evaluation.
 
 - Exit `0` = VALID, `1` = INVALID, `2` = BLOCKED (evidence or approval missing
-  on a completed task).
+  on a completed task, or `--handoff` on a task that is not `done`).
 
 ## Profiles vs. project verification
 

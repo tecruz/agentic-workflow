@@ -1,40 +1,37 @@
-# TASK-102: Extract request-id middleware
+# TASK-015: Standard missing baseline fixture
 
+## Status
+
+Status: done
+Updated: 2026-08-18
 ## Risk profile
 
 Profile: standard
-
 ## Profile rationale
 
-Ordinary maintenance refactor of HTTP middleware. No escalation signals apply.
-
+Standard product/maintenance work with no elevated risk signals.
 ## Acceptance criteria
 
-- AC-1: Request-ID middleware sets a header when absent.
-- AC-2: Existing handlers receive the middleware without API changes.
-
+- AC-1: Asset URLs include a `v=` query parameter.
+- AC-2: The asset list renders in under 500 ms.
 ## Required evidence
 
-| Criterion | Evidence required | Result |
-|---|---|---|
-| AC-1 | Unit test `middleware_test.go` | Passed |
-| AC-2 | Existing integration suite | Passed |
-
+| AC ID | Evidence | Result |
+| --- | --- | --- |
+| AC-1 | Unit test `asset_url_test.go` | Passed |
+| AC-2 | Bench `asset_list_bench_test.go` | Passed |
 ## Approval gates
 
-- None identified
-
-## Files changed
-
-- `internal/http/middleware.go`
-- `internal/http/middleware_test.go`
-
+- [x] AG-1: Approved by alice@example.com on 2026-08-18
 ## Verification
 
 ### Final
 
-`go test ./...` — 84 passed, 0 failed.
+- `go test ./...` → 42 passed, 0 failed.
+## Files changed
 
+- `internal/assets/url.go`
+- `internal/assets/url_test.go`
 ## Remaining risks
 
-- None known.
+- None identified.

@@ -1,8 +1,8 @@
-# TASK-014: Standard valid fixture
+# TASK-016: Standard in progress fixture
 
 ## Status
 
-Status: done
+Status: in-progress
 Updated: 2026-08-18
 ## Risk profile
 

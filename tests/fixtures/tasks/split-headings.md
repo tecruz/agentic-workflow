@@ -1,13 +1,14 @@
-# TASK-014: Standard valid fixture
+# TASK-026: Split headings fixture
 
 ## Status
 
 Status: done
 Updated: 2026-08-18
-## Risk profile
+## Risk
 
 Profile: standard
-## Profile rationale
+
+## Profile
 
 Standard product/maintenance work with no elevated risk signals.
 ## Acceptance criteria

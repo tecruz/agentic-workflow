@@ -1,4 +1,4 @@
-# TASK-035: High assurance missing recovery plan fixture
+# TASK-036: High assurance empty risk analysis fixture
 
 ## Status
 
@@ -19,9 +19,6 @@ Authentication is safety-critical: escalate to high-assurance.
 
 ## Risk analysis
 
-Threat model: credential theft from disk and online brute force. Mitigations:
-AES-GCM at rest with a key derived via Argon2id; per-account lockout after
-five failed attempts.
 
 ## Requirement-to-evidence
 
@@ -39,6 +36,9 @@ five failed attempts.
 
 - Full login flow exercised end-to-end against a local IdP container.
 
+## Recovery plan
+
+- Restore from encrypted snapshot; key rotation documented in `docs/ops.md`.
 
 ## Approval gates
 

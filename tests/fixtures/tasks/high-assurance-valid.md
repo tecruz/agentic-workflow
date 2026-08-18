@@ -1,88 +1,84 @@
-# TASK-201: Rotate user session signing keys
+# TASK-033: High assurance valid fixture
 
+## Status
+
+Status: done
+Updated: 2026-08-18
 ## Risk profile
 
 Profile: high-assurance
 
 ## Profile rationale
 
-Involves secrets and cryptography; session forgery would compromise all accounts. Escalated to high-assurance.
+Authentication is safety-critical: escalate to high-assurance.
 
 ## Requirements
 
-- R-1: Session signing keys rotate without invalidating active sessions.
-- R-2: The rotation procedure is fully reversible within one window.
-- R-3: No plaintext key material is ever written to logs or the repository.
+- R-1: Credentials are stored at rest encrypted.
+- R-2: Failed login attempts are rate limited.
 
 ## Risk analysis
 
-Threat: a compromised key lets an attacker forge sessions. Blast radius: all
-authenticated accounts. Mitigations: dual-key overlap during rotation, short
-signing window, key material held only in the secret store, rotation rehearsed
-in staging first.
+Threat model: credential theft from disk and online brute force. Mitigations:
+AES-GCM at rest with a key derived via Argon2id; per-account lockout after
+five failed attempts.
 
 ## Requirement-to-evidence
 
-| Requirement | Evidence required | Result |
-|---|---|---|
-| R-1 | Rotation integration test | Passed |
-| R-2 | Rollback dry run in staging | Passed |
-| R-3 | Secret scan on full diff | Passed |
-
-## Acceptance criteria
-
-- AC-1: Rotation script updates the active signing key with overlap.
-- AC-2: Rollback restores the previous key within the overlap window.
-
-## Required evidence
-
-| Criterion | Evidence required | Result |
-|---|---|---|
-| AC-1 | Rotation integration test | Passed |
-| AC-2 | Rollback test | Passed |
+| Requirement ID | Evidence | Result |
+| --- | --- | --- |
+| R-1 | Security unit test `crypto_at_rest_test.go` | Passed |
+| R-2 | Integration test `rate_limit_test.go` | Passed |
 
 ## Negative-path and boundary tests
 
-- Rotation with a corrupted key entry.
-- Rotation when the overlap window has elapsed.
-- Concurrent session issuance during rotation.
+- Malformed tokens are rejected with HTTP 401.
+- Exactly five failed attempts pass; the sixth is locked out.
 
 ## Integration verification
 
-Staging: rotation ran against the staging secret store, sessions remained valid
-across the rotation, rollback restored the prior key. Production not touched.
+- Full login flow exercised end-to-end against a local IdP container.
 
 ## Recovery plan
 
-If rotation fails after the new key is active, re-run the stored rollback
-procedure within the overlap window; the old key remains valid until expiry.
+- Restore from encrypted snapshot; key rotation documented in `docs/ops.md`.
 
 ## Approval gates
 
-- [x] Approved by: security-owner@example.com (2026-08-14)
-- [x] Signed off: change-review@example.com (2026-08-14)
+- [x] AG-1: Approved by mallory@example.com on 2026-08-18
 
 ## Independent review
 
-Reviewed by a second engineer who did not author the rotation script; found no
-plaintext-key or overlap-window defects.
+- Second engineer reviewed the crypto module (PR #11).
 
-## Files changed
+## Acceptance criteria
 
-- `internal/session/rotation.go`
-- `internal/session/rotation_test.go`
-- `scripts/rotate-session-keys.sh`
+- AC-1: Credentials are encrypted at rest.
+- AC-2: Brute force is rate limited.
+
+## Required evidence
+
+| AC ID | Evidence | Result |
+| --- | --- | --- |
+| AC-1 | Security unit test `crypto_at_rest_test.go` | Passed |
+| AC-2 | Integration test `rate_limit_test.go` | Passed |
 
 ## Verification
 
 ### Baseline
 
-`go test ./internal/session` — 31 passed, 0 failed.
+- `go test ./...` → 55 passed, 0 failed.
 
 ### Final
 
-`go test ./internal/session` — 35 passed, 0 failed. `git diff` secret scan clean.
+- `go test ./...` → 57 passed, 0 failed.
+
+## Files changed
+
+- `internal/auth/crypto.go`
+- `internal/auth/rate_limit.go`
 
 ## Remaining risks
 
-- None unresolved.
+- None identified.
+

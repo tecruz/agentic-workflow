@@ -1,41 +1,13 @@
-# TASK-001: Unclassified task
+# TASK-029: Unknown profile fixture
 
+## Status
+
+Status: done
+Updated: 2026-08-18
 ## Risk profile
 
-Profile: gold-plated
+Profile: wat
 
 ## Profile rationale
 
-This task uses a profile that does not exist.
-
-## Acceptance criteria
-
-- AC-1: This task must be rejected for its unknown profile.
-
-## Required evidence
-
-| Criterion | Evidence required | Result |
-|---|---|---|
-| AC-1 | Validator fixture | Pending |
-
-## Approval gates
-
-- None identified
-
-## Files changed
-
-- `nothing.md`
-
-## Verification
-
-### Baseline
-
-`echo baseline`
-
-### Final
-
-`echo final`
-
-## Remaining risks
-
-- None known.
+Undefined profile.

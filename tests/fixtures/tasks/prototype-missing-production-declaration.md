@@ -1,4 +1,4 @@
-# TASK-012: Prototype missing warning fixture
+# TASK-013: Prototype missing production declaration fixture
 
 ## Status
 
@@ -24,6 +24,6 @@ Prove that the media pipeline keeps 30 fps on the reference device.
 - Only the reference device was tested.
 ## Handoff
 
-No production deployment or irreversible operation: confirmed
+Production readiness: not established
 
 - Notes handed to the product team in `proto/README.md`.

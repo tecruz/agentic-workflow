@@ -1,4 +1,4 @@
-# TASK-014: Standard valid fixture
+# TASK-030: Unchecked gate fixture
 
 ## Status
 
@@ -22,7 +22,7 @@ Standard product/maintenance work with no elevated risk signals.
 | AC-2 | Bench `asset_list_bench_test.go` | Passed |
 ## Approval gates
 
-- [x] AG-1: Approved by alice@example.com on 2026-08-18
+- [ ] AG-1: Approved by alice@example.com on 2026-08-18
 ## Verification
 
 ### Baseline

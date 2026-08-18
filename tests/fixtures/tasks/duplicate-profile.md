@@ -1,4 +1,4 @@
-# TASK-014: Standard valid fixture
+# TASK-024: Duplicate profile fixture
 
 ## Status
 
@@ -10,6 +10,13 @@ Profile: standard
 ## Profile rationale
 
 Standard product/maintenance work with no elevated risk signals.
+## Risk profile
+
+Profile: prototype
+
+## Profile rationale (extra)
+
+Duplicate profile marker.
 ## Acceptance criteria
 
 - AC-1: Asset URLs include a `v=` query parameter.

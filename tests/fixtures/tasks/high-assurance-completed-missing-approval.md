@@ -1,84 +1,83 @@
-# TASK-205: Enable audit log retention toggle
+# TASK-038: High assurance completed missing approval fixture
 
+## Status
+
+Status: done
+Updated: 2026-08-18
 ## Risk profile
 
 Profile: high-assurance
 
 ## Profile rationale
 
-Affects privacy-regulated data retention. Escalated to high-assurance.
+Authentication is safety-critical: escalate to high-assurance.
 
 ## Requirements
 
-- R-1: Audit log retention is configurable per environment.
-- R-2: Lowering retention below the regulatory minimum is impossible.
+- R-1: Credentials are stored at rest encrypted.
+- R-2: Failed login attempts are rate limited.
 
 ## Risk analysis
 
-Threat: an operator lowers retention below the regulatory minimum and loses
-mandated records. Blast radius: regulatory exposure. Mitigations: hard floor
-enforced in code, approval required to change the floor.
+Threat model: credential theft from disk and online brute force. Mitigations:
+AES-GCM at rest with a key derived via Argon2id; per-account lockout after
+five failed attempts.
 
 ## Requirement-to-evidence
 
-| Requirement | Evidence required | Result |
-|---|---|---|
-| R-1 | Config integration test | Passed |
-| R-2 | Floor enforcement test | Passed |
-
-## Acceptance criteria
-
-- AC-1: Retention floor cannot be set below the regulatory minimum.
-- AC-2: Config change requires an approval record.
-
-## Required evidence
-
-| Criterion | Evidence required | Result |
-|---|---|---|
-| AC-1 | Negative-path test | Passed |
-| AC-2 | Approval record test | Passed |
+| Requirement ID | Evidence | Result |
+| --- | --- | --- |
+| R-1 | Security unit test `crypto_at_rest_test.go` | Passed |
+| R-2 | Integration test `rate_limit_test.go` | Passed |
 
 ## Negative-path and boundary tests
 
-- Retention set below the floor.
-- Retention at exactly the floor.
+- Malformed tokens are rejected with HTTP 401.
+- Exactly five failed attempts pass; the sixth is locked out.
 
 ## Integration verification
 
-Staging: config toggle exercised in staging; floor rejection verified.
+- Full login flow exercised end-to-end against a local IdP container.
 
 ## Recovery plan
 
-Restore the prior retention value from the last approved config; the change is
-reversible via the existing config pipeline.
+- Restore from encrypted snapshot; key rotation documented in `docs/ops.md`.
 
 ## Approval gates
 
-- [ ] Awaiting approval from compliance-owner@example.com
+- [ ] AG-1: Approved by mallory@example.com on 2026-08-18
 
 ## Independent review
 
-Reviewed by a second engineer; confirmed the floor cannot be bypassed.
+- Second engineer reviewed the crypto module (PR #11).
 
-## Files changed
+## Acceptance criteria
 
-- `internal/audit/retention.go`
-- `internal/audit/retention_test.go`
+- AC-1: Credentials are encrypted at rest.
+- AC-2: Brute force is rate limited.
+
+## Required evidence
+
+| AC ID | Evidence | Result |
+| --- | --- | --- |
+| AC-1 | Security unit test `crypto_at_rest_test.go` | Passed |
+| AC-2 | Integration test `rate_limit_test.go` | Passed |
 
 ## Verification
 
 ### Baseline
 
-`go test ./internal/audit` — 14 passed, 0 failed.
+- `go test ./...` → 55 passed, 0 failed.
 
 ### Final
 
-`go test ./internal/audit` — 17 passed, 0 failed.
+- `go test ./...` → 57 passed, 0 failed.
+
+## Files changed
+
+- `internal/auth/crypto.go`
+- `internal/auth/rate_limit.go`
 
 ## Remaining risks
 
-- None unresolved.
-
-## Status
-
-Status: done
+- None identified.

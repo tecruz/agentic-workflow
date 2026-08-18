@@ -86,6 +86,10 @@ Describe 'install.ps1' {
             $manifest -match "\.agentic/profiles/README\.md`tmanaged" | Should -Be $true
             $manifest -match "\.agentic/scripts/validate-task\.ps1`tmanaged" | Should -Be $true
             $manifest -match "\.agentic/templates/task\.md`tmanaged" | Should -Be $true
+            # the installed validator runs directly and classifies a valid task
+            $repoFixture = Join-Path $repoRoot 'tests\fixtures\tasks\standard-valid.md'
+            & (Join-Path $tmp '.agentic\scripts\validate-task.ps1') $repoFixture *> $null
+            $LASTEXITCODE | Should -Be 0
         }
         finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
     }

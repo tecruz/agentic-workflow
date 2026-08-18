@@ -1,9 +1,11 @@
-# TASK-014: Standard valid fixture
+# TASK-023: Duplicate status fixture
 
 ## Status
 
 Status: done
 Updated: 2026-08-18
+Status: planned
+Updated: 2026-08-19
 ## Risk profile
 
 Profile: standard

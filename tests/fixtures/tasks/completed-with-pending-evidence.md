@@ -1,48 +1,40 @@
-# TASK-103: Add pagination to list endpoint
-
-## Risk profile
-
-Profile: standard
-
-## Profile rationale
-
-Ordinary product work. No escalation signals apply.
-
-## Acceptance criteria
-
-- AC-1: List endpoint accepts `page` and `page_size` parameters.
-- AC-2: Responses include a total count.
-
-## Required evidence
-
-| Criterion | Evidence required | Result |
-|---|---|---|
-| AC-1 | Unit test `list_test.go` | Pending |
-| AC-2 | Contract test | Pending |
-
-## Approval gates
-
-- None identified
-
-## Files changed
-
-- `internal/api/list.go`
-- `internal/api/list_test.go`
-
-## Verification
-
-### Baseline
-
-`go test ./internal/api` — 44 passed, 0 failed.
-
-### Final
-
-`go test ./internal/api` — 45 passed, 0 failed.
-
-## Remaining risks
-
-- None known.
+# TASK-017: Completed with pending evidence fixture
 
 ## Status
 
 Status: done
+Updated: 2026-08-18
+## Risk profile
+
+Profile: standard
+## Profile rationale
+
+Standard product/maintenance work with no elevated risk signals.
+## Acceptance criteria
+
+- AC-1: Asset URLs include a `v=` query parameter.
+
+## Required evidence
+
+| AC ID | Evidence | Result |
+| --- | --- | --- |
+| AC-1 | Unit test `asset_url_test.go` | Pending |
+## Approval gates
+
+- [x] AG-1: Approved by alice@example.com on 2026-08-18
+## Verification
+
+### Baseline
+
+- `go test ./...` → 42 passed, 0 failed.
+
+### Final
+
+- `go test ./...` → 42 passed, 0 failed.
+## Files changed
+
+- `internal/assets/url.go`
+- `internal/assets/url_test.go`
+## Remaining risks
+
+- None identified.

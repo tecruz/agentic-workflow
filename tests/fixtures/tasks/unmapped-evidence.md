@@ -1,4 +1,4 @@
-# TASK-014: Standard valid fixture
+# TASK-020: Unmapped evidence fixture
 
 ## Status
 
@@ -19,7 +19,6 @@ Standard product/maintenance work with no elevated risk signals.
 | AC ID | Evidence | Result |
 | --- | --- | --- |
 | AC-1 | Unit test `asset_url_test.go` | Passed |
-| AC-2 | Bench `asset_list_bench_test.go` | Passed |
 ## Approval gates
 
 - [x] AG-1: Approved by alice@example.com on 2026-08-18

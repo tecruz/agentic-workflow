@@ -1,4 +1,4 @@
-# TASK-035: High assurance missing recovery plan fixture
+# TASK-039: High assurance unmapped matrix fixture
 
 ## Status
 
@@ -39,6 +39,9 @@ five failed attempts.
 
 - Full login flow exercised end-to-end against a local IdP container.
 
+## Recovery plan
+
+- Restore from encrypted snapshot; key rotation documented in `docs/ops.md`.
 
 ## Approval gates
 

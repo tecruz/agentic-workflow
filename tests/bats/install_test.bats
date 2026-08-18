@@ -56,6 +56,8 @@ configure_test_git_identity() {
     [ -f .agentic/scripts/validate-task.sh ]
     [ -f .agentic/scripts/validate-task.ps1 ]
     [ -f .agentic/templates/task.md ]
+    # validate-task.sh must be executable in the installed tree
+    [ -x .agentic/scripts/validate-task.sh ]
     # all new files are framework-managed and recorded in the manifest
     grep -q $'\.agentic/profiles/README\.md\tmanaged' .agentic/install-manifest.tsv
     grep -q $'\.agentic/scripts/validate-task\.sh\tmanaged' .agentic/install-manifest.tsv
@@ -793,6 +795,13 @@ keep me" ]
     [ -x .agentic/scripts/verify.sh ]
     run ./.agentic/scripts/verify.sh
     [ "$status" -eq 3 ]
+}
+
+@test "installed task validator keeps its executable bit and runs directly" {
+    bash "$INSTALL" . >/dev/null 2>&1
+    [ -x .agentic/scripts/validate-task.sh ]
+    run ./.agentic/scripts/validate-task.sh --handoff "$REPO_ROOT/tests/fixtures/tasks/standard-valid.md"
+    [ "$status" -eq 0 ]
 }
 
 @test "--detect-checks refuses an .agentic symlink to an outside directory" {

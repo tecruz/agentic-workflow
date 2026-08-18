@@ -1,7 +1,12 @@
 # TASK-NNN: Title
 
+## Status
+
+Status: planned
+Updated: 2026-08-18
+
 > Copy this template into `.agentic/tasks/` when planning a task. Every task
-> declares a risk profile, the required evidence for that profile, and its
+> declares a risk profile, status, the required evidence for that profile, and its
 > approval gates. Choose the profile per `.agentic/profiles/README.md`; the
 > default is `standard`.
 
@@ -20,14 +25,14 @@ Explain why this level applies and identify any escalation signals.
 
 ## Required evidence
 
-| Criterion | Evidence required | Result |
-|---|---|---|
+| AC ID | Evidence | Result |
+| --- | --- | --- |
 | AC-1 | Unit test | Pending |
 | AC-2 | Integration test | Pending |
 
 ## Approval gates
 
-- None identified
+- [ ] AG-1: Approved by <approver> on YYYY-MM-DD
 
 ## Context modules
 

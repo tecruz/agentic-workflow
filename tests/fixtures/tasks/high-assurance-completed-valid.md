@@ -1,89 +1,83 @@
-# TASK-204: Ship zero-downtime deployment gate
+# TASK-037: High assurance completed valid fixture
 
+## Status
+
+Status: done
+Updated: 2026-08-18
 ## Risk profile
 
 Profile: high-assurance
 
 ## Profile rationale
 
-Affects production infrastructure. Escalated to high-assurance.
+Authentication is safety-critical: escalate to high-assurance.
 
 ## Requirements
 
-- R-1: Deployments require a passing health check before cutover.
-- R-2: The gate can be bypassed only with a recorded human approval.
+- R-1: Credentials are stored at rest encrypted.
+- R-2: Failed login attempts are rate limited.
 
 ## Risk analysis
 
-Threat: cutover to an unhealthy deployment causes an outage. Blast radius:
-all production traffic. Mitigations: mandatory health check, approval-gated
-bypass, staged rollout with automatic rollback.
+Threat model: credential theft from disk and online brute force. Mitigations:
+AES-GCM at rest with a key derived via Argon2id; per-account lockout after
+five failed attempts.
 
 ## Requirement-to-evidence
 
-| Requirement | Evidence required | Result |
-|---|---|---|
-| R-1 | Deployment integration test | Passed |
-| R-2 | Approval-record test | Passed |
-
-## Acceptance criteria
-
-- AC-1: Cutover is blocked when the health check fails.
-- AC-2: Bypass writes an approval record to the audit log.
-
-## Required evidence
-
-| Criterion | Evidence required | Result |
-|---|---|---|
-| AC-1 | Negative-path deploy test | Passed |
-| AC-2 | Audit log assertion | Passed |
+| Requirement ID | Evidence | Result |
+| --- | --- | --- |
+| R-1 | Security unit test `crypto_at_rest_test.go` | Passed |
+| R-2 | Integration test `rate_limit_test.go` | Passed |
 
 ## Negative-path and boundary tests
 
-- Health check fails at cutover.
-- Health check times out.
-- Bypass without an approval record.
+- Malformed tokens are rejected with HTTP 401.
+- Exactly five failed attempts pass; the sixth is locked out.
 
 ## Integration verification
 
-Staging: deploy gate exercised against staging environment; block and bypass
-paths both verified.
+- Full login flow exercised end-to-end against a local IdP container.
 
 ## Recovery plan
 
-Re-enable the mandatory gate and redeploy the last known-good release; the
-rollback task is fully automated.
+- Restore from encrypted snapshot; key rotation documented in `docs/ops.md`.
 
 ## Approval gates
 
-- [x] Approved by: infra-owner@example.com (2026-08-17)
-- [x] Signed off: change-review@example.com (2026-08-17)
+- [x] AG-1: Approved by mallory@example.com on 2026-08-18
 
 ## Independent review
 
-Reviewed by an engineer who did not author the gate; confirmed the health
-check cannot be silently skipped.
+- Second engineer reviewed the crypto module (PR #11).
 
-## Files changed
+## Acceptance criteria
 
-- `deploy/gate.sh`
-- `deploy/gate_test.sh`
-- `deploy/audit.go`
+- AC-1: Credentials are encrypted at rest.
+- AC-2: Brute force is rate limited.
+
+## Required evidence
+
+| AC ID | Evidence | Result |
+| --- | --- | --- |
+| AC-1 | Security unit test `crypto_at_rest_test.go` | Passed |
+| AC-2 | Integration test `rate_limit_test.go` | Passed |
 
 ## Verification
 
 ### Baseline
 
-`deploy/gate_test.sh` — 6 passed, 0 failed.
+- `go test ./...` → 55 passed, 0 failed.
 
 ### Final
 
-`deploy/gate_test.sh` — 9 passed, 0 failed. Staging dry run passed.
+- `go test ./...` → 57 passed, 0 failed.
+
+## Files changed
+
+- `internal/auth/crypto.go`
+- `internal/auth/rate_limit.go`
 
 ## Remaining risks
 
-- None unresolved.
-
-## Status
-
-Status: done
+- None identified.

@@ -101,7 +101,17 @@ Before planning, classify the task's risk profile per `.agentic/profiles/README.
 **Goal**: Give the next human or agent everything needed to review, continue, or merge.
 
 1. **Validate the Task File**:
-   - Run `.agentic/scripts/validate-task.sh` or `.agentic/scripts/validate-task.ps1` on the task file. Exit codes: `0` VALID, `1` INVALID, `2` BLOCKED (missing evidence or approval on a completed task).
+   - Keep the task's `## Status` (`Status:` + `Updated:`) current as work
+     progresses.
+   - Before handoff, mark the task `done` and run
+     `.agentic/scripts/validate-task.sh --handoff` or
+     `.agentic/scripts/validate-task.ps1 -Handoff`. The handoff gate requires
+     `Status: done`, resolved evidence, and checked approval gates. Exit codes:
+     `0` VALID, `1` INVALID, `2` BLOCKED (missing/unresolved evidence or
+     unchecked approval on a completed task, or `--handoff` on a task that is
+     not `done`).
+   - Validate the task file with the handoff flag *after* marking it done, so
+     the recorded state is the one that gets reviewed.
 2. **Update State**:
    - Mark task status and update `.agentic/STATUS.md`.
    - Record architectural decisions as immutable ADRs in `.agentic/decisions/`.

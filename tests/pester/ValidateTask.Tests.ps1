@@ -70,6 +70,92 @@ Describe 'validate-task.ps1 risk-profile validator' {
         $LASTEXITCODE | Should -Be 1
     }
 
+    It 'INVALID (1) for a prototype task missing the no-production-deployment declaration' {
+        Invoke-Validator 'prototype-missing-production-declaration.md' | Should -Be 1
+    }
+
+    It 'VALID (0) for an in-progress standard task' {
+        Invoke-Validator 'standard-in-progress.md' | Should -Be 0
+    }
+
+    It 'BLOCKED (2) for -Handoff on a task that is not done' {
+        & $validate -Handoff (Join-Path $fixtures 'standard-in-progress.md') *> $null
+        $LASTEXITCODE | Should -Be 2
+    }
+
+    It 'VALID (0) for -Handoff on a done standard task' {
+        & $validate -Handoff (Join-Path $fixtures 'standard-valid.md') *> $null
+        $LASTEXITCODE | Should -Be 0
+    }
+
+    It 'BLOCKED (2) for a completed task with Partial required evidence' {
+        Invoke-Validator 'completed-with-partial-evidence.md' | Should -Be 2
+    }
+
+    It 'INVALID (1) for a completed task with a blank evidence result' {
+        Invoke-Validator 'completed-with-blank-result.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when required evidence does not map every criterion' {
+        Invoke-Validator 'unmapped-evidence.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when acceptance criteria repeat an identifier' {
+        Invoke-Validator 'duplicate-ac.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) for an unrecognized status value' {
+        Invoke-Validator 'unknown-status.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when Status is declared more than once' {
+        Invoke-Validator 'duplicate-status.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when Profile is declared more than once' {
+        Invoke-Validator 'duplicate-profile.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when all required words live in a single heading' {
+        Invoke-Validator 'single-heading-all-words.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when the profile heading is split' {
+        Invoke-Validator 'split-headings.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when Baseline is not scoped under Verification' {
+        Invoke-Validator 'baseline-outside-verification.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when required headings are inside a fenced code block' {
+        Invoke-Validator 'headings-in-fenced-code.md' | Should -Be 1
+    }
+
+    It 'BLOCKED (2) for a completed task with an unchecked approval gate' {
+        Invoke-Validator 'unchecked-gate.md' | Should -Be 2
+    }
+
+    It 'INVALID (1) when approval is negated rather than granted' {
+        Invoke-Validator 'negated-approval.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when approval is recorded as not granted' {
+        Invoke-Validator 'approval-not-granted.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when high-assurance evidence mapping omits a requirement' {
+        Invoke-Validator 'high-assurance-unmapped-matrix.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) for an empty high-assurance risk analysis' {
+        Invoke-Validator 'high-assurance-empty-risk-analysis.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when a high-assurance task declares None identified approvals' {
+        Invoke-Validator 'high-assurance-none-identified.md' | Should -Be 1
+    }
+
     It 'PowerShell and Bash classifiers agree on every fixture' {
         if (-not (Get-Command bash -ErrorAction SilentlyContinue)) { return }
         # Probe: bash must be able to invoke the validator and read the

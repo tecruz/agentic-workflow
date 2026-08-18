@@ -167,12 +167,13 @@ DISCOVER → CLASSIFY RISK → PLAN → IMPLEMENT → VERIFY → HANDOFF
 4. **Implement** — minimal, style-matching changes per `.agentic/rules/`.
 5. **Verify** — run the project's checks. Self-heal failures with at most
    three evidence-based repair cycles; never weaken a test to go green.
-6. **Handoff** — validate the task file with
-   `.agentic/scripts/validate-task.sh` / `validate-task.ps1`, then report
-   files changed, verification commands with exit codes and results,
-   pre-existing failures, environment blockers, remaining risks, and commit
-   status. Commits happen only when explicitly requested or permitted by
-   project policy.
+6. **Handoff** — mark the task `done` under `## Status`, then validate it with
+   `.agentic/scripts/validate-task.sh --handoff` / `validate-task.ps1 -Handoff`
+   (the handoff gate requires `Status: done`, resolved evidence, and checked
+   approval gates), then report files changed, verification commands with exit
+   codes and results, pre-existing failures, environment blockers, remaining
+   risks, and commit status. Commits happen only when explicitly requested or
+   permitted by project policy.
 
 Full details: [`.agentic/WORKFLOW.md`](.agentic/WORKFLOW.md). Canonical agent
 instructions: [`AGENTS.md`](AGENTS.md).

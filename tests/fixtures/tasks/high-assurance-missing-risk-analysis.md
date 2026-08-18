@@ -1,74 +1,78 @@
-# TASK-202: Enable two-factor authentication enforcement
+# TASK-034: High assurance missing risk analysis fixture
 
+## Status
+
+Status: done
+Updated: 2026-08-18
 ## Risk profile
 
 Profile: high-assurance
 
 ## Profile rationale
 
-Affects authentication. Escalated to high-assurance.
+Authentication is safety-critical: escalate to high-assurance.
 
 ## Requirements
 
-- R-1: All administrative accounts require 2FA within 14 days.
-- R-2: Users without 2FA cannot perform administrative actions.
+- R-1: Credentials are stored at rest encrypted.
+- R-2: Failed login attempts are rate limited.
 
-## Acceptance criteria
-
-- AC-1: Enforcement flag gates administrative actions on 2FA status.
-- AC-2: Grace period is configurable.
-
-## Required evidence
-
-| Criterion | Evidence required | Result |
-|---|---|---|
-| AC-1 | Auth integration test | Passed |
-| AC-2 | Config unit test | Passed |
 
 ## Requirement-to-evidence
 
-| Requirement | Evidence required | Result |
-|---|---|---|
-| R-1 | Enforcement integration test | Passed |
-| R-2 | Negative-path auth test | Passed |
+| Requirement ID | Evidence | Result |
+| --- | --- | --- |
+| R-1 | Security unit test `crypto_at_rest_test.go` | Passed |
+| R-2 | Integration test `rate_limit_test.go` | Passed |
 
 ## Negative-path and boundary tests
 
-- Administrative action attempted without 2FA.
-- Boundary: user exactly at the 14-day deadline.
+- Malformed tokens are rejected with HTTP 401.
+- Exactly five failed attempts pass; the sixth is locked out.
 
 ## Integration verification
 
-Staging: enforcement behavior verified against the staging auth service.
+- Full login flow exercised end-to-end against a local IdP container.
 
 ## Recovery plan
 
-Disable the enforcement flag and re-enable the grace period to restore prior
-behavior; feature flag is the single rollback switch.
+- Restore from encrypted snapshot; key rotation documented in `docs/ops.md`.
 
 ## Approval gates
 
-- [x] Approved by: security-owner@example.com (2026-08-15)
+- [x] AG-1: Security review approved by mallory@example.com on 2026-08-18
 
 ## Independent review
 
-Reviewed by an engineer outside the auth team.
+- Second engineer reviewed the crypto module (PR #11).
 
-## Files changed
+## Acceptance criteria
 
-- `internal/auth/enforcement.go`
-- `internal/auth/enforcement_test.go`
+- AC-1: Credentials are encrypted at rest.
+- AC-2: Brute force is rate limited.
+
+## Required evidence
+
+| AC ID | Evidence | Result |
+| --- | --- | --- |
+| AC-1 | Security unit test `crypto_at_rest_test.go` | Passed |
+| AC-2 | Integration test `rate_limit_test.go` | Passed |
 
 ## Verification
 
 ### Baseline
 
-`go test ./internal/auth` — 27 passed, 0 failed.
+- `go test ./...` → 55 passed, 0 failed.
 
 ### Final
 
-`go test ./internal/auth` — 30 passed, 0 failed.
+- `go test ./...` → 57 passed, 0 failed.
+
+## Files changed
+
+- `internal/auth/crypto.go`
+- `internal/auth/rate_limit.go`
 
 ## Remaining risks
 
-- None unresolved.
+- None identified.

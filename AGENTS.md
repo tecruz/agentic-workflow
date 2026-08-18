@@ -29,7 +29,7 @@ DISCOVER → CLASSIFY RISK → PLAN → IMPLEMENT → VERIFY → HANDOFF
 3. **Plan**: Decompose the request into atomic, verifiable steps. Create or update a task file in `.agentic/tasks/` using `.agentic/templates/task.md`, declaring the profile and its required evidence. Ask before destructive or ambiguous actions.
 4. **Implement**: Make minimal, style-matching changes per `.agentic/rules/`. Comments explain *why*, not *what*.
 5. **Verify**: Run the project's checks via `.agentic/scripts/verify.sh` / `verify.ps1` (see Section 7). Attempt at most three evidence-based repair cycles; then stop, preserve the latest useful state, and report the blocker. Never weaken a failing test merely to go green.
-6. **Handoff**: Validate the task file with `.agentic/scripts/validate-task.sh` / `validate-task.ps1`. Report files changed, verification commands run with exit codes and results, pre-existing failures, environment blockers, remaining risks, whether any commit was made, and the profile's handoff evidence. Commit only when explicitly requested or permitted by documented project policy.
+6. **Handoff**: Mark the task `done` under `## Status`, then validate the task file with `.agentic/scripts/validate-task.sh --handoff` / `validate-task.ps1 -Handoff`. Report files changed, verification commands run with exit codes and results, pre-existing failures, environment blockers, remaining risks, whether any commit was made, and the profile's handoff evidence. Commit only when explicitly requested or permitted by documented project policy.
 
 ---
 

@@ -1,4 +1,4 @@
-# TASK-014: Standard valid fixture
+# TASK-027: Baseline outside verification fixture
 
 ## Status
 
@@ -23,11 +23,11 @@ Standard product/maintenance work with no elevated risk signals.
 ## Approval gates
 
 - [x] AG-1: Approved by alice@example.com on 2026-08-18
-## Verification
-
 ### Baseline
 
-- `go test ./...` → 42 passed, 0 failed.
+- baseline must be scoped under Verification.
+
+## Verification
 
 ### Final
 

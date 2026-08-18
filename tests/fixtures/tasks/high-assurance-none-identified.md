@@ -1,4 +1,4 @@
-# TASK-035: High assurance missing recovery plan fixture
+# TASK-040: High assurance none identified fixture
 
 ## Status
 
@@ -39,10 +39,14 @@ five failed attempts.
 
 - Full login flow exercised end-to-end against a local IdP container.
 
+## Recovery plan
+
+- Restore from encrypted snapshot; key rotation documented in `docs/ops.md`.
 
 ## Approval gates
 
-- [x] AG-1: Security review approved by mallory@example.com on 2026-08-18
+- None identified
+
 
 ## Independent review
 

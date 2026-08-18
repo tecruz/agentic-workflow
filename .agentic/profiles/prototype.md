@@ -28,29 +28,33 @@ required_evidence:
 
 A prototype task file must include:
 
-- **Task goal** — what the experiment or spike is trying to learn.
-- **Known limitations** — what the prototype does not cover.
-- **Smoke verification** — the basic smoke check that the prototype runs.
-- **Handoff** — outcome, smoke verification result, known limitations, and the
-  statement `Production readiness: not established`.
+- **Risk profile** - the `Profile: prototype` declaration.
+- **Profile rationale** - why this level applies.
+- **Task goal** - what the experiment or spike is trying to learn.
+- **Smoke verification** - the basic smoke check that the prototype runs.
+- **Known limitations** - what the prototype does not cover.
+- **Handoff** - outcome, smoke verification result, known limitations, and
+  both declarations below.
 
-A prototype must declare that no production deployment or irreversible
-operation was performed.
+A prototype must declare, in its `## Handoff` section:
+
+```text
+Production readiness: not established
+No production deployment or irreversible operation: confirmed
+```
+
+The validator rejects a prototype task that omits either declaration.
 
 ## Forbidden
 
 - Production deployment or irreversible operations.
 - Claiming production readiness.
 - Bypassing guarded actions that still require approval (see `AGENTS.md`
-  Approval Gates) — a lower profile never overrides mandatory safety or
+  Approval Gates) - a lower profile never overrides mandatory safety or
   approval constraints.
 
 ## Handoff
 
-```text
-Profile: prototype
-Outcome:
-Smoke verification:
-Known limitations:
-Production readiness: not established
-```
+Mark the task `done` under `## Status` and run the validator with
+`--handoff` (Bash) / `-Handoff` (PowerShell) as the final gate before
+handing off. The handoff must carry both prototype declarations above.

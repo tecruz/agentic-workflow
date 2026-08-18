@@ -30,15 +30,18 @@ required_evidence:
 
 A standard task file must include:
 
-- **Acceptance criteria** — observable, testable conditions with identifiers
+- **Risk profile** - the `Profile: standard` declaration.
+- **Profile rationale** - why this level applies and any escalation signals.
+- **Acceptance criteria** - observable, testable conditions with identifiers
   (`AC-N`).
-- **Required evidence** — a table mapping each criterion to the evidence that
-  satisfies it.
-- **Files changed** — the list of files touched by the task.
-- **Baseline verification** — the verification result before changes began.
-- **Final verification** — the verification result after the final
-  modification.
-- **Remaining risks** — known risks, blockers, and open questions.
+- **Required evidence** - a table mapping each criterion to the evidence that
+  satisfies it and a result token (`passed`, `satisfied`, `n/a`, `pending`,
+  `partial`, `blocked`, `missing`, `not-run`).
+- **Approval gates** - structured `AG-N` records
+  (`- [x] AG-1: Approved by <approver> on YYYY-MM-DD`) or `None identified`.
+- **Verification** - `### Baseline` and `### Final` scoped under it.
+- **Files changed** - the list of files touched by the task.
+- **Remaining risks** - known risks, blockers, and open questions.
 
 ## Escalation
 
@@ -48,11 +51,7 @@ automatically; they must not silently downgrade.
 
 ## Handoff
 
-```text
-Profile: standard
-Acceptance criteria:
-Files changed:
-Baseline verification:
-Final verification:
-Remaining risks:
-```
+Mark the task `done` under `## Status` and run the validator with
+`--handoff` (Bash) / `-Handoff` (PowerShell) as the final gate before
+handing off. Handoff requires `Status: done`, resolved evidence, and checked
+approval gates.
