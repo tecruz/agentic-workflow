@@ -16,7 +16,7 @@ Profile: standard
 
 ## Profile rationale
 
-Explain why this level applies and identify any escalation signals.
+[Explain why this level applies and identify any escalation signals.]
 
 ## Acceptance criteria
 

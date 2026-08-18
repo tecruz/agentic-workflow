@@ -308,6 +308,34 @@ Describe 'validate-task.ps1 risk-profile validator' {
         Invoke-Validator 'approval-early-date-invalid.md' | Should -Be 1
     }
 
+    It 'BLOCKED (2) when an acceptance criterion keeps the template placeholder' {
+        Invoke-Validator 'done-template-acceptance-criterion-blocked.md' | Should -Be 2
+    }
+
+    It 'BLOCKED (2) when an evidence description is a placeholder' {
+        Invoke-Validator 'done-placeholder-evidence-description-blocked.md' | Should -Be 2
+    }
+
+    It 'BLOCKED (2) when a high-assurance requirement keeps the template placeholder' {
+        Invoke-Validator 'high-assurance-template-requirement-blocked.md' | Should -Be 2
+    }
+
+    It 'BLOCKED (2) when the profile rationale keeps the template instruction' {
+        Invoke-Validator 'done-template-profile-rationale-blocked.md' | Should -Be 2
+    }
+
+    It 'BLOCKED (2) when Files changed is a table of placeholders' {
+        Invoke-Validator 'done-placeholder-files-table-blocked.md' | Should -Be 2
+    }
+
+    It 'INVALID (1) when a high-assurance section is a table of placeholders' {
+        Invoke-Validator 'high-assurance-placeholder-risk-table-invalid.md' | Should -Be 1
+    }
+
+    It 'VALID (0) when a high-assurance section is a real table' {
+        Invoke-Validator 'high-assurance-real-risk-table-valid.md' | Should -Be 0
+    }
+
     It 'PowerShell and Bash classifiers agree on every fixture' {
         if (-not (Get-Command bash -ErrorAction SilentlyContinue)) { return }
         # Probe: bash must be able to invoke the validator and read the

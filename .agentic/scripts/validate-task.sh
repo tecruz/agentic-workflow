@@ -176,6 +176,9 @@ validate_table() {
         [ -n "$id" ] || continue
         id="$(printf '%s' "$id" | lower)"
         [ -n "$ev" ] || fail_invalid "$label row '$id' has an empty evidence description."
+        if [ "$COMPLETED" -eq 1 ] && [ "$(content_class "$ev")" = "placeholder" ]; then
+            fail_blocked "$label row '$id' has a placeholder evidence description."
+        fi
         [ -n "$res" ] || fail_invalid "$label row '$id' has an empty result."
         lres="$(printf '%s' "$res" | lower)"
         case " $RESULT_ALLOWED " in
@@ -236,13 +239,34 @@ validate_date() {
     return 0
 }
 
+# table_row_has_content <row> — returns 0 when at least one data cell is real
+# (non-placeholder) content. Cells that are bracket/angle markers, bare dates,
+# TBD / TODO / Pending, or blank do not count, so a table of template
+# placeholders is not treated as real evidence.
+table_row_has_content() {
+    local line="$1" oldifs cell
+    line="$(printf '%s' "$line" | sed -E 's/^[[:space:]]*\|//; s/\|[[:space:]]*$//')"
+    oldifs="$IFS"
+    IFS='|'
+    for cell in $line; do
+        cell="$(printf '%s' "$cell" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+        if [ -n "$cell" ] && [ "$(content_class "$cell")" = "content" ]; then
+            IFS="$oldifs"
+            return 0
+        fi
+    done
+    IFS="$oldifs"
+    return 1
+}
+
 # content_class <content> — classifies authoritative content lines as
 # "content" (real evidence), "placeholder" (lines exist but none are real),
 # or "empty" (no lines at all). Headings, table separators, blank bullets,
 # and placeholder text such as TBD / TODO / Pending / None provided do not
 # count as content. Unchanged template markers — a whole bracketed token,
-# an angle-bracket token, or a bare ISO date — also count as placeholders.
-# A table counts only once a data row follows its header.
+# an angle-bracket token, a bare ISO date, or the profile-rationale
+# instruction — also count as placeholders. A table counts only once a data
+# row with at least one real cell follows its header.
 content_class() {
     local line text table_header_seen saw_lines
     table_header_seen=0
@@ -256,16 +280,19 @@ content_class() {
         saw_lines=1
         if printf '%s' "$line" | grep -qE '^[[:space:]]*\|.*\|.*\|[[:space:]]*$'; then
             if [ "$table_header_seen" -eq 1 ]; then
-                echo content
-                return 0
+                table_row_has_content "$line" && { echo content; return 0; }
+                continue
             fi
             table_header_seen=1
             continue
         fi
         text="$(printf '%s' "$line" | sed -E 's/^[[:space:]]*[-*+][[:space:]]+//; s/[[:space:]]+$//')"
         [ -n "$text" ] || continue
-        printf '%s' "$text" | grep -qiE '^(tbd|todo|pending|none[[:space:]]+provided|none[[:space:]]+identified)([[:space:]]*:.*)?$|^[^:]+:[[:space:]]*(tbd|todo|pending|none[[:space:]]+provided|none[[:space:]]+identified)[[:space:]]*$|^\[.*\]$|^<.*>$|^[0-9]{4}-[0-9]{2}-[0-9]{2}$' \
+        printf '%s' "$text" | grep -qiE '^(tbd|todo|pending|none[[:space:]]+provided|none[[:space:]]+identified)([[:space:]]*:.*)?$|^[^:]+:[[:space:]]*(tbd|todo|pending|none[[:space:]]+provided|none[[:space:]]+identified)[[:space:]]*$|^\[.*\]$|^<.*>$|^[0-9]{4}-[0-9]{2}-[0-9]{2}$|^(tbd|todo|pending)[[:space:]]+.*$' \
             && continue
+        case "$(printf '%s' "$text" | lower | tr -cd '[:alnum:]')" in
+            explainwhythislevelappliesandidentifyanyescalationsignals) continue ;;
+        esac
         echo content
         return 0
     done <<< "$1"
@@ -343,6 +370,20 @@ verify_completion_evidence_none() {
         empty) fail_invalid "completed task must record verification evidence under '$kind'." ;;
         *) fail_blocked "completed task verification under '$kind' is still a placeholder (TBD, TODO, Pending, or similar)." ;;
     esac
+}
+
+# check_completion_descriptions <content> <id-pattern> <kind> — a completed task
+# must give every declared identifier a real, non-placeholder description.
+check_completion_descriptions() {
+    local content="$1" idpat="$2" kind="$3" line id desc
+    while IFS= read -r line || [ -n "$line" ]; do
+        id="$(printf '%s' "$line" | grep -oiE "$idpat" | head -1 | lower)"
+        [ -n "$id" ] || continue
+        desc="$(printf '%s' "$line" | sed -nE "s/^.*$idpat[[:space:]]*:?[[:space:]]*(.*)[[:space:]]*$/\1/p")"
+        if [ -z "$desc" ] || [ "$(content_class "$desc")" = "placeholder" ]; then
+            fail_blocked "$kind '$id' has a placeholder description."
+        fi
+    done <<< "$content"
 }
 
 # ---------------------------------------------------------------------------
@@ -549,6 +590,9 @@ if [ "$PROFILE" != "prototype" ]; then
     collect_ids "$ac_content" 'AC-[0-9]+' ac_ids
     [ -n "$ac_ids" ] || fail_invalid "acceptance criteria must declare at least one 'AC-N' identifier."
     [ "$DUP_IDS" -eq 0 ] || fail_invalid "acceptance criteria declare duplicate 'AC-N' identifiers."
+    if [ "$COMPLETED" -eq 1 ]; then
+        check_completion_descriptions "$ac_content" 'AC-[0-9]+' "acceptance criterion"
+    fi
 
     ev_ids=""
     validate_table "required evidence" 'AC-[0-9]+' "required evidence" ev_ids
@@ -567,6 +611,9 @@ if [ "$PROFILE" != "prototype" ]; then
         collect_ids "$req_content" 'R-[0-9]+' r_ids
         [ -n "$r_ids" ] || fail_invalid "high-assurance requirements must declare at least one 'R-N' identifier."
         [ "$DUP_IDS" -eq 0 ] || fail_invalid "high-assurance requirements declare duplicate 'R-N' identifiers."
+        if [ "$COMPLETED" -eq 1 ]; then
+            check_completion_descriptions "$req_content" 'R-[0-9]+' "high-assurance requirement"
+        fi
 
         m_ids=""
         validate_table "requirement-to-evidence" 'R-[0-9]+' "requirement-to-evidence" m_ids

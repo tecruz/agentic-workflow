@@ -392,3 +392,38 @@ classify() {  # classify <fixture>
     classify approval-early-date-invalid.md
     [ "$status" -eq 1 ]
 }
+
+@test "BLOCKED (2) when an acceptance criterion keeps the template placeholder" {
+    classify done-template-acceptance-criterion-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "BLOCKED (2) when an evidence description is a placeholder" {
+    classify done-placeholder-evidence-description-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "BLOCKED (2) when a high-assurance requirement keeps the template placeholder" {
+    classify high-assurance-template-requirement-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "BLOCKED (2) when the profile rationale keeps the template instruction" {
+    classify done-template-profile-rationale-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "BLOCKED (2) when Files changed is a table of placeholders" {
+    classify done-placeholder-files-table-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "INVALID (1) when a high-assurance section is a table of placeholders" {
+    classify high-assurance-placeholder-risk-table-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "VALID (0) when a high-assurance section is a real table" {
+    classify high-assurance-real-risk-table-valid.md
+    [ "$status" -eq 0 ]
+}

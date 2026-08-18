@@ -254,13 +254,28 @@ function Get-SubsectionContent {
     return @()
 }
 
+# Test-TableRowContent — returns true when at least one data cell is real
+# (non-placeholder) content. Cells that are bracket/angle markers, bare dates,
+# TBD / TODO / Pending, or blank do not count, so a table of template
+# placeholders is not treated as real evidence.
+function Test-TableRowContent {
+    param([string]$Line)
+    $line = $Line -replace '^\s*\|', '' -replace '\|\s*$', ''
+    foreach ($cell in $line -split '\|') {
+        $cell = $cell.Trim()
+        if ($cell -and ((Get-ContentClass @($cell)) -eq 'content')) { return $true }
+    }
+    return $false
+}
+
 # Get-ContentClass — classifies authoritative content lines as 'content'
 # (real evidence), 'placeholder' (lines exist but none are real), or 'empty'.
 # Headings, table separators, blank bullets, and placeholder text such as
 # TBD / TODO / Pending / None provided do not count as content. Unchanged
-# template markers — a whole bracketed token, an angle-bracket token, or a bare
-# ISO date — also count as placeholders. A table counts only once a data row
-# follows its header.
+# template markers — a whole bracketed token, an angle-bracket token, a bare
+# ISO date, or the profile-rationale instruction — also count as placeholders.
+# A table counts only once a data row with at least one real cell follows its
+# header.
 function Get-ContentClass {
     param([string[]]$Content)
     $tableHeaderSeen = $false
@@ -271,13 +286,17 @@ function Get-ContentClass {
         if ($line -match '---') { continue }
         $sawLines = $true
         if ($line -match '^\s*\|.*\|.*\|\s*$') {
-            if ($tableHeaderSeen) { return 'content' }
+            if ($tableHeaderSeen) {
+                if (Test-TableRowContent $line) { return 'content' }
+                continue
+            }
             $tableHeaderSeen = $true
             continue
         }
         $text = ($line -replace '^\s*[-*+]\s+', '').Trim()
         if (-not $text) { continue }
-        if ($text -match '^(tbd|todo|pending|none\s+provided|none\s+identified)(\s*:.*)?$|^[^:]+:\s*(tbd|todo|pending|none\s+provided|none\s+identified)\s*$|^\[.*\]$|^<.*>$|^\d{4}-\d{2}-\d{2}$') { continue }
+        if ($text -match '^(tbd|todo|pending|none\s+provided|none\s+identified)(\s*:.*)?$|^[^:]+:\s*(tbd|todo|pending|none\s+provided|none\s+identified)\s*$|^\[.*\]$|^<.*>$|^\d{4}-\d{2}-\d{2}$|^(tbd|todo|pending)\s+.*$') { continue }
+        if (($text.ToLowerInvariant() -replace '[^a-z0-9]', '') -eq 'explainwhythislevelappliesandidentifyanyescalationsignals') { continue }
         return 'content'
     }
     if (-not $sawLines) { return 'empty' }
@@ -318,6 +337,20 @@ function Assert-VerificationEvidenceNone {
     Write-Blocked "completed task verification under '$Kind' is still a placeholder (TBD, TODO, Pending, or similar)."
 }
 
+# Assert-CompletionDescriptions — a completed task must give every declared
+# identifier a real, non-placeholder description.
+function Assert-CompletionDescriptions {
+    param([string[]]$ContentLines, [string]$IdPattern, [string]$Kind)
+    foreach ($line in $ContentLines) {
+        $id = [regex]::Match($line, $IdPattern, 'IgnoreCase').Value.ToLowerInvariant()
+        if (-not $id) { continue }
+        $desc = ([regex]::Match($line, "^.*$IdPattern\s*:?\s*(.*?)\s*$", 'IgnoreCase')).Groups[1].Value
+        if (-not $desc -or ((Get-ContentClass @($desc)) -eq 'placeholder')) {
+            Write-Blocked "$Kind '$id' has a placeholder description."
+        }
+    }
+}
+
 function Get-Ids {
     param([string[]]$ContentLines, [string]$Pattern)
     $script:DupIds = $false
@@ -355,6 +388,9 @@ function Test-Table {
         if ($id -notmatch "^$IdPattern$") { continue }
         $idLower = $id.ToLowerInvariant()
         if (-not $ev) { Write-Invalid "$Label row '$idLower' has an empty evidence description." }
+        if ($script:Completed -and ((Get-ContentClass @($ev)) -eq 'placeholder')) {
+            Write-Blocked "$Label row '$idLower' has a placeholder evidence description."
+        }
         if (-not $res) { Write-Invalid "$Label row '$idLower' has an empty result." }
         $lres = $res.ToLowerInvariant()
         if ($AllowedResults -notcontains $lres) {
@@ -446,6 +482,9 @@ if ($ProfileName -ne 'prototype') {
     $acIds = Get-Ids (Get-SectionContent 'acceptance criteria') 'AC-\d+'
     if ($acIds.Count -eq 0) { Write-Invalid "acceptance criteria must declare at least one 'AC-N' identifier." }
     if ($script:DupIds) { Write-Invalid "acceptance criteria declare duplicate 'AC-N' identifiers." }
+    if ($Completed) {
+        Assert-CompletionDescriptions (Get-SectionContent 'acceptance criteria') 'AC-\d+' 'acceptance criterion'
+    }
 
     $evIds = Test-Table 'required evidence' 'AC-\d+' 'required evidence'
     if ($evIds.Count -eq 0) { Write-Invalid "required evidence must map at least one 'AC-N' to evidence." }
@@ -461,6 +500,9 @@ if ($ProfileName -ne 'prototype') {
         $rIds = Get-Ids (Get-SectionContent 'requirements') 'R-\d+'
         if ($rIds.Count -eq 0) { Write-Invalid "high-assurance requirements must declare at least one 'R-N' identifier." }
         if ($script:DupIds) { Write-Invalid "high-assurance requirements declare duplicate 'R-N' identifiers." }
+        if ($Completed) {
+            Assert-CompletionDescriptions (Get-SectionContent 'requirements') 'R-\d+' 'high-assurance requirement'
+        }
 
         $mIds = Test-Table 'requirement-to-evidence' 'R-\d+' 'requirement-to-evidence'
         if ($mIds.Count -eq 0) { Write-Invalid "the requirement-to-evidence matrix must map at least one 'R-N' to evidence." }
