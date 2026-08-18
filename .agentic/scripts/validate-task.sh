@@ -120,14 +120,14 @@ section_content() {
     [ "${#SECTIONS[@]}" -gt 0 ] || return 1
     for i in "${!SECTIONS[@]}"; do
         if [ "${SECTIONS[$i]}" = "$name" ]; then
-            start=$(( SECTION_START[$i] + 1 ))
+            start=$(( SECTION_START[i] + 1 ))
             if [ $(( i + 1 )) -lt "${#SECTIONS[@]}" ]; then
-                end=$(( SECTION_START[$(( i + 1 ))] - 1 ))
+                end=$(( SECTION_START[i + 1] - 1 ))
             else
-                end=$(( ${#LINES[@]} - 1 ))
+                end=$(( ${#CONTENT_LINES[@]} - 1 ))
             fi
             for (( j = start; j <= end; j++ )); do
-                printf '%s\n' "${LINES[$j]}"
+                printf '%s\n' "${CONTENT_LINES[$j]}"
             done
             return 0
         fi
@@ -168,7 +168,7 @@ RESULT_UNRESOLVED=" pending partial blocked missing not-run "
 # <outvar> and sets the globals TABLE_DUP and HAS_UNRESOLVED. Fails on
 # structural problems.
 validate_table() {
-    local section="$1" idpat="$2" label="$3" outvar="$4" content row id ev res lres ids="" seen=""
+    local section="$1" idpat="$2" label="$3" outvar="$4" content id ev res lres ids="" seen=""
     content="$(section_content "$section" || true)"
     TABLE_DUP=0
     HAS_UNRESOLVED=0
@@ -211,7 +211,7 @@ sorted_unique() { printf '%s\n' "$@" | sort -u; }
 # Scan: drop non-authoritative Markdown (fenced code blocks, HTML comments, and
 # blockquote lines) and collect headings, declarations, and content.
 # ---------------------------------------------------------------------------
-LINES=()
+CONTENT_LINES=()
 SECTIONS=()
 SECTION_START=()
 SUBSECTIONS=()
@@ -257,15 +257,15 @@ while IFS= read -r line || [ -n "$line" ]; do
             h="$(normalize_heading "${line#'### '}")"
             SUBSECTIONS+=("$h")
             SUB_SECTION+=("$cur")
-            LINES+=("$line")
+            CONTENT_LINES+=("$line")
             continue
             ;;
         '## '*)
             h="$(normalize_heading "${line#'## '}")"
             SECTIONS+=("$h")
-            SECTION_START+=( "${#LINES[@]}" )
+            SECTION_START+=( "${#CONTENT_LINES[@]}" )
             cur="$h"
-            LINES+=("$line")
+            CONTENT_LINES+=("$line")
             continue
             ;;
     esac
@@ -281,7 +281,7 @@ while IFS= read -r line || [ -n "$line" ]; do
             STATUS="$(printf '%s\n' "$line" | sed -E 's/^[[:space:]]*[-*]*[[:space:]]*\*?[Ss]tatus[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]*$//' | lower)"
         fi
     fi
-    LINES+=("$line")
+    CONTENT_LINES+=("$line")
 done < "$TASK_FILE"
 
 # ---------------------------------------------------------------------------
@@ -375,7 +375,7 @@ if [ "$PROFILE" != "prototype" ]; then
     validate_table "required evidence" 'AC-[0-9]+' "required evidence" ev_ids
     [ -n "$ev_ids" ] || fail_invalid "required evidence must map at least one 'AC-N' to evidence."
     [ "$TABLE_DUP" -eq 0 ] || fail_invalid "required evidence maps a criterion more than once."
-    if [ "$(sorted_unique $ac_ids)" != "$(sorted_unique $ev_ids)" ]; then
+    if [ "$(sorted_unique "$ac_ids")" != "$(sorted_unique "$ev_ids")" ]; then
         fail_invalid "acceptance criteria and required evidence must list exactly the same 'AC-N' identifiers."
     fi
     if [ "$COMPLETED" -eq 1 ] && [ "$HAS_UNRESOLVED" -eq 1 ]; then
@@ -393,7 +393,7 @@ if [ "$PROFILE" != "prototype" ]; then
         validate_table "requirement-to-evidence" 'R-[0-9]+' "requirement-to-evidence" m_ids
         [ -n "$m_ids" ] || fail_invalid "the requirement-to-evidence matrix must map at least one 'R-N' to evidence."
         [ "$TABLE_DUP" -eq 0 ] || fail_invalid "the requirement-to-evidence matrix maps a requirement more than once."
-        if [ "$(sorted_unique $r_ids)" != "$(sorted_unique $m_ids)" ]; then
+        if [ "$(sorted_unique "$r_ids")" != "$(sorted_unique "$m_ids")" ]; then
             fail_invalid "requirements and the requirement-to-evidence matrix must list exactly the same 'R-N' identifiers."
         fi
         if [ "$COMPLETED" -eq 1 ] && [ "$HAS_UNRESOLVED" -eq 1 ]; then
