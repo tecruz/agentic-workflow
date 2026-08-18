@@ -342,10 +342,10 @@ case "$PROFILE" in
         ;;
 esac
 
-for s in "${REQUIRED_SECTIONS[@]}"; do
+for s in ${REQUIRED_SECTIONS[@]+"${REQUIRED_SECTIONS[@]}"}; do
     has_section "$s" || fail_invalid "missing required section '## $s' for profile '$PROFILE'."
 done
-for s in "${REQUIRED_SUBSECTIONS[@]}"; do
+for s in ${REQUIRED_SUBSECTIONS[@]+"${REQUIRED_SUBSECTIONS[@]}"}; do
     has_subsection_under "$s" "verification" \
         || fail_invalid "missing '### $s' subsection under '## Verification' for profile '$PROFILE'."
 done

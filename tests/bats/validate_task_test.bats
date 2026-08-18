@@ -12,7 +12,7 @@ FIXTURES="$REPO_ROOT/tests/fixtures/tasks"
 have() { command -v "$1" >/dev/null 2>&1; }
 
 classify() {  # classify <fixture>
-    run bash "$VALIDATE" "$FIXTURES/$1" 2>&1
+    run bash "$VALIDATE" "$FIXTURES/$1" >/dev/null 2>&1
 }
 
 @test "VALID (0) for a complete prototype task" {
@@ -81,12 +81,10 @@ classify() {  # classify <fixture>
     for f in "$FIXTURES"/*.md; do
         run bash "$VALIDATE" "$f"
         bash_code=$status
-        bash_out="$output"
         run pwsh -NoProfile -File "$REPO_ROOT/.agentic/scripts/validate-task.ps1" "$f"
         ps_code=$status
         if [ "$bash_code" -ne "$ps_code" ]; then
             echo "classification mismatch for '$(basename "$f")': bash=$bash_code ps=$ps_code" >&2
-            echo "bash output: $bash_out" >&2
             return 1
         fi
     done
