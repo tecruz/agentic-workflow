@@ -1311,9 +1311,16 @@ Describe 'install.ps1' {
                 Test-Path (Join-Path $tmp '.agentic\VERSION') | Should -Be $true
                 (Get-Content -Raw (Join-Path $tmp '.agentic\install-manifest.tsv')) -match '\tseed\t' | Should -Be $true
 
-                # the verifier should report UNSUPPORTED (3) for an empty project
-                & (Join-Path $tmp '.agentic\scripts\verify.ps1')
-                $LASTEXITCODE | Should -Be 3
+                # the verifier should report UNSUPPORTED (3) for an empty project.
+                # verify.ps1 resolves .agentic/checks.tsv from the current
+                # location, so run it inside $tmp or it picks up the framework's
+                # own checks at the repo root and recursively re-runs this suite.
+                Push-Location $tmp
+                try {
+                    & (Join-Path $tmp '.agentic\scripts\verify.ps1')
+                    $LASTEXITCODE | Should -Be 3
+                }
+                finally { Pop-Location }
 
                 # exercise update, plan, prune, uninstall
                 & (Join-Path $bundleRoot 'install.ps1') -Target $tmp *> $null
