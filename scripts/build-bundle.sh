@@ -106,17 +106,21 @@ fi
 tar -C "$DIST" -czf "$DIST/agentic-workflow-$VERSION.tar.gz" "agentic-workflow-$VERSION"
 if command -v zip >/dev/null 2>&1; then
     (cd "$DIST" && zip -qr "agentic-workflow-$VERSION.zip" "agentic-workflow-$VERSION")
-elif command -v pwsh >/dev/null 2>&1; then
-    # Compress-Archive needs Windows paths even when launched from git-bash.
-    bundle_win="$BUNDLE"
-    dist_win="$DIST/agentic-workflow-$VERSION.zip"
-    if command -v cygpath >/dev/null 2>&1; then
-        bundle_win="$(cygpath -w "$BUNDLE")"
-        dist_win="$(cygpath -w "$DIST/agentic-workflow-$VERSION.zip")"
+elif [ "${OS:-}" = "Windows_NT" ] || uname -s | grep -qE "MINGW|MSYS|CYGWIN"; then
+    if command -v pwsh >/dev/null 2>&1; then
+        # Compress-Archive needs Windows paths even when launched from git-bash.
+        bundle_win="$BUNDLE"
+        dist_win="$DIST/agentic-workflow-$VERSION.zip"
+        if command -v cygpath >/dev/null 2>&1; then
+            bundle_win="$(cygpath -w "$BUNDLE")"
+            dist_win="$(cygpath -w "$DIST/agentic-workflow-$VERSION.zip")"
+        fi
+        pwsh -NoProfile -Command "Compress-Archive -Path '$bundle_win' -DestinationPath '$dist_win' -Force"
+    else
+        echo "WARNING: neither zip nor pwsh found; skipping zip archive." >&2
     fi
-    pwsh -NoProfile -Command "Compress-Archive -Path '$bundle_win' -DestinationPath '$dist_win' -Force"
 else
-    echo "WARNING: neither zip nor pwsh found; skipping zip archive." >&2
+    echo "WARNING: 'zip' utility not found on Unix; skipping zip archive (tar.gz is available)." >&2
 fi
 
 # Checksums for every archive in dist/ (the bundle directory is a build output).

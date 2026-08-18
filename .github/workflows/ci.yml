@@ -43,7 +43,7 @@ jobs:
       - name: Install bats
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
-            sudo apt-get update && sudo apt-get install -y bats
+            sudo apt-get update && sudo apt-get install -y bats zip
           else
             brew install bats-core
           fi
