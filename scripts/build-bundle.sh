@@ -29,6 +29,30 @@ DIST="$ROOT/dist"
 BUNDLE="$DIST/agentic-workflow-$VERSION"
 NO_ARCHIVES=0
 
+# Portable SHA-256 helpers: detect GNU coreutils or BSD shasum.
+sha256_generate() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$@"
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$@"
+    else
+        echo "ERROR: no SHA-256 utility found" >&2
+        return 1
+    fi
+}
+
+sha256_verify() {
+    local checksum_file="$1"
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum -c "$checksum_file"
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 -c "$checksum_file"
+    else
+        echo "ERROR: no SHA-256 utility found" >&2
+        return 1
+    fi
+}
+
 while [ $# -gt 0 ]; do
     case "$1" in
         --no-archives) NO_ARCHIVES=1 ;;
@@ -76,27 +100,34 @@ if [ "$NO_ARCHIVES" -eq 1 ]; then
     exit 0
 fi
 
-# Archives: tar.gz via tar; zip via pwsh (Compress-Archive works on every
-# supported platform and produces Windows-friendly archives).
+# Archives: tar.gz via tar; zip via zip or pwsh Compress-Archive.
+# Compress-Archive on Linux pwsh omits dotfiles (.agentic/), so prefer
+# the zip utility when available.
 tar -C "$DIST" -czf "$DIST/agentic-workflow-$VERSION.tar.gz" "agentic-workflow-$VERSION"
-if command -v pwsh >/dev/null 2>&1; then
-    # Compress-Archive needs Windows paths even when launched from git-bash.
-    bundle_win="$BUNDLE"
-    dist_win="$DIST/agentic-workflow-$VERSION.zip"
-    if command -v cygpath >/dev/null 2>&1; then
-        bundle_win="$(cygpath -w "$BUNDLE")"
-        dist_win="$(cygpath -w "$DIST/agentic-workflow-$VERSION.zip")"
+if command -v zip >/dev/null 2>&1; then
+    (cd "$DIST" && zip -qr "agentic-workflow-$VERSION.zip" "agentic-workflow-$VERSION")
+elif [ "${OS:-}" = "Windows_NT" ] || uname -s | grep -qE "MINGW|MSYS|CYGWIN"; then
+    if command -v pwsh >/dev/null 2>&1; then
+        # Compress-Archive needs Windows paths even when launched from git-bash.
+        bundle_win="$BUNDLE"
+        dist_win="$DIST/agentic-workflow-$VERSION.zip"
+        if command -v cygpath >/dev/null 2>&1; then
+            bundle_win="$(cygpath -w "$BUNDLE")"
+            dist_win="$(cygpath -w "$DIST/agentic-workflow-$VERSION.zip")"
+        fi
+        pwsh -NoProfile -Command "Compress-Archive -Path '$bundle_win' -DestinationPath '$dist_win' -Force"
+    else
+        echo "WARNING: neither zip nor pwsh found; skipping zip archive." >&2
     fi
-    pwsh -NoProfile -Command "Compress-Archive -Path '$bundle_win' -DestinationPath '$dist_win' -Force"
 else
-    echo "WARNING: pwsh not found; skipping zip archive." >&2
+    echo "WARNING: 'zip' utility not found on Unix; skipping zip archive (tar.gz is available)." >&2
 fi
 
 # Checksums for every archive in dist/ (the bundle directory is a build output).
 {
     cd "$DIST"
     for f in agentic-workflow-$VERSION.tar.gz agentic-workflow-$VERSION.zip; do
-        [ -e "$f" ] && sha256sum "$f"
+        [ -e "$f" ] && sha256_generate "$f"
     done
 } > "$DIST/SHA256SUMS"
 

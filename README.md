@@ -140,7 +140,7 @@ the framework's own checks, tests, CI, and docs so adopters start clean:
 
 ```bash
 bash scripts/build-bundle.sh                    # assemble + archive
-bash dist/agentic-workflow-1.2.1/install.sh /path/to/your-project
+bash dist/agentic-workflow-1.2.2/install.sh /path/to/your-project
 ```
 
 ---

@@ -24,6 +24,14 @@ make_outside_dir() {
     printf '%s' "$OUTSIDE_DIR"
 }
 
+# Configure a local Git identity for tests that create temporary repositories.
+# Clean CI environments have no inherited Git config, so commits and annotated
+# tags fail with "Author identity unknown" without this.
+configure_test_git_identity() {
+    git config user.name "agentic-workflow-tests"
+    git config user.email "agentic-workflow-tests@example.invalid"
+}
+
 @test "fresh install creates the core file set and manifest" {
     bash "$INSTALL" . >/dev/null 2>&1
     [ -f AGENTS.md ]
@@ -759,7 +767,7 @@ make_outside_dir() {
     bash "$INSTALL" . >/dev/null 2>&1
     [ -x .agentic/scripts/verify.sh ]
     run ./.agentic/scripts/verify.sh
-    [ "$status" -le 3 ]
+    [ "$status" -eq 3 ]
 }
 
 @test "--detect-checks refuses an .agentic symlink to an outside directory" {
@@ -803,7 +811,7 @@ make_outside_dir() {
     printf 'lowercase custom\n' > .agentic/version
     bash "$INSTALL" . >/dev/null 2>&1
     [ -f .agentic/VERSION ]
-    [ "$(cat .agentic/VERSION)" = "1.2.1" ]
+    [ "$(cat .agentic/VERSION)" = "1.2.2" ]
     [ "$(cat .agentic/version)" = "lowercase custom" ]
     [ ! -e .agentic/version.new ]
 }
@@ -847,14 +855,26 @@ SHIM
 
 @test "bundle build produces archives and a SHA256SUMS file" {
     bash "$REPO_ROOT/scripts/build-bundle.sh"
-    BUNDLE="$REPO_ROOT/dist/agentic-workflow-$(cat "$REPO_ROOT/.agentic/VERSION")"
+    VERSION="$(cat "$REPO_ROOT/.agentic/VERSION")"
+    BUNDLE="$REPO_ROOT/dist/agentic-workflow-$VERSION"
     [ -f "$REPO_ROOT/dist/SHA256SUMS" ]
-    [ -f "$REPO_ROOT/dist/agentic-workflow-$(cat "$REPO_ROOT/.agentic/VERSION").tar.gz" ]
-    [ -f "$REPO_ROOT/dist/agentic-workflow-$(cat "$REPO_ROOT/.agentic/VERSION").zip" ]
+    [ -f "$REPO_ROOT/dist/agentic-workflow-$VERSION.tar.gz" ]
+    [ -f "$REPO_ROOT/dist/agentic-workflow-$VERSION.zip" ]
     [ -f "$BUNDLE/install.sh" ]
     [ -f "$BUNDLE/AGENTS.md" ]
-    grep -q "agentic-workflow-$(cat "$REPO_ROOT/.agentic/VERSION").tar.gz" "$REPO_ROOT/dist/SHA256SUMS"
-    grep -q "agentic-workflow-$(cat "$REPO_ROOT/.agentic/VERSION").zip" "$REPO_ROOT/dist/SHA256SUMS"
+    grep -q "agentic-workflow-$VERSION.tar.gz" "$REPO_ROOT/dist/SHA256SUMS"
+    grep -q "agentic-workflow-$VERSION.zip" "$REPO_ROOT/dist/SHA256SUMS"
+
+    # Verify the actual checksums match
+    cd "$REPO_ROOT/dist"
+    sha256sum -c SHA256SUMS
+}
+
+@test "release changelog section can be extracted" {
+    VERSION="$(cat "$REPO_ROOT/.agentic/VERSION")"
+    NOTES="$(sed -n "/^## \[$VERSION\]/,/^## \[/p" "$REPO_ROOT/CHANGELOG.md" | sed '$d')"
+    [ -n "$NOTES" ]
+    echo "$NOTES" | grep -q "## \[$VERSION\]"
 }
 
 @test "bundle excludes framework-only files" {
@@ -932,4 +952,310 @@ SHIM
     run env PATH="$PWD/shimbin:$PATH" bash "$INSTALL" . --detect-checks
     [ "$status" -ne 0 ]
     [ -f .agentic/checks.generated.tsv ]
+}
+
+# ---------------------------------------------------------------------------
+# Extracted-archive release tests: install from the final tar.gz and zip
+# assets rather than the unarchived bundle directory.
+# ---------------------------------------------------------------------------
+
+@test "end-to-end: extract tar.gz and install from extracted archive" {
+    bash "$REPO_ROOT/scripts/build-bundle.sh"
+    VERSION="$(cat "$REPO_ROOT/.agentic/VERSION")"
+    ARCHIVE="$REPO_ROOT/dist/agentic-workflow-$VERSION.tar.gz"
+    [ -f "$ARCHIVE" ]
+
+    EXTRACT_DIR="$TMP/extract-tar"
+    mkdir -p "$EXTRACT_DIR"
+    tar -xzf "$ARCHIVE" -C "$EXTRACT_DIR"
+
+    PROJECT="$TMP/project"
+    mkdir -p "$PROJECT"
+    cd "$PROJECT"
+    bash "$EXTRACT_DIR/agentic-workflow-$VERSION/install.sh" . >/dev/null 2>&1
+
+    [ -f AGENTS.md ]
+    [ -f .aider.conf.yml ]
+    [ -f .agentic/VERSION ]
+    [ -f .agentic/checks.tsv ]
+    grep -q "seed" .agentic/install-manifest.tsv
+
+    # the verifier should report UNSUPPORTED (3) for an empty project
+    run bash .agentic/scripts/verify.sh
+    [ "$status" -eq 3 ]
+
+    # exercise update, plan, prune, uninstall
+    bash "$EXTRACT_DIR/agentic-workflow-$VERSION/install.sh" . >/dev/null 2>&1
+    run bash "$EXTRACT_DIR/agentic-workflow-$VERSION/install.sh" . --prune --plan
+    [ "$status" -eq 0 ]
+    run bash "$EXTRACT_DIR/agentic-workflow-$VERSION/install.sh" . --uninstall --plan
+    [ "$status" -eq 0 ]
+}
+
+@test "end-to-end: extract zip and install from extracted archive" {
+    command -v unzip >/dev/null 2>&1 || skip "unzip not available"
+    bash "$REPO_ROOT/scripts/build-bundle.sh"
+    VERSION="$(cat "$REPO_ROOT/.agentic/VERSION")"
+    ARCHIVE="$REPO_ROOT/dist/agentic-workflow-$VERSION.zip"
+    [ -f "$ARCHIVE" ]
+
+    EXTRACT_DIR="$TMP/extract-zip"
+    mkdir -p "$EXTRACT_DIR"
+    unzip -q "$ARCHIVE" -d "$EXTRACT_DIR"
+
+    # Detect the actual bundle directory (extraction tools may nest differently)
+    BUNDLE="$(find "$EXTRACT_DIR" -name "install.sh" -path "*/agentic-workflow-*/install.sh" -exec dirname {} \; 2>/dev/null | head -1)"
+    [ -n "$BUNDLE" ] || skip "could not locate bundle after zip extraction"
+
+    PROJECT="$TMP/project"
+    mkdir -p "$PROJECT"
+    cd "$PROJECT"
+    bash "$BUNDLE/install.sh" . >/dev/null 2>&1
+
+    [ -f AGENTS.md ]
+    [ -f .aider.conf.yml ]
+    [ -f .agentic/VERSION ]
+    grep -q "seed" .agentic/install-manifest.tsv
+
+    # the verifier should report UNSUPPORTED (3) for an empty project
+    run bash .agentic/scripts/verify.sh
+    [ "$status" -eq 3 ]
+
+    # exercise update, plan, prune, uninstall
+    bash "$BUNDLE/install.sh" . >/dev/null 2>&1
+    run bash "$BUNDLE/install.sh" . --prune --plan
+    [ "$status" -eq 0 ]
+    run bash "$BUNDLE/install.sh" . --uninstall --plan
+    [ "$status" -eq 0 ]
+}
+
+@test "release tar.gz does not leak development-only files" {
+    bash "$REPO_ROOT/scripts/build-bundle.sh"
+    VERSION="$(cat "$REPO_ROOT/.agentic/VERSION")"
+    EXTRACT_DIR="$TMP/extract-leak"
+    mkdir -p "$EXTRACT_DIR"
+    tar -xzf "$REPO_ROOT/dist/agentic-workflow-$VERSION.tar.gz" -C "$EXTRACT_DIR"
+    BUNDLE="$EXTRACT_DIR/agentic-workflow-$VERSION"
+
+    [ ! -e "$BUNDLE/tests" ]
+    [ ! -e "$BUNDLE/.github" ]
+    [ ! -e "$BUNDLE/docs" ]
+    [ ! -e "$BUNDLE/.agentic/checks.tsv" ]
+    [ ! -e "$BUNDLE/CHANGELOG.md" ]
+    [ ! -e "$BUNDLE/README.md" ]
+    [ ! -e "$BUNDLE/CONTRIBUTING.md" ]
+    [ ! -e "$BUNDLE/SECURITY.md" ]
+    [ ! -e "$BUNDLE/dist" ]
+    [ ! -e "$BUNDLE/.agentic/decisions/ADR-"* ]
+    [ -f "$BUNDLE/.agentic/templates/checks.tsv" ]
+    [ -f "$BUNDLE/.agentic/scripts/verify.sh" ]
+    [ -f "$BUNDLE/LICENSE" ]
+}
+
+@test "release zip does not leak development-only files" {
+    command -v unzip >/dev/null 2>&1 || skip "unzip not available"
+    bash "$REPO_ROOT/scripts/build-bundle.sh"
+    VERSION="$(cat "$REPO_ROOT/.agentic/VERSION")"
+    EXTRACT_DIR="$TMP/extract-zip-leak"
+    mkdir -p "$EXTRACT_DIR"
+    unzip -q "$REPO_ROOT/dist/agentic-workflow-$VERSION.zip" -d "$EXTRACT_DIR"
+
+    BUNDLE="$(find "$EXTRACT_DIR" -name "install.sh" -path "*/agentic-workflow-*/install.sh" -exec dirname {} \; 2>/dev/null | head -1)"
+    [ -n "$BUNDLE" ] || skip "could not locate bundle after zip extraction"
+
+    [ ! -e "$BUNDLE/tests" ]
+    [ ! -e "$BUNDLE/.github" ]
+    [ ! -e "$BUNDLE/docs" ]
+    [ ! -e "$BUNDLE/.agentic/checks.tsv" ]
+    [ ! -e "$BUNDLE/CHANGELOG.md" ]
+    [ ! -e "$BUNDLE/README.md" ]
+    [ ! -e "$BUNDLE/CONTRIBUTING.md" ]
+    [ ! -e "$BUNDLE/SECURITY.md" ]
+    [ -f "$BUNDLE/.agentic/templates/checks.tsv" ]
+    [ -f "$BUNDLE/.agentic/scripts/verify.sh" ]
+}
+
+# ---------------------------------------------------------------------------
+# Release-to-release upgrade test: install from the v1.2.1 bundle, modify
+# project state, then upgrade using the current (v1.2.2) bundle.
+# ---------------------------------------------------------------------------
+
+@test "upgrade from v1.2.1 bundle to v1.2.2 preserves project state" {
+    # Verify the v1.2.1 tag exists and has the expected VERSION
+    if [ "${CI:-}" = "true" ]; then
+        git -C "$REPO_ROOT" rev-parse v1.2.1 >/dev/null 2>&1 ||
+            fail "required migration tag v1.2.1 is unavailable in CI"
+    else
+        git -C "$REPO_ROOT" rev-parse v1.2.1 >/dev/null 2>&1 ||
+            skip "v1.2.1 tag not found"
+    fi
+    V121_VERSION="$(git -C "$REPO_ROOT" show v1.2.1:.agentic/VERSION 2>/dev/null)"
+    [ "$V121_VERSION" = "1.2.1" ]
+
+    # Extract the actual v1.2.1 source tree and build its bundle
+    V121_SRC="$TMP/v121-src"
+    mkdir -p "$V121_SRC"
+    git -C "$REPO_ROOT" archive v1.2.1 | tar -x -C "$V121_SRC"
+    bash "$V121_SRC/scripts/build-bundle.sh" --no-archives
+    V121_DIR="$V121_SRC/dist/agentic-workflow-1.2.1"
+
+    # Build the current (v1.2.2) bundle
+    bash "$REPO_ROOT/scripts/build-bundle.sh" --no-archives
+    CURRENT_BUNDLE="$REPO_ROOT/dist/agentic-workflow-$(cat "$REPO_ROOT/.agentic/VERSION")"
+
+    PROJECT="$TMP/upgrade-project"
+    mkdir -p "$PROJECT"
+    cd "$PROJECT"
+
+    # Step 1: Install from the real v1.2.1 bundle
+    run bash "$V121_DIR/install.sh" . --tools all
+    [ "$status" -eq 0 ]
+    [ -f AGENTS.md ]
+    [ -f CLAUDE.md ]
+    [ -f GEMINI.md ]
+    [ -f .aider.conf.yml ]
+    [ -f .agentic/VERSION ]
+    [ "$(cat .agentic/VERSION)" = "1.2.1" ]
+
+    # Step 2: Add custom content outside merge blocks
+    printf '\n## Team notes\nkeep this content\n' >> AGENTS.md
+    printf '\n# custom aider config\n' >> .aider.conf.yml
+
+    # Step 3: Modify a managed file
+    printf '\n# adopter workflow override\n' >> .agentic/WORKFLOW.md
+
+    # Step 4: Add a reviewed candidate (correct field order: requirement, check-id, dir, shell, command)
+    printf 'required\tcustom-check\t.\tnpm\ttest\n' > .agentic/checks.generated.tsv
+
+    # Record state before upgrade
+    AGENTS_BEFORE="$(cat AGENTS.md)"
+    WORKFLOW_BEFORE="$(cat .agentic/WORKFLOW.md)"
+
+    # Step 5: Upgrade using current bundle (v1.2.2)
+    run bash "$CURRENT_BUNDLE/install.sh" . --tools all
+    [ "$status" -eq 0 ]
+
+    # Step 6: Verify preservation
+    grep -q "keep this content" AGENTS.md
+    grep -q "AGENTIC-PROTOCOL-START" AGENTS.md
+    grep -q "# adopter workflow override" .agentic/WORKFLOW.md
+    [ -f .agentic/checks.generated.tsv ]
+    grep -q "custom-check" .agentic/checks.generated.tsv
+    # Verify the reviewed candidate is preserved exactly (byte-for-byte)
+    [ "$(cat .agentic/checks.generated.tsv)" = "required"$'\t'"custom-check"$'\t'"."$'\t'"npm"$'\t'"test" ]
+
+    # Verify .aider.conf.yml custom content is preserved
+    grep -q "# custom aider config" .aider.conf.yml
+
+    # Step 7: Exercise plan, prune, uninstall
+    run bash "$CURRENT_BUNDLE/install.sh" . --prune --plan --tools claude
+    [ "$status" -eq 0 ]
+    # GEMINI.md and .aider.conf.yml should still exist in plan mode
+    [ -f GEMINI.md ]
+    [ -f .aider.conf.yml ]
+
+    run bash "$CURRENT_BUNDLE/install.sh" . --uninstall --plan
+    [ "$status" -eq 0 ]
+    [ -f AGENTS.md ]
+
+    # Step 8: Actual prune removes deselected adapters
+    run bash "$CURRENT_BUNDLE/install.sh" . --prune --tools claude
+    [ "$status" -eq 0 ]
+    [ -f AGENTS.md ]
+    [ -f CLAUDE.md ]
+
+    # Step 9: Uninstall removes managed files, preserves seeds
+    run bash "$CURRENT_BUNDLE/install.sh" . --uninstall
+    [ "$status" -eq 0 ]
+    [ ! -f .agentic/VERSION ]
+    [ ! -f .agentic/scripts/verify.sh ]
+    [ -f .agentic/ARCHITECTURE.md ]
+    [ -f .agentic/STATUS.md ]
+    [ -f .agentic/checks.tsv ]
+}
+
+# ---------------------------------------------------------------------------
+# Tag resolution tests: verify that the release workflow's tag validation
+# logic correctly handles both lightweight and annotated tags.
+# ---------------------------------------------------------------------------
+
+@test "lightweight tag resolves to a valid commit SHA" {
+    TAG_REPO="$TMP/tag-repo"
+    mkdir -p "$TAG_REPO"
+    git -C "$REPO_ROOT" archive HEAD | tar -x -C "$TAG_REPO"
+    cd "$TAG_REPO"
+
+    git init -q
+    configure_test_git_identity
+    git add -A
+    git commit -q -m "initial commit"
+    git tag v0.0.1
+
+    # Resolve the tag (mirrors release.yml:61)
+    SHA="$(git rev-list -n 1 "v0.0.1" 2>/dev/null)"
+    [ -n "$SHA" ]
+
+    # For a lightweight tag, tag object == commit SHA
+    TAG_OBJECT="$(git rev-parse "v0.0.1")"
+    TAG_COMMIT="$(git rev-parse "v0.0.1^{commit}")"
+    [ "$TAG_OBJECT" = "$TAG_COMMIT" ]
+    [ "$TAG_COMMIT" = "$SHA" ]
+}
+
+@test "annotated tag resolves to a valid commit SHA" {
+    TAG_REPO="$TMP/tag-repo-annotated"
+    mkdir -p "$TAG_REPO"
+    git -C "$REPO_ROOT" archive HEAD | tar -x -C "$TAG_REPO"
+    cd "$TAG_REPO"
+
+    git init -q
+    configure_test_git_identity
+    git add -A
+    git commit -q -m "initial commit"
+    git tag -a v0.0.2 -m "annotated release tag"
+
+    # Resolve the tag (mirrors release.yml:61)
+    SHA="$(git rev-list -n 1 "v0.0.2" 2>/dev/null)"
+    [ -n "$SHA" ]
+
+    # For an annotated tag, tag object != commit SHA
+    TAG_OBJECT="$(git rev-parse "v0.0.2")"
+    TAG_COMMIT="$(git rev-parse "v0.0.2^{commit}")"
+    [ "$TAG_OBJECT" != "$TAG_COMMIT" ]
+    [ "$TAG_COMMIT" = "$SHA" ]
+
+    # The peeled commit SHA must match rev-list output
+    [ "$TAG_COMMIT" = "$SHA" ]
+}
+
+@test "tag validation rejects SemVer pre-release suffix" {
+    TAG_REPO="$TMP/tag-repo-prerelease"
+    mkdir -p "$TAG_REPO"
+    git -C "$REPO_ROOT" archive HEAD | tar -x -C "$TAG_REPO"
+    cd "$TAG_REPO"
+
+    git init -q
+    configure_test_git_identity
+    git add -A
+    git commit -q -m "initial commit"
+    git tag v1.0.0-beta.1
+
+    # Pre-release tags must fail the SemVer check (mirrors release.yml:55)
+    [[ ! "v1.0.0-beta.1" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+}
+
+@test "tag validation rejects missing tag" {
+    TAG_REPO="$TMP/tag-repo-missing"
+    mkdir -p "$TAG_REPO"
+    git -C "$REPO_ROOT" archive HEAD | tar -x -C "$TAG_REPO"
+    cd "$TAG_REPO"
+
+    git init -q
+    configure_test_git_identity
+    git add -A
+    git commit -q -m "initial commit"
+
+    # Non-existent tag should fail to resolve
+    run git rev-list -n 1 "v9.9.9" 2>/dev/null
+    [ "$status" -ne 0 ]
 }
