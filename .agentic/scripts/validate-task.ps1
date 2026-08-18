@@ -257,8 +257,10 @@ function Get-SubsectionContent {
 # Get-ContentClass — classifies authoritative content lines as 'content'
 # (real evidence), 'placeholder' (lines exist but none are real), or 'empty'.
 # Headings, table separators, blank bullets, and placeholder text such as
-# TBD / TODO / Pending / None provided do not count as content. A table counts
-# only once a data row follows its header.
+# TBD / TODO / Pending / None provided do not count as content. Unchanged
+# template markers — a whole bracketed token, an angle-bracket token, or a bare
+# ISO date — also count as placeholders. A table counts only once a data row
+# follows its header.
 function Get-ContentClass {
     param([string[]]$Content)
     $tableHeaderSeen = $false
@@ -275,7 +277,7 @@ function Get-ContentClass {
         }
         $text = ($line -replace '^\s*[-*+]\s+', '').Trim()
         if (-not $text) { continue }
-        if ($text -match '^(tbd|todo|pending|none\s+provided|none\s+identified)(\s*:.*)?$|^[^:]+:\s*(tbd|todo|pending|none\s+provided|none\s+identified)\s*$') { continue }
+        if ($text -match '^(tbd|todo|pending|none\s+provided|none\s+identified)(\s*:.*)?$|^[^:]+:\s*(tbd|todo|pending|none\s+provided|none\s+identified)\s*$|^\[.*\]$|^<.*>$|^\d{4}-\d{2}-\d{2}$') { continue }
         return 'content'
     }
     if (-not $sawLines) { return 'empty' }
@@ -298,6 +300,20 @@ function Assert-VerificationEvidence {
     param([string]$Kind, [string[]]$Content)
     $cls = Get-ContentClass $Content
     if ($cls -eq 'content') { return }
+    if ($cls -eq 'empty') { Write-Invalid "completed task must record verification evidence under '$Kind'." }
+    Write-Blocked "completed task verification under '$Kind' is still a placeholder (TBD, TODO, Pending, or similar)."
+}
+
+# Assert-VerificationEvidenceNone — like Assert-VerificationEvidence, but accepts
+# the exact 'None identified' sentinel as a resolved statement (Remaining risks).
+function Assert-VerificationEvidenceNone {
+    param([string]$Kind, [string[]]$Content)
+    $cls = Get-ContentClass $Content
+    if ($cls -eq 'content') { return }
+    if ($cls -eq 'placeholder') {
+        $normalized = (($Content -join "`n").ToLowerInvariant() -replace '^\s*[-*+]\s+', '' -replace '\s', '')
+        if ($normalized -eq 'noneidentified') { return }
+    }
     if ($cls -eq 'empty') { Write-Invalid "completed task must record verification evidence under '$Kind'." }
     Write-Blocked "completed task verification under '$Kind' is still a placeholder (TBD, TODO, Pending, or similar)."
 }
@@ -390,11 +406,17 @@ foreach ($s in $requiredSubsections) {
     if (-not $found) { Write-Invalid "missing '### $s' subsection under '## Verification' for profile '$ProfileName'." }
 }
 
-# Completed standard and high-assurance tasks must record real verification
-# evidence under Baseline and Final, not merely the headings.
+# Completed tasks must record real evidence in every section the profile
+# declares as required. Missing content is INVALID; placeholder-only content
+# is BLOCKED at completion.
+if ($Completed) {
+    Assert-VerificationEvidence '## Profile rationale' (Get-SectionContent 'profile rationale')
+}
 if ($ProfileName -ne 'prototype' -and $Completed) {
     Assert-VerificationEvidence '### Baseline' (Get-SubsectionContent 'baseline' 'verification')
     Assert-VerificationEvidence '### Final' (Get-SubsectionContent 'final' 'verification')
+    Assert-VerificationEvidence '## Files changed' (Get-SectionContent 'files changed')
+    Assert-VerificationEvidenceNone '## Remaining risks' (Get-SectionContent 'remaining risks')
 }
 
 # ---------------------------------------------------------------------------
@@ -410,7 +432,10 @@ if ($ProfileName -eq 'prototype') {
         Write-Invalid "prototype handoff must declare 'No production deployment or irreversible operation: confirmed'."
     }
     if ($Completed) {
+        Assert-VerificationEvidence '## Task goal' (Get-SectionContent 'task goal')
+        Assert-VerificationEvidence '## Known limitations' (Get-SectionContent 'known limitations')
         Assert-VerificationEvidence '## Smoke verification' (Get-SectionContent 'smoke verification')
+        Assert-VerificationEvidence '## Handoff' (Get-SectionContent 'handoff')
     }
 }
 
@@ -466,13 +491,13 @@ if ($ProfileName -ne 'prototype') {
         $gl = $rawLine.Trim()
         if (-not $gl) { continue }
         $glLow = $gl.ToLowerInvariant()
-        $bodyLow = ($glLow -replace '^[-*]\s+', '')
+        $bodyLow = ($glLow -replace '^[-*+]\s+', '')
         if ($bodyLow -eq 'none identified') { $hasNone = $true; continue }
-        if ($glLow -match '^[-*]\s*\[[ xX]\]') {
-            if ($glLow -notmatch '^[-*]\s*\[[ xX]\]\s*ag-\d+\s*:') {
+        if ($glLow -match '^[-*+]\s*\[[ xX]\]') {
+            if ($glLow -notmatch '^[-*+]\s*\[[ xX]\]\s*ag-\d+\s*:') {
                 Write-Invalid "malformed approval entry in '## Approval gates': '$gl'."
             }
-            $m = [regex]::Match($glLow, '^[-*]\s*\[([ xX])\]\s*(ag-\d+)\s*:\s*(.*?)\s*$')
+            $m = [regex]::Match($glLow, '^[-*+]\s*\[([ xX])\]\s*(ag-\d+)\s*:\s*(.*?)\s*$')
             $gid = $m.Groups[2].Value
             $gbox = $m.Groups[1].Value
             $gdet = $m.Groups[3].Value.Trim()
@@ -486,10 +511,14 @@ if ($ProfileName -ne 'prototype') {
                 if ($gdet -match '<approver>|tbd|pending|unknown|n/a|not\s+approved|approval\s+not\s+granted') {
                     Write-Invalid "approval gate '$gid' must not use placeholder values."
                 }
-                $dateMatch = [regex]::Match($gdet, '\d{4}-\d{2}-\d{2}')
-                if (-not $dateMatch.Success) { Write-Invalid "approval gate '$gid' must record an ISO date YYYY-MM-DD." }
-                if (-not (Test-IsoDate $dateMatch.Value)) { Write-Invalid "approval gate '$gid' has an invalid ISO date '$($dateMatch.Value)'." }
-                $approver = $gdet -replace '^approved\s+by\s+', '' -replace '\s+on\s+\d{4}-\d{2}-\d{2}\s*$', ''
+                # Parse anchored groups so the date validated is the trailing
+                # approval date, not an earlier date that happens to appear in
+                # the approver text.
+                $am = [regex]::Match($gdet, '^approved\s+by\s+(.+?)\s+on\s+(\d{4}-\d{2}-\d{2})\s*$')
+                $approvalDate = $am.Groups[2].Value
+                $approver = $am.Groups[1].Value
+                if (-not $approvalDate) { Write-Invalid "approval gate '$gid' must record an ISO date YYYY-MM-DD." }
+                if (-not (Test-IsoDate $approvalDate)) { Write-Invalid "approval gate '$gid' has an invalid ISO date '$approvalDate'." }
                 if (-not $approver) { Write-Invalid "approval gate '$gid' must record an approver." }
                 if ($approver -match '[<>]') { Write-Invalid "approval gate '$gid' must not use template placeholders." }
             }
@@ -502,7 +531,10 @@ if ($ProfileName -ne 'prototype') {
             }
             continue
         }
-        if ($glLow -match '^[-*]\s+') {
+        if ($glLow -match '\[[ xX]\]') {
+            Write-Invalid "malformed approval entry in '## Approval gates': '$gl'."
+        }
+        if ($glLow -match '^[-*+]\s+') {
             Write-Invalid "malformed approval entry in '## Approval gates': '$gl'."
         }
     }

@@ -256,6 +256,58 @@ Describe 'validate-task.ps1 risk-profile validator' {
         Invoke-Validator 'invalid-year-zero.md' | Should -Be 1
     }
 
+    It 'BLOCKED (2) when the Baseline keeps the template placeholder' {
+        Invoke-Validator 'done-template-baseline-placeholder-blocked.md' | Should -Be 2
+    }
+
+    It 'BLOCKED (2) when the Final keeps the template placeholder' {
+        Invoke-Validator 'done-template-final-placeholder-blocked.md' | Should -Be 2
+    }
+
+    It 'BLOCKED (2) when a completed prototype keeps the Smoke placeholder' {
+        Invoke-Validator 'prototype-template-smoke-placeholder-blocked.md' | Should -Be 2
+    }
+
+    It 'INVALID (1) when a high-assurance section is a bracket placeholder' {
+        Invoke-Validator 'high-assurance-bracket-placeholder-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) for a completed task with an empty Files changed' {
+        Invoke-Validator 'done-empty-files-changed-invalid.md' | Should -Be 1
+    }
+
+    It 'BLOCKED (2) when Files changed keeps the template placeholder' {
+        Invoke-Validator 'done-placeholder-files-changed-blocked.md' | Should -Be 2
+    }
+
+    It 'INVALID (1) for a completed task with an empty Remaining risks' {
+        Invoke-Validator 'done-empty-remaining-risks-invalid.md' | Should -Be 1
+    }
+
+    It 'VALID (0) when Remaining risks states the None identified sentinel' {
+        Invoke-Validator 'done-none-identified-remaining-risks-valid.md' | Should -Be 0
+    }
+
+    It 'INVALID (1) for a completed prototype with an empty Task goal' {
+        Invoke-Validator 'prototype-empty-task-goal-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) for a completed prototype with empty Known limitations' {
+        Invoke-Validator 'prototype-empty-known-limitations-invalid.md' | Should -Be 1
+    }
+
+    It 'BLOCKED (2) when a + bullet approval gate remains unchecked' {
+        Invoke-Validator 'plus-bullet-unchecked-gate-blocked.md' | Should -Be 2
+    }
+
+    It 'INVALID (1) when a + bullet checkbox is not a valid approval gate' {
+        Invoke-Validator 'plus-bullet-malformed-gate-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when an approval records an earlier date before an invalid one' {
+        Invoke-Validator 'approval-early-date-invalid.md' | Should -Be 1
+    }
+
     It 'PowerShell and Bash classifiers agree on every fixture' {
         if (-not (Get-Command bash -ErrorAction SilentlyContinue)) { return }
         # Probe: bash must be able to invoke the validator and read the

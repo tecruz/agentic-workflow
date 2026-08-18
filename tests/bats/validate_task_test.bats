@@ -327,3 +327,68 @@ classify() {  # classify <fixture>
     classify invalid-year-zero.md
     [ "$status" -eq 1 ]
 }
+
+@test "BLOCKED (2) when the Baseline keeps the template placeholder" {
+    classify done-template-baseline-placeholder-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "BLOCKED (2) when the Final keeps the template placeholder" {
+    classify done-template-final-placeholder-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "BLOCKED (2) when a completed prototype keeps the Smoke placeholder" {
+    classify prototype-template-smoke-placeholder-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "INVALID (1) when a high-assurance section is a bracket placeholder" {
+    classify high-assurance-bracket-placeholder-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a completed task with an empty Files changed" {
+    classify done-empty-files-changed-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "BLOCKED (2) when Files changed keeps the template placeholder" {
+    classify done-placeholder-files-changed-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "INVALID (1) for a completed task with an empty Remaining risks" {
+    classify done-empty-remaining-risks-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "VALID (0) when Remaining risks states the None identified sentinel" {
+    classify done-none-identified-remaining-risks-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "INVALID (1) for a completed prototype with an empty Task goal" {
+    classify prototype-empty-task-goal-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a completed prototype with empty Known limitations" {
+    classify prototype-empty-known-limitations-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "BLOCKED (2) when a + bullet approval gate remains unchecked" {
+    classify plus-bullet-unchecked-gate-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "INVALID (1) when a + bullet checkbox is not a valid approval gate" {
+    classify plus-bullet-malformed-gate-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when an approval records an earlier date before an invalid one" {
+    classify approval-early-date-invalid.md
+    [ "$status" -eq 1 ]
+}

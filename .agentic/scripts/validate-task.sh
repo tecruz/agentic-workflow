@@ -240,7 +240,9 @@ validate_date() {
 # "content" (real evidence), "placeholder" (lines exist but none are real),
 # or "empty" (no lines at all). Headings, table separators, blank bullets,
 # and placeholder text such as TBD / TODO / Pending / None provided do not
-# count as content. A table counts only once a data row follows its header.
+# count as content. Unchanged template markers — a whole bracketed token,
+# an angle-bracket token, or a bare ISO date — also count as placeholders.
+# A table counts only once a data row follows its header.
 content_class() {
     local line text table_header_seen saw_lines
     table_header_seen=0
@@ -262,7 +264,7 @@ content_class() {
         fi
         text="$(printf '%s' "$line" | sed -E 's/^[[:space:]]*[-*+][[:space:]]+//; s/[[:space:]]+$//')"
         [ -n "$text" ] || continue
-        printf '%s' "$text" | grep -qiE '^(tbd|todo|pending|none[[:space:]]+provided|none[[:space:]]+identified)([[:space:]]*:.*)?$|^[^:]+:[[:space:]]*(tbd|todo|pending|none[[:space:]]+provided|none[[:space:]]+identified)[[:space:]]*$' \
+        printf '%s' "$text" | grep -qiE '^(tbd|todo|pending|none[[:space:]]+provided|none[[:space:]]+identified)([[:space:]]*:.*)?$|^[^:]+:[[:space:]]*(tbd|todo|pending|none[[:space:]]+provided|none[[:space:]]+identified)[[:space:]]*$|^\[.*\]$|^<.*>$|^[0-9]{4}-[0-9]{2}-[0-9]{2}$' \
             && continue
         echo content
         return 0
@@ -321,6 +323,23 @@ verify_completion_evidence() {
     cls="$(content_class "$content")"
     case "$cls" in
         content) return 0 ;;
+        empty) fail_invalid "completed task must record verification evidence under '$kind'." ;;
+        *) fail_blocked "completed task verification under '$kind' is still a placeholder (TBD, TODO, Pending, or similar)." ;;
+    esac
+}
+
+# verify_completion_evidence_none <kind> <content> — like
+# verify_completion_evidence, but accepts the exact 'None identified' sentinel
+# as a resolved statement (used for Remaining risks).
+verify_completion_evidence_none() {
+    local kind="$1" content="$2" cls normalized
+    cls="$(content_class "$content")"
+    [ "$cls" = "content" ] && return 0
+    if [ "$cls" = "placeholder" ]; then
+        normalized="$(printf '%s' "$content" | lower | sed -E 's/^[[:space:]]*[-*+][[:space:]]+//' | tr -d '[:space:]')"
+        [ "$normalized" = "noneidentified" ] && return 0
+    fi
+    case "$cls" in
         empty) fail_invalid "completed task must record verification evidence under '$kind'." ;;
         *) fail_blocked "completed task verification under '$kind' is still a placeholder (TBD, TODO, Pending, or similar)." ;;
     esac
@@ -491,11 +510,17 @@ for s in ${REQUIRED_SUBSECTIONS[@]+"${REQUIRED_SUBSECTIONS[@]}"}; do
         || fail_invalid "missing '### $s' subsection under '## Verification' for profile '$PROFILE'."
 done
 
-# Completed standard and high-assurance tasks must record real verification
-# evidence under Baseline and Final, not merely the headings.
+# Completed tasks must record real evidence in every section the profile
+# declares as required. Missing content is INVALID; placeholder-only content
+# is BLOCKED at completion.
+if [ "$COMPLETED" -eq 1 ]; then
+    verify_completion_evidence "## Profile rationale" "$(section_content "profile rationale" || true)"
+fi
 if [ "$PROFILE" != "prototype" ] && [ "$COMPLETED" -eq 1 ]; then
     verify_completion_evidence "### Baseline" "$(subsection_content "baseline" "verification" || true)"
     verify_completion_evidence "### Final" "$(subsection_content "final" "verification" || true)"
+    verify_completion_evidence "## Files changed" "$(section_content "files changed" || true)"
+    verify_completion_evidence_none "## Remaining risks" "$(section_content "remaining risks" || true)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -508,7 +533,10 @@ if [ "$PROFILE" = "prototype" ]; then
     printf '%s\n' "$handoff" | grep -qiE 'no[[:space:]]+production[[:space:]]+deployment[[:space:]]+or[[:space:]]+irreversible[[:space:]]+operation[[:space:]]*:[[:space:]]*confirmed' \
         || fail_invalid "prototype handoff must declare 'No production deployment or irreversible operation: confirmed'."
     if [ "$COMPLETED" -eq 1 ]; then
+        verify_completion_evidence "## Task goal" "$(section_content "task goal" || true)"
+        verify_completion_evidence "## Known limitations" "$(section_content "known limitations" || true)"
         verify_completion_evidence "## Smoke verification" "$(section_content "smoke verification" || true)"
+        verify_completion_evidence "## Handoff" "$(section_content "handoff" || true)"
     fi
 fi
 
@@ -571,18 +599,18 @@ if [ "$PROFILE" != "prototype" ]; then
         gl="$(printf '%s' "$gl" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
         [ -n "$gl" ] || continue
         gl_low="$(printf '%s' "$gl" | lower)"
-        body_low="$(printf '%s\n' "$gl_low" | sed -E 's/^[-*][[:space:]]+//')"
+        body_low="$(printf '%s\n' "$gl_low" | sed -E 's/^[-*+][[:space:]]+//')"
         if [ "$body_low" = "none identified" ]; then
             has_none=1
             continue
         fi
-        if printf '%s' "$gl_low" | grep -qE '^[-*][[:space:]]*\[[ xX]\]'; then
-            printf '%s' "$gl_low" | grep -qE '^[-*][[:space:]]*\[[ xX]\][[:space:]]*ag-[0-9]+[[:space:]]*:' \
+        if printf '%s' "$gl_low" | grep -qE '^[-*+][[:space:]]*\[[ xX]\]'; then
+            printf '%s' "$gl_low" | grep -qE '^[-*+][[:space:]]*\[[ xX]\][[:space:]]*ag-[0-9]+[[:space:]]*:' \
                 || fail_invalid "malformed approval entry in '## Approval gates': '$gl'."
             gate_count=$(( gate_count + 1 ))
-            gid="$(printf '%s\n' "$gl_low" | sed -nE 's/^[-*][[:space:]]*\[([ xX])\][[:space:]]*(ag-[0-9]+)[[:space:]]*:[[:space:]]*(.*)[[:space:]]*$/\2/p')"
-            gbox="$(printf '%s\n' "$gl_low" | sed -nE 's/^[-*][[:space:]]*\[([ xX])\][[:space:]]*(ag-[0-9]+)[[:space:]]*:[[:space:]]*(.*)[[:space:]]*$/\1/p')"
-            gdet="$(printf '%s\n' "$gl_low" | sed -nE 's/^[-*][[:space:]]*\[([ xX])\][[:space:]]*(ag-[0-9]+)[[:space:]]*:[[:space:]]*(.*)[[:space:]]*$/\3/p' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+            gid="$(printf '%s\n' "$gl_low" | sed -nE 's/^[-*+][[:space:]]*\[([ xX])\][[:space:]]*(ag-[0-9]+)[[:space:]]*:[[:space:]]*(.*)[[:space:]]*$/\2/p')"
+            gbox="$(printf '%s\n' "$gl_low" | sed -nE 's/^[-*+][[:space:]]*\[([ xX])\][[:space:]]*(ag-[0-9]+)[[:space:]]*:[[:space:]]*(.*)[[:space:]]*$/\1/p')"
+            gdet="$(printf '%s\n' "$gl_low" | sed -nE 's/^[-*+][[:space:]]*\[([ xX])\][[:space:]]*(ag-[0-9]+)[[:space:]]*:[[:space:]]*(.*)[[:space:]]*$/\3/p' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
             case " $gate_seen " in
                 *" $gid "*) fail_invalid "approval gate '$gid' is declared more than once." ;;
             esac
@@ -611,7 +639,10 @@ if [ "$PROFILE" != "prototype" ]; then
             esac
             continue
         fi
-        if printf '%s' "$gl_low" | grep -qE '^[-*][[:space:]]+'; then
+        if printf '%s' "$gl_low" | grep -qE '\[[ xX]\]'; then
+            fail_invalid "malformed approval entry in '## Approval gates': '$gl'."
+        fi
+        if printf '%s' "$gl_low" | grep -qE '^[-*+][[:space:]]+'; then
             fail_invalid "malformed approval entry in '## Approval gates': '$gl'."
         fi
     done <<< "$gates"
