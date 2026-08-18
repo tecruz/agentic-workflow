@@ -42,10 +42,10 @@ contents, and validator parity across Bash and PowerShell.
 | --- | --- | --- |
 | AC-1 | Profile docs present and reviewed | Passed |
 | AC-2 | Template present and matches profile requirements | Passed |
-| AC-3 | Fixture parity tests pass on both validators (31 fixtures) | Passed |
+| AC-3 | Fixture parity tests pass on both validators (43 fixtures) | Passed |
 | AC-4 | WORKFLOW.md / AGENTS.md / README.md updated | Passed |
 | AC-5 | Managed-file registration + bundle tests | Passed |
-| AC-6 | Full bats + Pester suites green (31 fixtures validated on Bash + PS) | Passed |
+| AC-6 | Full bats + Pester suites green (43 fixtures validated on Bash + PS) — CI #61 | Passed |
 
 ## Approval gates
 
@@ -60,7 +60,7 @@ contents, and validator parity across Bash and PowerShell.
 - `.agentic/profiles/{README,prototype,standard,high-assurance}.md`
 - `.agentic/templates/task.md`
 - `.agentic/scripts/validate-task.sh`, `.agentic/scripts/validate-task.ps1`
-- `tests/fixtures/tasks/*.md` (11 fixtures)
+- `tests/fixtures/tasks/*.md` (43 fixtures)
 - `tests/bats/validate_task_test.bats`, `tests/pester/ValidateTask.Tests.ps1`
 - `tests/bats/install_test.bats`, `tests/pester/Install.Tests.ps1`
 - `install.sh`, `install.ps1`, `scripts/build-bundle.sh`
@@ -86,6 +86,8 @@ contents, and validator parity across Bash and PowerShell.
   `git archive | tar -x` pipe; unrelated to this PR (blame: cd4763ee).
 - `bats tests/bats` — not runnable locally (bats not installed); CI covers it.
 - Fixture smoke harnesses run via CI.
+- CI #61 green at `a4f5bde` across Ubuntu, macOS, and Windows; the pipeline now
+  also runs this task through both validators in `--handoff` mode (43 fixtures).
 
 ## Remaining risks
 

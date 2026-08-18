@@ -194,3 +194,63 @@ classify() {  # classify <fixture>
     classify high-assurance-none-identified.md
     [ "$status" -eq 1 ]
 }
+
+@test "VALID (0) when required-evidence rows are reordered" {
+    classify standard-reordered-evidence-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "VALID (0) when requirement-to-evidence matrix rows are reordered" {
+    classify high-assurance-reordered-matrix-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "VALID (0) for an all-uppercase Profile, Status, and Updated" {
+    classify uppercase-profile-status-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "VALID (0) for mixed-case Profile and Status declarations" {
+    classify mixed-case-profile-status-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "INVALID (1) when Status is declared outside the Status section" {
+    classify status-outside-status-section-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when Profile is declared outside the Risk profile section" {
+    classify profile-outside-risk-profile-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when the Updated declaration is missing" {
+    classify missing-updated-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for an invalid Updated date" {
+    classify invalid-updated-date.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a checked approval gate with placeholder values" {
+    classify checked-placeholder-approval-blocked.md
+    [ "$status" -eq 1 ]
+}
+
+@test "VALID (0) for a checked approval gate with a real approver and date" {
+    classify checked-real-approval-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "INVALID (1) when a high-assurance section contains only a heading" {
+    classify high-assurance-heading-only-risk-analysis-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when reordered evidence rows repeat a criterion" {
+    classify duplicate-evidence-reordered.md
+    [ "$status" -eq 1 ]
+}

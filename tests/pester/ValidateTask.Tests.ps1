@@ -156,6 +156,54 @@ Describe 'validate-task.ps1 risk-profile validator' {
         Invoke-Validator 'high-assurance-none-identified.md' | Should -Be 1
     }
 
+    It 'VALID (0) when required-evidence rows are reordered' {
+        Invoke-Validator 'standard-reordered-evidence-valid.md' | Should -Be 0
+    }
+
+    It 'VALID (0) when requirement-to-evidence matrix rows are reordered' {
+        Invoke-Validator 'high-assurance-reordered-matrix-valid.md' | Should -Be 0
+    }
+
+    It 'VALID (0) for an all-uppercase Profile, Status, and Updated' {
+        Invoke-Validator 'uppercase-profile-status-valid.md' | Should -Be 0
+    }
+
+    It 'VALID (0) for mixed-case Profile and Status declarations' {
+        Invoke-Validator 'mixed-case-profile-status-valid.md' | Should -Be 0
+    }
+
+    It 'INVALID (1) when Status is declared outside the Status section' {
+        Invoke-Validator 'status-outside-status-section-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when Profile is declared outside the Risk profile section' {
+        Invoke-Validator 'profile-outside-risk-profile-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when the Updated declaration is missing' {
+        Invoke-Validator 'missing-updated-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) for an invalid Updated date' {
+        Invoke-Validator 'invalid-updated-date.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) for a checked approval gate with placeholder values' {
+        Invoke-Validator 'checked-placeholder-approval-blocked.md' | Should -Be 1
+    }
+
+    It 'VALID (0) for a checked approval gate with a real approver and date' {
+        Invoke-Validator 'checked-real-approval-valid.md' | Should -Be 0
+    }
+
+    It 'INVALID (1) when a high-assurance section contains only a heading' {
+        Invoke-Validator 'high-assurance-heading-only-risk-analysis-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when reordered evidence rows repeat a criterion' {
+        Invoke-Validator 'duplicate-evidence-reordered.md' | Should -Be 1
+    }
+
     It 'PowerShell and Bash classifiers agree on every fixture' {
         if (-not (Get-Command bash -ErrorAction SilentlyContinue)) { return }
         # Probe: bash must be able to invoke the validator and read the

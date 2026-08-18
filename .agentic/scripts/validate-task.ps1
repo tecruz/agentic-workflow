@@ -88,8 +88,13 @@ $SUBSECTIONS = [System.Collections.Generic.List[string]]::new()
 $SUB_SECTION = [System.Collections.Generic.List[string]]::new()
 $ProfileDecl = 0
 $ProfileName = ''
+$ProfileInRisk = $false
 $StatusDecl = 0
 $StatusName = ''
+$StatusInStatus = $false
+$UpdatedCount = 0
+$Updated = ''
+$UpdatedInStatus = $false
 $inFence = $false
 $inComment = $false
 $cur = ''
@@ -129,20 +134,42 @@ foreach ($line in $fileLines) {
     }
     if ($line -match '^\s*Profile\s*:') {
         $ProfileDecl++
+        if ($cur -eq 'risk profile') { $ProfileInRisk = $true }
         if (-not $ProfileName) {
-            $ProfileName = (($line -replace '^\s*[Pp]rofile\s*:\s*', '').Trim()).ToLowerInvariant()
+            $ProfileName = (($line -replace '^\s*profile\s*:\s*', '').Trim()).ToLowerInvariant()
         }
     }
-    if ($line -match '^\s*[-*]*\s*\*?[Ss]tatus\s*:') {
+    if ($line -match '^\s*[-*]*\s*\*?Status\s*:') {
         $StatusDecl++
+        if ($cur -eq 'status') { $StatusInStatus = $true }
         if (-not $StatusName) {
-            $StatusName = (($line -replace '^\s*[-*]*\s*\*?[Ss]tatus\s*:\s*', '').Trim()).ToLowerInvariant()
+            $StatusName = (($line -replace '^\s*[-*]*\s*\*?status\s*:\s*', '').Trim()).ToLowerInvariant()
+        }
+    }
+    if ($line -match '^\s*Updated\s*:') {
+        $UpdatedCount++
+        if ($cur -eq 'status') { $UpdatedInStatus = $true }
+        if (-not $Updated) {
+            $Updated = (($line -replace '^\s*updated\s*:\s*', '').Trim()).ToLowerInvariant()
         }
     }
     $contentLines.Add($line)
 }
 
-
+function Test-IsoDate {
+    param([string]$Value)
+    if ($Value -notmatch '^\d{4}-\d{2}-\d{2}$') { return $false }
+    $parts = $Value -split '-'
+    $y = [int]$parts[0]; $m = [int]$parts[1]; $d = [int]$parts[2]
+    if ($m -lt 1 -or $m -gt 12 -or $d -lt 1) { return $false }
+    $leap = ([DateTime]::IsLeapYear($y))
+    $max = switch ($m) {
+        1 { 31 } 3 { 31 } 5 { 31 } 7 { 31 } 8 { 31 } 10 { 31 } 12 { 31 }
+        4 { 30 } 6 { 30 } 9 { 30 } 11 { 30 }
+        2 { if ($leap) { 29 } else { 28 } }
+    }
+    return ($d -le $max)
+}
 
 # ---------------------------------------------------------------------------
 # Profile and status declarations.
@@ -150,14 +177,32 @@ foreach ($line in $fileLines) {
 if ($ProfileDecl -ne 1) {
     Write-Invalid "task must declare exactly one 'Profile:' (found $ProfileDecl)."
 }
+if (-not $ProfileInRisk) {
+    Write-Invalid "Profile: must be declared inside '## Risk profile'."
+}
 if ($ProfileName -notin @('prototype', 'standard', 'high-assurance')) {
     Write-Invalid 'task must declare a recognized risk profile (prototype, standard, or high-assurance).'
 }
 if ($StatusDecl -ne 1) {
     Write-Invalid "task must declare exactly one 'Status:' (found $StatusDecl)."
 }
+if (-not $StatusInStatus) {
+    Write-Invalid "Status: must be declared inside '## Status'."
+}
 if ($StatusName -notin @('planned', 'in-progress', 'blocked', 'done')) {
     Write-Invalid "task status must be one of: planned, in-progress, blocked, done (found '$StatusName')."
+}
+if ($UpdatedCount -ne 1) {
+    Write-Invalid "task must declare exactly one 'Updated:' (found $UpdatedCount)."
+}
+if (-not $UpdatedInStatus) {
+    Write-Invalid "Updated: must be declared inside '## Status'."
+}
+if (-not $Updated) {
+    Write-Invalid "Updated: must have a value."
+}
+if (-not (Test-IsoDate $Updated)) {
+    Write-Invalid "Updated: must be a valid ISO date YYYY-MM-DD (found '$Updated')."
 }
 $Completed = ($StatusName -eq 'done')
 if ($Handoff -and -not $Completed) {
@@ -195,6 +240,19 @@ function Test-SectionContent {
     param([string]$Name)
     foreach ($l in (Get-SectionContent $Name)) {
         if ($l -match '\S') { return $true }
+    }
+    return $false
+}
+
+function Test-SectionRealContent {
+    param([string]$Name)
+    foreach ($l in (Get-SectionContent $Name)) {
+        if ($l -match '^\s*#') { continue }
+        if ($l -match '---') { continue }
+        $text = ($l -replace '^\s*[-*+]\s+', '').TrimEnd()
+        if (-not $text) { continue }
+        if ($text -match '^(tbd|todo|pending|none\s+provided|none\s+identified)\s*$') { continue }
+        return $true
     }
     return $false
 }
@@ -260,15 +318,15 @@ $requiredSections = @()
 $requiredSubsections = @()
 switch ($ProfileName) {
     'prototype' {
-        $requiredSections = @('risk profile', 'profile rationale', 'task goal', 'smoke verification', 'known limitations', 'handoff')
+        $requiredSections = @('status', 'risk profile', 'profile rationale', 'task goal', 'smoke verification', 'known limitations', 'handoff')
     }
     'standard' {
-        $requiredSections = @('risk profile', 'profile rationale', 'acceptance criteria', 'required evidence', 'approval gates', 'verification', 'files changed', 'remaining risks')
+        $requiredSections = @('status', 'risk profile', 'profile rationale', 'acceptance criteria', 'required evidence', 'approval gates', 'verification', 'files changed', 'remaining risks')
         $requiredSubsections = @('baseline', 'final')
     }
     'high-assurance' {
         $requiredSections = @(
-            'risk profile', 'profile rationale', 'requirements', 'risk analysis', 'requirement-to-evidence',
+            'status', 'risk profile', 'profile rationale', 'requirements', 'risk analysis', 'requirement-to-evidence',
             'negative-path and boundary tests', 'integration verification', 'recovery plan', 'approval gates',
             'independent review', 'acceptance criteria', 'required evidence', 'verification', 'files changed', 'remaining risks'
         )
@@ -335,7 +393,7 @@ if ($ProfileName -ne 'prototype') {
         }
 
         foreach ($s in @('risk analysis', 'negative-path and boundary tests', 'integration verification', 'recovery plan', 'independent review')) {
-            if (-not (Test-SectionContent $s)) { Write-Invalid "high-assurance section '## $s' must have content." }
+            if (-not (Test-SectionRealContent $s)) { Write-Invalid "high-assurance section '## $s' must contain real content (no headings, placeholders, or separators)." }
         }
     }
 }
@@ -359,8 +417,19 @@ if ($ProfileName -ne 'prototype') {
             $gdet = $m.Groups[3].Value.Trim()
             if (-not $gateSeen.Add($gid)) { Write-Invalid "approval gate '$gid' is declared more than once." }
             if ($gbox -match '[xX]') { $checked++ } else { $unchecked++ }
-            if ($gdet -notmatch '^approved\s+by\s+.+\s+on\s+[\w@./-]+\s*$') {
-                Write-Invalid "approval gate '$gid' must be in the form '- [x] AG-N: Approved by <approver> on <date>'."
+            if ($gdet -notmatch '^approved\s+by\s+.+\s+on\s+\d{4}-\d{2}-\d{2}\s*$') {
+                Write-Invalid "approval gate '$gid' must be in the form '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'."
+            }
+            if ($gbox -match '[xX]') {
+                if ($gdet -match '<approver>|TBD|pending|unknown|n/a|not\s+approved|approval\s+not\s+granted') {
+                    Write-Invalid "approval gate '$gid' must not use placeholder values."
+                }
+                $dateMatch = [regex]::Match($gdet, '\d{4}-\d{2}-\d{2}')
+                if (-not $dateMatch.Success) { Write-Invalid "approval gate '$gid' must record an ISO date YYYY-MM-DD." }
+                if (-not (Test-IsoDate $dateMatch.Value)) { Write-Invalid "approval gate '$gid' has an invalid ISO date '$($dateMatch.Value)'." }
+                $approver = $gdet -replace '^approved\s+by\s+', '' -replace '\s+on\s+\d{4}-\d{2}-\d{2}\s*$', ''
+                if (-not $approver) { Write-Invalid "approval gate '$gid' must record an approver." }
+                if ($approver -match '[<>]') { Write-Invalid "approval gate '$gid' must not use template placeholders." }
             }
         }
     }

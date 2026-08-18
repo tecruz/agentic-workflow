@@ -205,7 +205,53 @@ validate_table() {
     printf -v "$outvar" '%s' "$ids"
 }
 
-sorted_unique() { printf '%s\n' "$@" | sort -u; }
+# sorted_unique <ids...> — prints the unique ids in sorted order regardless of
+# input order. Each argument may itself be a space-separated list, so a single
+# space-separated id string and a real array of ids both compare order-freely.
+sorted_unique() {
+    printf '%s\n' "$@" | tr '[:space:]' '\n' | sed '/^$/d' | sort -u
+}
+
+# validate_date <YYYY-MM-DD> — returns 0 when the value is a real calendar date.
+validate_date() {
+    local d="$1" y m day rest leap max
+    printf '%s' "$d" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' || return 1
+    y="${d%%-*}"; rest="${d#*-}"; m="${rest%%-*}"; day="${rest#*-}"
+    y=$((10#$y)); m=$((10#$m)); day=$((10#$day))
+    [ "$m" -ge 1 ] && [ "$m" -le 12 ] || return 1
+    [ "$day" -ge 1 ] || return 1
+    leap=0
+    if [ $(( y % 4 )) -eq 0 ] && { [ $(( y % 100 )) -ne 0 ] || [ $(( y % 400 )) -eq 0 ]; }; then
+        leap=1
+    fi
+    case "$m" in
+        1|3|5|7|8|10|12) max=31 ;;
+        4|6|9|11) max=30 ;;
+        2) max=$(( 28 + leap )) ;;
+    esac
+    [ "$day" -le "$max" ] || return 1
+    return 0
+}
+
+# section_has_real_content <name> — returns 0 when the section has at least one
+# authoritative content line that is not a heading, a table separator, an empty
+# bullet, or a placeholder such as TBD / TODO / Pending / None provided.
+section_has_real_content() {
+    local content line text
+    content="$(section_content "$1" || true)"
+    while IFS= read -r line || [ -n "$line" ]; do
+        printf '%s' "$line" | grep -qE '^[[:space:]]*#' && continue
+        case "$line" in
+            *'---'*) continue ;;
+        esac
+        text="$(printf '%s' "$line" | sed -E 's/^[[:space:]]*[-*+][[:space:]]+//; s/[[:space:]]+$//')"
+        [ -n "$text" ] || continue
+        printf '%s' "$text" | grep -qiE '^(tbd|todo|pending|none[[:space:]]+provided|none[[:space:]]+identified)[[:space:]]*$' \
+            && continue
+        return 0
+    done <<< "$content"
+    return 1
+}
 
 # ---------------------------------------------------------------------------
 # Scan: drop non-authoritative Markdown (fenced code blocks, HTML comments, and
@@ -218,8 +264,13 @@ SUBSECTIONS=()
 SUB_SECTION=()
 PROFILE_DECL=0
 PROFILE=""
+PROFILE_IN_RISK=0
 STATUS_DECL=0
 STATUS=""
+STATUS_IN_STATUS=0
+UPDATED_COUNT=0
+UPDATED=""
+UPDATED_IN_STATUS=0
 in_fence=0
 in_comment=0
 cur=""
@@ -269,16 +320,25 @@ while IFS= read -r line || [ -n "$line" ]; do
             continue
             ;;
     esac
-    if printf '%s' "$line" | grep -qiE '^[[:space:]]*Profile[[:space:]]*:'; then
+    if printf '%s' "$line" | grep -qiE '^[[:space:]]*profile[[:space:]]*:'; then
         PROFILE_DECL=$(( PROFILE_DECL + 1 ))
+        [ "$cur" = "risk profile" ] && PROFILE_IN_RISK=1
         if [ -z "$PROFILE" ]; then
-            PROFILE="$(printf '%s\n' "$line" | sed -E 's/^[[:space:]]*[Pp]rofile[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]*$//' | lower)"
+            PROFILE="$(printf '%s\n' "$line" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]*profile[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]*$//')"
         fi
     fi
-    if printf '%s' "$line" | grep -qiE '^[[:space:]]*[-*]*[[:space:]]*\*?[Ss]tatus[[:space:]]*:'; then
+    if printf '%s' "$line" | grep -qiE '^[[:space:]]*[-*]*[[:space:]]*\*?status[[:space:]]*:'; then
         STATUS_DECL=$(( STATUS_DECL + 1 ))
+        [ "$cur" = "status" ] && STATUS_IN_STATUS=1
         if [ -z "$STATUS" ]; then
-            STATUS="$(printf '%s\n' "$line" | sed -E 's/^[[:space:]]*[-*]*[[:space:]]*\*?[Ss]tatus[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]*$//' | lower)"
+            STATUS="$(printf '%s\n' "$line" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]*[-*]*[[:space:]]*\*?status[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]*$//')"
+        fi
+    fi
+    if printf '%s' "$line" | grep -qiE '^[[:space:]]*updated[[:space:]]*:'; then
+        UPDATED_COUNT=$(( UPDATED_COUNT + 1 ))
+        [ "$cur" = "status" ] && UPDATED_IN_STATUS=1
+        if [ -z "$UPDATED" ]; then
+            UPDATED="$(printf '%s\n' "$line" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]*updated[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]*$//')"
         fi
     fi
     CONTENT_LINES+=("$line")
@@ -288,15 +348,21 @@ done < "$TASK_FILE"
 # Profile and status declarations.
 # ---------------------------------------------------------------------------
 [ "$PROFILE_DECL" -eq 1 ] || fail_invalid "task must declare exactly one 'Profile:' (found $PROFILE_DECL)."
+[ "$PROFILE_IN_RISK" -eq 1 ] || fail_invalid "Profile: must be declared inside '## Risk profile'."
 case "$PROFILE" in
     prototype|standard|high-assurance) ;;
     *) fail_invalid "task must declare a recognized risk profile (prototype, standard, or high-assurance)." ;;
 esac
 [ "$STATUS_DECL" -eq 1 ] || fail_invalid "task must declare exactly one 'Status:' (found $STATUS_DECL)."
+[ "$STATUS_IN_STATUS" -eq 1 ] || fail_invalid "Status: must be declared inside '## Status'."
 case "$STATUS" in
     planned|in-progress|blocked|done) ;;
     *) fail_invalid "task status must be one of: planned, in-progress, blocked, done (found '$STATUS')." ;;
 esac
+[ "$UPDATED_COUNT" -eq 1 ] || fail_invalid "task must declare exactly one 'Updated:' (found $UPDATED_COUNT)."
+[ "$UPDATED_IN_STATUS" -eq 1 ] || fail_invalid "Updated: must be declared inside '## Status'."
+[ -n "$UPDATED" ] || fail_invalid "Updated: must have a value."
+validate_date "$UPDATED" || fail_invalid "Updated: must be a valid ISO date YYYY-MM-DD (found '$UPDATED')."
 COMPLETED=0
 [ "$STATUS" = "done" ] && COMPLETED=1
 if [ "$HANDOFF" -eq 1 ] && [ "$COMPLETED" -eq 0 ]; then
@@ -330,14 +396,14 @@ REQUIRED_SECTIONS=()
 REQUIRED_SUBSECTIONS=()
 case "$PROFILE" in
     prototype)
-        REQUIRED_SECTIONS=( "risk profile" "profile rationale" "task goal" "smoke verification" "known limitations" "handoff" )
+        REQUIRED_SECTIONS=( "status" "risk profile" "profile rationale" "task goal" "smoke verification" "known limitations" "handoff" )
         ;;
     standard)
-        REQUIRED_SECTIONS=( "risk profile" "profile rationale" "acceptance criteria" "required evidence" "approval gates" "verification" "files changed" "remaining risks" )
+        REQUIRED_SECTIONS=( "status" "risk profile" "profile rationale" "acceptance criteria" "required evidence" "approval gates" "verification" "files changed" "remaining risks" )
         REQUIRED_SUBSECTIONS=( "baseline" "final" )
         ;;
     high-assurance)
-        REQUIRED_SECTIONS=( "risk profile" "profile rationale" "requirements" "risk analysis" "requirement-to-evidence" "negative-path and boundary tests" "integration verification" "recovery plan" "approval gates" "independent review" "acceptance criteria" "required evidence" "verification" "files changed" "remaining risks" )
+        REQUIRED_SECTIONS=( "status" "risk profile" "profile rationale" "requirements" "risk analysis" "requirement-to-evidence" "negative-path and boundary tests" "integration verification" "recovery plan" "approval gates" "independent review" "acceptance criteria" "required evidence" "verification" "files changed" "remaining risks" )
         REQUIRED_SUBSECTIONS=( "baseline" "final" )
         ;;
 esac
@@ -401,7 +467,7 @@ if [ "$PROFILE" != "prototype" ]; then
         fi
 
         for s in "risk analysis" "negative-path and boundary tests" "integration verification" "recovery plan" "independent review"; do
-            section_has_content "$s" || fail_invalid "high-assurance section '## $s' must have content."
+            section_has_real_content "$s" || fail_invalid "high-assurance section '## $s' must contain real content (no headings, placeholders, or separators)."
         done
     fi
 fi
@@ -433,8 +499,21 @@ if [ "$PROFILE" != "prototype" ]; then
                 [xX]) checked=$(( checked + 1 )) ;;
                 *) unchecked=$(( unchecked + 1 )) ;;
             esac
-            printf '%s' "$gdet" | grep -qiE '^approved[[:space:]]+by[[:space:]]+.+[[:space:]]+on[[:space:]]+[[:alnum:]@./_-]+[[:space:]]*$' \
-                || fail_invalid "approval gate '$gid' must be in the form '- [x] AG-N: Approved by <approver> on <date>'."
+            printf '%s' "$gdet" | grep -qiE '^approved[[:space:]]+by[[:space:]]+.+[[:space:]]+on[[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]*$' \
+                || fail_invalid "approval gate '$gid' must be in the form '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'."
+            case "$gbox" in
+                [xX])
+                    printf '%s' "$gdet" | grep -qiE '<approver>|TBD|pending|unknown|n/a|not[[:space:]]+approved|approval[[:space:]]+not[[:space:]]+granted' \
+                        && fail_invalid "approval gate '$gid' must not use placeholder values."
+                    adate="$(printf '%s\n' "$gdet" | sed -nE 's/^.*[[:space:]]+on[[:space:]]+([0-9]{4}-[0-9]{2}-[0-9]{2})[[:space:]]*$/\1/p')"
+                    [ -n "$adate" ] || fail_invalid "approval gate '$gid' must record an ISO date YYYY-MM-DD."
+                    validate_date "$adate" || fail_invalid "approval gate '$gid' has an invalid ISO date '$adate'."
+                    approver="$(printf '%s\n' "$gdet" | awk '{ sub(/^Approved[[:space:]]+by[[:space:]]+/, ""); sub(/[[:space:]]+on[[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]*$/, ""); print }')"
+                    [ -n "$approver" ] || fail_invalid "approval gate '$gid' must record an approver."
+                    printf '%s' "$approver" | grep -q '[<>]' \
+                        && fail_invalid "approval gate '$gid' must not use template placeholders."
+                    ;;
+            esac
         fi
     done <<< "$gates"
 

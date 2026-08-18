@@ -86,6 +86,9 @@ jobs:
           $results | Format-Table -AutoSize
           if ($results) { exit 1 }
 
+      - name: Validate the completed task in handoff mode
+        run: bash .agentic/scripts/validate-task.sh --handoff .agentic/tasks/TASK-002-risk-profiles-and-evidence-contracts.md
+
       - name: Run fixture smoke harness
         run: bash tests/fixtures/run-fixtures.sh .agentic/scripts/verify.sh
 
@@ -134,6 +137,10 @@ jobs:
           }
           $results | Format-Table -AutoSize
           if ($results) { exit 1 }
+
+      - name: Validate the completed task in handoff mode
+        shell: pwsh
+        run: pwsh -NoProfile -File .agentic/scripts/validate-task.ps1 -Handoff .agentic/tasks/TASK-002-risk-profiles-and-evidence-contracts.md
 
       - name: Run fixture smoke harness
         shell: pwsh
