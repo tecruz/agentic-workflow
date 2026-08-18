@@ -79,10 +79,10 @@ classify() {  # classify <fixture>
     have pwsh || skip "pwsh not available"
     local f bash_code ps_code
     for f in "$FIXTURES"/*.md; do
-        bash "$VALIDATE" "$f" >/dev/null 2>&1
-        bash_code=$?
-        pwsh -NoProfile -File "$REPO_ROOT/.agentic/scripts/validate-task.ps1" "$f" >/dev/null 2>&1
-        ps_code=$?
+        run bash "$VALIDATE" "$f"
+        bash_code=$status
+        run pwsh -NoProfile -File "$REPO_ROOT/.agentic/scripts/validate-task.ps1" "$f"
+        ps_code=$status
         if [ "$bash_code" -ne "$ps_code" ]; then
             echo "classification mismatch for '$(basename "$f")': bash=$bash_code ps=$ps_code" >&2
             return 1

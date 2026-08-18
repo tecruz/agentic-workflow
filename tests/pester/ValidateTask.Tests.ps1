@@ -6,8 +6,8 @@ Describe 'validate-task.ps1 risk-profile validator' {
 
     BeforeEach {
         $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-        $validate = Join-Path $repoRoot '.agentic\scripts\validate-task.ps1'
-        $fixtures = Join-Path $repoRoot 'tests\fixtures\tasks'
+        $validate = Join-Path $repoRoot '.agentic' 'scripts' 'validate-task.ps1'
+        $fixtures = Join-Path $repoRoot 'tests' 'fixtures' 'tasks'
 
         function Invoke-Validator([string]$fixture) {
             $out = & $validate (Join-Path $fixtures $fixture) 2>&1
@@ -75,11 +75,13 @@ Describe 'validate-task.ps1 risk-profile validator' {
         # Probe: bash must be able to invoke the validator and read the
         # fixtures. On Windows hosts where 'bash' is WSL, Windows paths are
         # not resolvable; in that case skip the cross-language comparison.
-        bash (Join-Path $repoRoot '.agentic\scripts\validate-task.sh') (Join-Path $fixtures 'prototype-valid.md') *> $null
+        $bashValidator = Join-Path $repoRoot '.agentic' 'scripts' 'validate-task.sh'
+        $probeFixture = Join-Path $fixtures 'prototype-valid.md'
+        bash $bashValidator $probeFixture *> $null
         if ($LASTEXITCODE -notin 0, 1, 2) { return }
         Get-ChildItem -LiteralPath $fixtures -Filter *.md | ForEach-Object {
             $psCode = Invoke-Validator $_.Name
-            bash (Join-Path $repoRoot '.agentic\scripts\validate-task.sh') $_.FullName *> $null
+            bash $bashValidator $_.FullName *> $null
             $bashCode = $LASTEXITCODE
             $psCode | Should -Be $bashCode
         }
