@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-08-18
+
+### Added
+- **Risk profiles and evidence contracts (PR #7).** Tasks now declare a risk
+  profile — `prototype`, `standard` (default), or `high-assurance` — that
+  determines the evidence a task must carry, the verification depth, the
+  handoff contents, and the approval gates.
+  - `.agentic/profiles/` documents the three profiles, the escalation signals
+    (authentication, payments, secrets, data migrations, production
+    infrastructure, irreversible operations, public API compatibility,
+    privacy, safety-critical behavior), and the default-is-`standard` /
+    never-downgrade-silently rules.
+  - `.agentic/templates/task.md` is a risk-aware task template with profile,
+    rationale, acceptance criteria (`AC-N`), required evidence, approval
+    gates, and remaining risks.
+  - `.agentic/scripts/validate-task.sh` / `validate-task.ps1` structurally
+    validate task files: recognized profile, required sections per profile,
+    `AC-N` identifiers, evidence-table entries, no `Pending` evidence on a
+    completed task, recorded approvals before completion, and the prototype
+    production-readiness warning. Exit codes: `0` VALID, `1` INVALID,
+    `2` BLOCKED. The Bash and PowerShell validators are held to identical
+    classifications by a fixture parity test.
+  - The lifecycle is now `DISCOVER → CLASSIFY RISK → PLAN → IMPLEMENT →
+    VERIFY → HANDOFF` (`.agentic/WORKFLOW.md`, `AGENTS.md`).
+  - Profile files, the task template, and the validators are registered as
+    `managed` files in both installers and travel in the distribution bundle;
+    adopter task files are never overwritten.
+  - New ADR: `docs/decisions/ADR-0008-risk-profiles-and-evidence-contracts.md`.
+
 ## [1.2.2] - 2026-08-18
 
 Release-integrity hardfix; addresses the `feedback (12).md` and `feedback (13).md`

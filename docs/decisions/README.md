@@ -13,3 +13,5 @@ project-owned copy of this layout under `.agentic/decisions/`.
 | [ADR-0004](ADR-0004-handoff-lifecycle.md) | Handoff lifecycle with bounded self-healing | Accepted |
 | [ADR-0005](ADR-0005-per-project-state.md) | Per-project state: tasks, decisions, STATUS | Accepted |
 | [ADR-0006](ADR-0006-installer-lifecycle-hardening.md) | Installer lifecycle hardening: read-only plans, confined manifests, proven legacy ownership | Accepted |
+| [ADR-0007](ADR-0007-extension-versioning.md) | Extension versioning: how future protocol extensions evolve | Accepted |
+| [ADR-0008](ADR-0008-risk-profiles-and-evidence-contracts.md) | Risk profiles and evidence contracts: prototype/standard/high-assurance with a structural task validator | Accepted |

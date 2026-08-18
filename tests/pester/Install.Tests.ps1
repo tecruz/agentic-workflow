@@ -70,6 +70,38 @@ Describe 'install.ps1' {
         finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
     }
 
+    It 'fresh install creates risk profiles, validators, and the task template' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp *> $null
+            Test-Path (Join-Path $tmp '.agentic\profiles\README.md') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\profiles\prototype.md') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\profiles\standard.md') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\profiles\high-assurance.md') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\scripts\validate-task.sh') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\scripts\validate-task.ps1') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\templates\task.md') | Should -Be $true
+            # all new files are framework-managed and recorded in the manifest
+            $manifest = Get-Content -Raw (Join-Path $tmp '.agentic\install-manifest.tsv')
+            $manifest -match "\.agentic/profiles/README\.md`tmanaged" | Should -Be $true
+            $manifest -match "\.agentic/scripts/validate-task\.ps1`tmanaged" | Should -Be $true
+            $manifest -match "\.agentic/templates/task\.md`tmanaged" | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'adopter task files in .agentic/tasks are never overwritten' {
+        $tmp = New-TestDir
+        try {
+            New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic\tasks') -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\tasks\TASK-900-adopter.md') -Value '# TASK-900: adopter task'
+            & $install -Target $tmp *> $null
+            (Get-Content -Raw (Join-Path $tmp '.agentic\tasks\TASK-900-adopter.md')) -match 'adopter task' | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\templates\task.md') | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
     It 'second run is idempotent and produces no conflicts' {
         $tmp = New-TestDir
         try {
@@ -1162,7 +1194,7 @@ Describe 'install.ps1' {
             & $install -Target $tmp *> $null
             $LASTEXITCODE | Should -Be 0
             Test-Path (Join-Path $tmp '.agentic\VERSION') | Should -Be $true
-            (Get-Content -Raw (Join-Path $tmp '.agentic\VERSION')).Trim() | Should -Be '1.2.2'
+            (Get-Content -Raw (Join-Path $tmp '.agentic\VERSION')).Trim() | Should -Be (Get-Content -Raw (Join-Path $repoRoot '.agentic\VERSION')).Trim()
             (Get-Content -Raw (Join-Path $tmp '.agentic\version')) -match 'lowercase custom' | Should -Be $true
             Test-Path (Join-Path $tmp '.agentic\version.new') | Should -Be $false
         }
@@ -1368,16 +1400,20 @@ Describe 'install.ps1' {
             Test-Path (Join-Path $bundleRoot 'SECURITY.md') | Should -Be $false
             Test-Path (Join-Path $bundleRoot '.agentic\templates\checks.tsv') | Should -Be $true
             Test-Path (Join-Path $bundleRoot '.agentic\scripts\verify.ps1') | Should -Be $true
+            Test-Path (Join-Path $bundleRoot '.agentic\profiles\README.md') | Should -Be $true
+            Test-Path (Join-Path $bundleRoot '.agentic\profiles\high-assurance.md') | Should -Be $true
+            Test-Path (Join-Path $bundleRoot '.agentic\scripts\validate-task.ps1') | Should -Be $true
+            Test-Path (Join-Path $bundleRoot '.agentic\templates\task.md') | Should -Be $true
         }
         finally { Remove-Item -Recurse -Force $extractDir -ErrorAction SilentlyContinue }
     }
 
     # -----------------------------------------------------------------------
     # Release-to-release upgrade test: install from a v1.2.1-like bundle,
-    # modify project state, then upgrade using the current (v1.2.2) bundle.
+    # modify project state, then upgrade using the current bundle.
     # -----------------------------------------------------------------------
 
-    It 'upgrade from v1.2.1 bundle to v1.2.2 preserves project state' {
+    It 'upgrade from v1.2.1 bundle to the current bundle preserves project state' {
         $bash = Get-Command bash -ErrorAction SilentlyContinue
         if (-not $bash) { Set-ItResult -Skipped -Because 'bash (git-bash/WSL) is required to build the bundle' }
 
@@ -1399,7 +1435,7 @@ Describe 'install.ps1' {
         if ($LASTEXITCODE -ne 0) { throw 'v1.2.1 build-bundle.sh failed' }
         $v121Dir = Join-Path $v121Src 'dist' 'agentic-workflow-1.2.1'
 
-        # Build the current (v1.2.2) bundle
+        # Build the current bundle
         $version = (Get-Content -Raw (Join-Path $repoRoot '.agentic\VERSION')).Trim()
         & $bash.Source "scripts/build-bundle.sh" --no-archives *> $null
         if ($LASTEXITCODE -ne 0) { throw 'build-bundle.sh failed' }
@@ -1426,7 +1462,7 @@ Describe 'install.ps1' {
             # Step 4: Add a reviewed candidate (correct field order: requirement, check-id, dir, shell, command)
             Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.generated.tsv') -Value "required`tcustom-check`t.`tnpm`ttest"
 
-            # Step 5: Upgrade using current bundle (v1.2.2)
+            # Step 5: Upgrade using current bundle
             & (Join-Path $currentBundle 'install.ps1') -Target $tmp -Tools all *> $null
             $LASTEXITCODE | Should -Be 0
 

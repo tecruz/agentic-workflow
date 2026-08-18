@@ -7,7 +7,7 @@ This document details the 5-Phase Agentic Development Loop required for all soft
 ## The 5-Phase Loop
 
 ```
-DISCOVER → PLAN → IMPLEMENT → VERIFY → HANDOFF
+DISCOVER → CLASSIFY RISK → PLAN → IMPLEMENT → VERIFY → HANDOFF
 ```
 
 ---
@@ -30,15 +30,30 @@ DISCOVER → PLAN → IMPLEMENT → VERIFY → HANDOFF
 
 ---
 
+## Risk Classification (with Discover)
+
+Before planning, classify the task's risk profile per `.agentic/profiles/README.md` and `.agentic/profiles/`.
+
+1. **Select the profile**:
+   - The default is `standard`.
+   - Use `prototype` only when the user explicitly requests an experiment, spike, or disposable prototype with no production or persistent impact.
+   - Escalate to `high-assurance` for authentication, authorization, payments, secrets or cryptography, database schemas or destructive migrations, privacy or regulated data, production infrastructure, irreversible operations, public API compatibility, or safety-critical/healthcare behavior.
+2. **Never downgrade silently**:
+   - A lower profile never overrides mandatory safety or approval constraints.
+   - Mixed-risk tasks use the highest applicable profile unless split into separately-classified tasks.
+3. **Declare the profile** in the task file (see `.agentic/templates/task.md`).
+
+---
+
 ## Phase 2: Plan & Decompose
 
 **Goal**: Transform user requests into atomic, verifiable steps.
 
 1. **Task Breakdown**:
-   - Create or update one task file per work item in `.agentic/tasks/` (`TASK-NNN-short-description.md`) with scope, acceptance criteria, and affected areas.
+   - Create or update one task file per work item in `.agentic/tasks/` (`TASK-NNN-short-description.md`) using `.agentic/templates/task.md`, declaring the risk profile and the evidence required by that profile.
    - Update `.agentic/STATUS.md` as the high-level index only.
 2. **Risk Assessment**:
-   - Identify potential breaking changes, data migrations, or API contract modifications.
+   - Identify potential breaking changes, data migrations, or API contract modifications; escalate the profile when escalation signals apply.
 3. **Clarification**:
    - If user requirements are ambiguous or high-risk, ask targeted questions before taking irreversible actions.
 4. **Baseline**:
@@ -85,16 +100,19 @@ DISCOVER → PLAN → IMPLEMENT → VERIFY → HANDOFF
 
 **Goal**: Give the next human or agent everything needed to review, continue, or merge.
 
-1. **Update State**:
+1. **Validate the Task File**:
+   - Run `.agentic/scripts/validate-task.sh` or `.agentic/scripts/validate-task.ps1` on the task file. Exit codes: `0` VALID, `1` INVALID, `2` BLOCKED (missing evidence or approval on a completed task).
+2. **Update State**:
    - Mark task status and update `.agentic/STATUS.md`.
    - Record architectural decisions as immutable ADRs in `.agentic/decisions/`.
-2. **Report**:
+3. **Report**:
    - Files changed.
    - Verification commands actually run, with exit codes and concise results.
    - Pre-existing failures and whether they were distinguished from new ones.
    - Environment or dependency blockers.
    - Remaining risks and open questions.
    - Whether any commit was made.
-3. **Commit Only When Permitted**:
+   - The risk profile's handoff evidence (see the matching file in `.agentic/profiles/`).
+4. **Commit Only When Permitted**:
    - Create commits only when explicitly requested or allowed by documented project policy.
    - Otherwise leave a clean working-tree diff for review. If committing, follow Conventional Commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`) and keep commits atomic.

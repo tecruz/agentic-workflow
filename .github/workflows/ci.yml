@@ -80,7 +80,7 @@ jobs:
         shell: pwsh
         run: |
           $results = @()
-          foreach ($f in @('install.ps1', '.agentic/scripts/verify.ps1')) {
+          foreach ($f in @('install.ps1', '.agentic/scripts/verify.ps1', '.agentic/scripts/validate-task.ps1')) {
             $results += Invoke-ScriptAnalyzer -Path $f -Severity Error
           }
           $results | Format-Table -AutoSize
@@ -129,7 +129,7 @@ jobs:
         shell: pwsh
         run: |
           $results = @()
-          foreach ($f in @('install.ps1', '.agentic/scripts/verify.ps1')) {
+          foreach ($f in @('install.ps1', '.agentic/scripts/verify.ps1', '.agentic/scripts/validate-task.ps1')) {
             $results += Invoke-ScriptAnalyzer -Path $f -Severity Error
           }
           $results | Format-Table -AutoSize

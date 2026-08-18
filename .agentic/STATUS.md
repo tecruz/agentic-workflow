@@ -11,11 +11,17 @@
 - [x] v1.2.2 release-integrity hardfix (PR #6): version/changelog/tag agreement,
   reusable CI, extracted-archive and release-to-release upgrade tests, release
   workflow. Released as `v1.2.2`.
+- [ ] PR #7 — Risk profiles and evidence contracts: `prototype`/`standard`/
+  `high-assurance` profiles, a risk-aware task template, structural task
+  validators (Bash + PowerShell), lifecycle risk-classification step, and
+  managed-file registration in the installers and bundle.
+  See `.agentic/tasks/TASK-002-risk-profiles-and-evidence-contracts.md`.
 
 ## Recent Decisions
 
 - ADR-0006 — Installer lifecycle hardening: read-only plans, confined manifests, proven legacy ownership (see `docs/decisions/ADR-0006-installer-lifecycle-hardening.md`)
 - ADR-0007 — Extension versioning policy for future protocol extensions (see `docs/decisions/ADR-0007-extension-versioning.md`)
+- ADR-0008 — Risk profiles and evidence contracts (see `docs/decisions/ADR-0008-risk-profiles-and-evidence-contracts.md`)
 
 ## Notes
 

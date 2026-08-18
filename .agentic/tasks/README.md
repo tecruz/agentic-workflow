@@ -14,35 +14,49 @@ short and kebab-case.
 
 ## Template
 
+Start from `.agentic/templates/task.md`. It declares the task's risk profile
+(`prototype` | `standard` | `high-assurance` — see `.agentic/profiles/`), the
+evidence required by that profile, and its approval gates.
+
 ```markdown
 # TASK-NNN — <short description>
 
-- **Status**: open | in-progress | blocked | done | cancelled
-- **Owner**: [person or agent]
-- **Created**: [date]
-- **Updated**: [date]
+## Risk profile
 
-## Scope
-[What this task covers.]
+Profile: standard
 
-## Acceptance Criteria
-- [ ] [observable, testable condition 1]
-- [ ] [observable, testable condition 2]
+## Profile rationale
+[Why this level applies and any escalation signals.]
 
-## Affected Areas
+## Acceptance criteria
+- AC-1: [observable, testable condition]
+
+## Required evidence
+| Criterion | Evidence required | Result |
+|---|---|---|
+| AC-1 | Unit test | Pending |
+
+## Approval gates
+- None identified
+
+## Files changed
 - [modules/files]
 
-## Verification Evidence
-- Commands run and their exit codes / results (see `.agentic/scripts/verify.sh`).
-- Pre-existing failures or environment blockers, if any.
+## Verification
+### Baseline
+[Verification before changes began.]
+### Final
+[Verification after the final modification.]
 
-## Handoff Notes
-- Remaining risks, open questions, and what a future session must know.
+## Remaining risks
+[Known risks, blockers, or open questions.]
 ```
 
 ## Guidance
 
 - Update the **Status** and **Updated** fields, not the whole file, as work
   progresses.
-- Mark tasks `done` only after verification evidence exists.
+- Mark tasks `done` only after verification evidence exists and no required
+  evidence remains `Pending`; `.agentic/scripts/validate-task.sh` /
+  `validate-task.ps1` will otherwise report the task as BLOCKED (exit `2`).
 - Do not delete task files; they are the project's history.
