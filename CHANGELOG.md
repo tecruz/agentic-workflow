@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Task validator contract hardening (PR #7 follow-up).** Closes three
+  evidence-contract bypasses in `validate-task.sh` / `validate-task.ps1`:
+  - Unrecognized nonblank approval-gate prose is rejected instead of ignored,
+    so `## Approval gates` accepts only `None identified` or structured
+    `- [ ] AG-N:` / `- [x] AG-N:` records.
+  - A list item without an `AC-N` / `R-N` identifier in Acceptance criteria or
+    high-assurance Requirements is rejected, so every criterion and requirement
+    is part of the evidence contract.
+  - Table parsing state is reset at each table boundary, so the header of a
+    second empty table is no longer mistaken for the first table's data row.
+  - Eight new shared fixtures cover all three behaviors in both Bash and
+    PowerShell (100 total), and the parity tests keep the validators identical.
+
 ## [1.3.0] - 2026-08-18
 
 ### Added

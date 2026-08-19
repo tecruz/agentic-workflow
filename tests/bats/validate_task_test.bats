@@ -507,3 +507,43 @@ classify() {  # classify <fixture>
     classify na-matrix-placeholder-blocked.md
     [ "$status" -eq 2 ]
 }
+
+@test "INVALID (1) when the approval section contains unrecognized plain prose" {
+    classify approval-plain-prose-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when 'None identified' approvals are followed by unresolved prose" {
+    classify none-plus-pending-prose-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when a checked approval gate is followed by unresolved prose" {
+    classify checked-gate-plus-pending-prose-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when an acceptance criterion list entry has no AC identifier" {
+    classify unnumbered-criterion-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when a high-assurance requirement list entry has no R identifier" {
+    classify unnumbered-requirement-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when a valid criterion is followed by an unnumbered bullet" {
+    classify valid-criterion-plus-unnumbered-bullet-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when a valid requirement is followed by an unnumbered bullet" {
+    classify valid-requirement-plus-unnumbered-bullet-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when a section holds two consecutive empty tables" {
+    classify consecutive-empty-tables-invalid.md
+    [ "$status" -eq 1 ]
+}

@@ -400,6 +400,38 @@ Describe 'validate-task.ps1 risk-profile validator' {
         Invoke-Validator 'na-matrix-placeholder-blocked.md' | Should -Be 2
     }
 
+    It 'INVALID (1) when the approval section contains unrecognized plain prose' {
+        Invoke-Validator 'approval-plain-prose-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when None identified approvals are followed by unresolved prose' {
+        Invoke-Validator 'none-plus-pending-prose-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when a checked approval gate is followed by unresolved prose' {
+        Invoke-Validator 'checked-gate-plus-pending-prose-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when an acceptance criterion list entry has no AC identifier' {
+        Invoke-Validator 'unnumbered-criterion-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when a high-assurance requirement list entry has no R identifier' {
+        Invoke-Validator 'unnumbered-requirement-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when a valid criterion is followed by an unnumbered bullet' {
+        Invoke-Validator 'valid-criterion-plus-unnumbered-bullet-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when a valid requirement is followed by an unnumbered bullet' {
+        Invoke-Validator 'valid-requirement-plus-unnumbered-bullet-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when a section holds two consecutive empty tables' {
+        Invoke-Validator 'consecutive-empty-tables-invalid.md' | Should -Be 1
+    }
+
     It 'PowerShell and Bash classifiers agree on every fixture' {
         if (-not (Get-Command bash -ErrorAction SilentlyContinue)) { return }
         # Probe: bash must be able to invoke the validator and read the

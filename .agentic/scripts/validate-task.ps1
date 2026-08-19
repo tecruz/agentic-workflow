@@ -300,7 +300,12 @@ function Get-ContentClass {
     $tableHeaderSeen = $false
     $sawLines = $false
     foreach ($line in $Content) {
-        if ($line -notmatch '\S') { continue }
+        if ($line -notmatch '\S') {
+            # A blank line ends any in-progress table; reset so the header of a
+            # following table is not mistaken for the prior table's data row.
+            $tableHeaderSeen = $false
+            continue
+        }
         if ($line -match '^\s*#') { continue }
         if ($line -match '---') { continue }
         $sawLines = $true
@@ -312,6 +317,8 @@ function Get-ContentClass {
             $tableHeaderSeen = $true
             continue
         }
+        # A non-table line ends any in-progress table.
+        $tableHeaderSeen = $false
         $text = ($line -replace '^\s*[-*+]\s+', '').Trim()
         if (-not $text) { continue }
         if (Test-TextIsPlaceholder $text) { continue }
@@ -383,6 +390,7 @@ function Get-CanonicalIds {
     $script:MultiIds = $false
     $script:BadForm = $false
     $script:DupIds = $false
+    $script:Unnumbered = $false
     $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     $out = [System.Collections.Generic.List[string]]::new()
     foreach ($line in $ContentLines) {
@@ -390,7 +398,7 @@ function Get-CanonicalIds {
         $lowLine = $line.ToLowerInvariant()
         $idMatches = [regex]::Matches($lowLine, $IdPattern)
         if ($idMatches.Count -gt 1) { $script:MultiIds = $true; continue }
-        if ($idMatches.Count -eq 0) { continue }
+        if ($idMatches.Count -eq 0) { $script:Unnumbered = $true; continue }
         if ($lowLine -notmatch "^\s*[-*+]\s*$IdPattern\s*:\s*\S") { $script:BadForm = $true; continue }
         $id = $idMatches[0].Value
         if (-not $seen.Add($id)) { $script:DupIds = $true }
@@ -524,6 +532,7 @@ if ($ProfileName -ne 'prototype') {
     $acIds = Get-CanonicalIds (Get-SectionContent 'acceptance criteria') 'ac-\d+'
     if ($script:MultiIds) { Write-Invalid "an acceptance criterion list entry declares more than one 'AC-N' identifier." }
     if ($script:BadForm) { Write-Invalid "acceptance criteria must use the form '- AC-N: <description>'." }
+    if ($script:Unnumbered) { Write-Invalid "every acceptance criterion list entry must begin with exactly one 'AC-N:' identifier; explanatory prose belongs in a separate Notes section." }
     if ($acIds.Count -eq 0) { Write-Invalid "acceptance criteria must declare at least one 'AC-N' identifier." }
     if ($script:DupIds) { Write-Invalid "acceptance criteria declare duplicate 'AC-N' identifiers." }
     if ($Completed) {
@@ -544,6 +553,7 @@ if ($ProfileName -ne 'prototype') {
         $rIds = Get-CanonicalIds (Get-SectionContent 'requirements') 'r-\d+'
         if ($script:MultiIds) { Write-Invalid "a high-assurance requirement list entry declares more than one 'R-N' identifier." }
         if ($script:BadForm) { Write-Invalid "high-assurance requirements must use the form '- R-N: <description>'." }
+        if ($script:Unnumbered) { Write-Invalid "every high-assurance requirement list entry must begin with exactly one 'R-N:' identifier; explanatory prose belongs in a separate Notes section." }
         if ($rIds.Count -eq 0) { Write-Invalid "high-assurance requirements must declare at least one 'R-N' identifier." }
         if ($script:DupIds) { Write-Invalid "high-assurance requirements declare duplicate 'R-N' identifiers." }
         if ($Completed) {
@@ -625,6 +635,7 @@ if ($ProfileName -ne 'prototype') {
         if ($glLow -match '^[-*+]\s+') {
             Write-Invalid "malformed approval entry in '## Approval gates': '$gl'."
         }
+        Write-Invalid "malformed approval entry in '## Approval gates': '$gl'."
     }
 
     if ($hasNone -and $gateCount -gt 0) {

@@ -152,12 +152,13 @@ collect_canonical_ids() {
     MULTI_IDS=0
     BAD_FORM=0
     DUP_IDS=0
+    UNNUMBERED=0
     while IFS= read -r line || [ -n "$line" ]; do
         printf '%s' "$line" | grep -qE '^[[:space:]]*[-*+][[:space:]]+' || continue
         lowline="$(printf '%s' "$line" | lower)"
         n="$(printf '%s' "$lowline" | grep -oE "$idpat" | wc -l | tr -d '[:space:]')"
         [ "$n" -gt 1 ] && { MULTI_IDS=1; continue; }
-        [ "$n" -eq 1 ] || continue
+        [ "$n" -eq 1 ] || { UNNUMBERED=1; continue; }
         printf '%s' "$lowline" | grep -qE "^[[:space:]]*[-*+][[:space:]]*$idpat[[:space:]]*:[[:space:]]*[^[:space:]]" \
             || { BAD_FORM=1; continue; }
         id="$(printf '%s' "$lowline" | grep -oE "$idpat" | head -1)"
@@ -311,7 +312,14 @@ content_class() {
     table_header_seen=0
     saw_lines=0
     while IFS= read -r line || [ -n "$line" ]; do
-        printf '%s' "$line" | grep -q '[^[:space:]]' || continue
+        if printf '%s' "$line" | grep -q '[^[:space:]]'; then
+            :
+        else
+            # A blank line ends any in-progress table; reset so the header of a
+            # following table is not mistaken for the prior table's data row.
+            table_header_seen=0
+            continue
+        fi
         printf '%s' "$line" | grep -qE '^[[:space:]]*#' && continue
         case "$line" in
             *'---'*) continue ;;
@@ -325,6 +333,8 @@ content_class() {
             table_header_seen=1
             continue
         fi
+        # A non-table line ends any in-progress table.
+        table_header_seen=0
         text="$(printf '%s' "$line" | sed -E 's/^[[:space:]]*[-*+][[:space:]]+//; s/[[:space:]]+$//')"
         [ -n "$text" ] || continue
         text_is_placeholder "$text" && continue
@@ -628,6 +638,7 @@ if [ "$PROFILE" != "prototype" ]; then
     collect_canonical_ids "$ac_content" 'ac-[0-9]+' ac_ids
     [ "$MULTI_IDS" -eq 0 ] || fail_invalid "an acceptance criterion list entry declares more than one 'AC-N' identifier."
     [ "$BAD_FORM" -eq 0 ] || fail_invalid "acceptance criteria must use the form '- AC-N: <description>'."
+    [ "$UNNUMBERED" -eq 0 ] || fail_invalid "every acceptance criterion list entry must begin with exactly one 'AC-N:' identifier; explanatory prose belongs in a separate Notes section."
     [ -n "$ac_ids" ] || fail_invalid "acceptance criteria must declare at least one 'AC-N' identifier."
     [ "$DUP_IDS" -eq 0 ] || fail_invalid "acceptance criteria declare duplicate 'AC-N' identifiers."
     if [ "$COMPLETED" -eq 1 ]; then
@@ -651,6 +662,7 @@ if [ "$PROFILE" != "prototype" ]; then
         collect_canonical_ids "$req_content" 'r-[0-9]+' r_ids
         [ "$MULTI_IDS" -eq 0 ] || fail_invalid "a high-assurance requirement list entry declares more than one 'R-N' identifier."
         [ "$BAD_FORM" -eq 0 ] || fail_invalid "high-assurance requirements must use the form '- R-N: <description>'."
+        [ "$UNNUMBERED" -eq 0 ] || fail_invalid "every high-assurance requirement list entry must begin with exactly one 'R-N:' identifier; explanatory prose belongs in a separate Notes section."
         [ -n "$r_ids" ] || fail_invalid "high-assurance requirements must declare at least one 'R-N' identifier."
         [ "$DUP_IDS" -eq 0 ] || fail_invalid "high-assurance requirements declare duplicate 'R-N' identifiers."
         if [ "$COMPLETED" -eq 1 ]; then
@@ -734,6 +746,7 @@ if [ "$PROFILE" != "prototype" ]; then
         if printf '%s' "$gl_low" | grep -qE '^[-*+][[:space:]]+'; then
             fail_invalid "malformed approval entry in '## Approval gates': '$gl'."
         fi
+        fail_invalid "malformed approval entry in '## Approval gates': '$gl'."
     done <<< "$gates"
 
     if [ "$has_none" -eq 1 ] && [ "$gate_count" -gt 0 ]; then
