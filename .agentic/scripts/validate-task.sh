@@ -195,15 +195,12 @@ table_row_parts() {
 # table_row_is_separator — returns 0 when every non-empty cell of CELLS is a
 # Markdown `---` (or `:---:` etc.) separator and at least one cell is non-empty.
 table_row_is_separator() {
-    local c saw=0
-    [ "$CELL_COUNT" -gt 0 ] || return 1
+    local c
+    [ "$CELL_COUNT" -eq 3 ] || return 1
     for c in "${CELLS[@]}"; do
-        if [ -n "$c" ]; then
-            printf '%s' "$c" | grep -qE '^:?-+:?$' || return 1
-            saw=1
-        fi
+        printf '%s' "$c" | grep -qE '^:?-{3,}:?$' || return 1
     done
-    [ "$saw" -eq 1 ]
+    return 0
 }
 
 # validate_table <section> <id-pattern> <label> <header-label> <outvar> —
@@ -223,6 +220,7 @@ validate_table() {
     content="$(section_content "$section" || true)"
     lp="$(printf '%s' "$idpat" | lower)"
     hl="$(printf '%s' "$header_label" | lower)"
+    idprefix="$(printf '%s' "$idpat" | sed -E 's/\[.*//' | lower)"
     TABLE_DUP=0
     HAS_UNRESOLVED=0
     while IFS= read -r line || [ -n "$line" ]; do
@@ -232,6 +230,11 @@ validate_table() {
             # A pipe-delimited line that omitted its leading pipe is a table
             # row; reject it rather than silently treating it as prose.
             printf '%s' "$trimmed" | grep -qE '[^|]+\|[^|]+\|[^|]+' \
+                && fail_invalid "$label table row '$trimmed' must begin with a leading pipe."
+            # Also reject a row that opens with a known identifier or the
+            # expected header label even when its other cells are empty or
+            # missing, so a malformed duplicate cannot hide an unresolved row.
+            printf '%s' "$trimmed" | grep -qiE "^($idprefix|$hl)[^|]*\|" \
                 && fail_invalid "$label table row '$trimmed' must begin with a leading pipe."
             continue
         fi
@@ -350,10 +353,15 @@ table_row_has_content() {
 }
 
 # has_meaningful_char <text> — returns 0 when the text contains at least one
-# letter or number. Symbol-only values ('_', '()', '+++', '^^^') carry no real
-# content regardless of which punctuation characters they use.
+# meaningful character: an ASCII letter/number or any non-ASCII byte.
+# Symbol-only values ('_', '()', '+++', '^^^') carry no real content.
+# Locale policy (deterministic parity with the PowerShell \p{L}\p{N} check):
+# LC_ALL=C makes [^[:space:][:punct:]] match only ASCII alphanumerics plus
+# any non-ASCII byte, so Unicode letters/digits are meaningful regardless of
+# the caller's locale. Non-ASCII punctuation is accepted as meaningful too,
+# which matches PowerShell's treatment of any non-ASCII character.
 has_meaningful_char() {
-    printf '%s' "$1" | grep -q '[[:alnum:]]'
+    printf '%s' "$1" | LC_ALL=C grep -q '[^[:space:][:punct:]]'
 }
 
 # text_is_placeholder <text> — returns 0 when <text> is template placeholder
@@ -363,11 +371,30 @@ has_meaningful_char() {
 # a whole bracketed or angle-bracket marker, a bare date, or the
 # profile-rationale instruction. Real sentences are not placeholders.
 text_is_placeholder() {
-    local t="$1" n
+    local t="$1" n prev
     n="$(printf '%s' "$t" | sed -E 's/^[[:space:]]*[-*+][[:space:]]+//; s/[[:space:]]+$//; s/[[:space:]]*[.!?;:,-]+$//' | lower)"
     # Stripping trailing punctuation may leave an empty value (e.g. a bare '.');
     # punctuation-only text carries no real content and is a placeholder.
     [ -n "$n" ] || return 0
+    # Strip common whole-value Markdown formatting wrappers before placeholder
+    # classification so that '**TBD**', '`Pending`', '~~TODO~~', 'TBD_',
+    # 'TBD()', and similar wrappers are recognized as placeholders rather than
+    # real content.
+    prev=""
+    while [ "$n" != "$prev" ]; do
+        prev="$n"
+        n="$(printf '%s' "$n" | sed -E 's/^\*\*([^*]+)\*\*$/\1/; s/^\*([^*]+)\*$/\1/; s/^__([^_]+)__$/\1/; s/^_([^_]+)_$/\1/; s/^`([^`]+)`$/\1/; s/^~~([^~]+)~~$/\1/')"
+        # Wrapper symbols may trail a marker or token ('TBD_', 'TBD()',
+        # '[label]_'); strip them so the underlying value can be classified.
+        n="$(printf '%s' "$n" | sed -E 's/[[:space:]]*[_()]+$//; s/^[_()]+//')"
+    done
+    # After unwrapping, strip trailing punctuation again.
+    n="$(printf '%s' "$n" | sed -E 's/[[:space:]]+$//; s/[[:space:]]*[.!?;:,-]+$//')"
+    [ -n "$n" ] || return 0
+    # A whole bracketed or angle-bracket marker (optionally with trailing
+    # wrapper symbols) is a placeholder; brackets are not unwrapped to prose.
+    printf '%s' "$n" | grep -qE '^\[[^]]+\][[:space:]_.()*~-]*$' && return 0
+    printf '%s' "$n" | grep -qE '^<[^>]+>[[:space:]_.()*~-]*$' && return 0
     # Symbol-only text is also a placeholder even though it is not one of the
     # recognized placeholder tokens.
     has_meaningful_char "$n" || return 0
@@ -375,8 +402,6 @@ text_is_placeholder() {
         tbd|todo|pending|none\ identified|none\ provided) return 0 ;;
         tbd:*|todo:*|pending:*|none\ identified:*|none\ provided:*) return 0 ;;
         'tbd '*|'todo '*|'pending '*) return 0 ;;
-        \[*\]) return 0 ;;
-        \<*\>) return 0 ;;
         [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) return 0 ;;
     esac
     if printf '%s' "$n" | grep -qE '^[^:]+:[[:space:]]*(tbd|todo|pending|none[[:space:]]+identified|none[[:space:]]+provided)$'; then
@@ -775,8 +800,9 @@ fi
 
 # ---------------------------------------------------------------------------
 # Approval gates: structured records only; no prose-based approval inference.
+# Validated for every profile whenever an '## Approval gates' section exists.
 # ---------------------------------------------------------------------------
-if [ "$PROFILE" != "prototype" ]; then
+if has_section "approval gates"; then
     gates="$(section_content "approval gates" || true)"
     has_none=0
     gate_count=0

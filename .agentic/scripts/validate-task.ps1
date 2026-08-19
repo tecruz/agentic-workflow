@@ -269,12 +269,15 @@ function Test-TableRowContent {
     return $false
 }
 
-# Test-MeaningfulChar — true when the text contains at least one letter or
-# number. Symbol-only values ('_', '()', '+++', '^^^') carry no real content
-# regardless of which punctuation characters they use.
+# Test-MeaningfulChar — true when the text contains at least one meaningful
+# character: an ASCII letter/number or any non-ASCII character. Symbol-only
+# values ('_', '()', '+++', '^^^') carry no real content.
+# Locale policy (deterministic parity with the Bash check, which runs under
+# LC_ALL=C so [^[:space:][:punct:]] is ASCII-only): any non-ASCII character
+# is meaningful regardless of Unicode category.
 function Test-MeaningfulChar {
     param([string]$Value)
-    return ($Value -match '[\p{L}\p{N}]')
+    return ($Value -match '[A-Za-z0-9]' -or $Value -match '[^\x00-\x7F]')
 }
 
 # Test-TextIsPlaceholder — true when a single text value is template placeholder
@@ -286,9 +289,32 @@ function Test-MeaningfulChar {
 function Test-TextIsPlaceholder {
     param([string]$Text)
     $n = (($Text -replace '^\s*[-*+]\s+', '').Trim() -replace '\s*[.!?;:,-]+$', '').ToLowerInvariant()
+    if (-not $n) { return $true }
+    # Strip common whole-value Markdown formatting wrappers before placeholder
+    # classification so that '**TBD**', '`Pending`', '~~TODO~~', 'TBD_',
+    # 'TBD()', and similar wrappers are recognized as placeholders rather than
+    # real content.
+    $prev = ''
+    while ($n -ne $prev) {
+        $prev = $n
+        $n = $n -replace '^\*\*([^*]+)\*\*$', '$1'
+        $n = $n -replace '^\*([^*]+)\*$', '$1'
+        $n = $n -replace '^__([^_]+)__$', '$1'
+        $n = $n -replace '^_([^_]+)_$', '$1'
+        $n = $n -replace '^`([^`]+)`$', '$1'
+        $n = $n -replace '^~~([^~]+)~~$', '$1'
+        # Wrapper symbols may trail a marker or token ('TBD_', 'TBD()',
+        # '[label]_'); strip them so the underlying value can be classified.
+        $n = ($n -replace '\s*[_()]+$', '') -replace '^[_()]+', ''
+    }
     # Stripping trailing punctuation may leave an empty value (e.g. a bare '.');
     # punctuation-only text carries no real content and is a placeholder.
+    $n = ($n.Trim() -replace '\s*[.!?;:,-]+$', '').Trim()
     if (-not $n) { return $true }
+    # A whole bracketed or angle-bracket marker (optionally with trailing
+    # wrapper symbols) is a placeholder; brackets are not unwrapped to prose.
+    if ($n -match '^\[[^]]+\][\s_.()*~-]*$') { return $true }
+    if ($n -match '^<[^>]+>[\s_.()*~-]*$') { return $true }
     # Symbol-only text is also a placeholder even though it is not one of the
     # recognized placeholder tokens.
     if (-not (Test-MeaningfulChar $n)) { return $true }
@@ -297,8 +323,6 @@ function Test-TextIsPlaceholder {
         '^(tbd|todo|pending|none\s+identified|none\s+provided):' { return $true }
         '^(tbd|todo|pending)\s' { return $true }
         '^[^:]+:\s*(tbd|todo|pending|none\s+identified|none\s+provided)$' { return $true }
-        '^\[.*\]$' { return $true }
-        '^<.*>$' { return $true }
         '^\d{4}-\d{2}-\d{2}$' { return $true }
     }
     if (($n -replace '[^a-z0-9]', '') -eq 'explainwhythislevelappliesandidentifyanyescalationsignals') { return $true }
@@ -436,19 +460,16 @@ function Get-TableRowParts {
     return , $cells
 }
 
-# Test-TableRowIsSeparator <cells> — true when every non-empty cell is a
-# Markdown `---` (or `:---:` etc.) separator and at least one cell is non-empty.
+# Test-TableRowIsSeparator <cells> — true when the row has exactly three cells,
+# all of which are a Markdown `---` (or `:---:` etc.) separator of at least
+# three hyphens.
 function Test-TableRowIsSeparator {
     param([string[]]$Cells)
-    if ($Cells.Count -eq 0) { return $false }
-    $saw = $false
+    if ($Cells.Count -ne 3) { return $false }
     foreach ($c in $Cells) {
-        if ($c) {
-            if ($c -notmatch '^:?-+:?$') { return $false }
-            $saw = $true
-        }
+        if ($c -notmatch '^:?-{3,}:?$') { return $false }
     }
-    return $saw
+    return $true
 }
 
 # Test-Table <section> <id-pattern> <label> <header-label> — validates a
@@ -469,6 +490,8 @@ function Test-Table {
     $stage = 0
     $lp = $IdPattern.ToLowerInvariant()
     $hl = $HeaderLabel.ToLowerInvariant()
+    # Literal id prefix (the pattern before its regex suffix), e.g. 'AC-\d+' -> 'ac-'.
+    $idPrefix = ($IdPattern -split '\\')[0].ToLowerInvariant()
     foreach ($rawLine in (Get-SectionContent $Section)) {
         if ($rawLine -notmatch '\S') { continue }
         $trimmed = $rawLine.Trim()
@@ -476,6 +499,12 @@ function Test-Table {
             # A pipe-delimited line that omitted its leading pipe is a table
             # row; reject it rather than silently treating it as prose.
             if ($trimmed -match '[^|]+\|[^|]+\|[^|]+') {
+                Write-Invalid "$Label table row '$trimmed' must begin with a leading pipe."
+            }
+            # Also reject a row that opens with a known identifier or the
+            # expected header label even when its other cells are empty or
+            # missing, so a malformed duplicate cannot hide an unresolved row.
+            if ($trimmed -match "^($([regex]::Escape($idPrefix))|$([regex]::Escape($hl)))[^|]*\|") {
                 Write-Invalid "$Label table row '$trimmed' must begin with a leading pipe."
             }
             continue
@@ -668,8 +697,9 @@ if ($ProfileName -ne 'prototype') {
 
 # ---------------------------------------------------------------------------
 # Approval gates: structured records only; no prose-based approval inference.
+# Validated for every profile whenever an '## Approval gates' section exists.
 # ---------------------------------------------------------------------------
-if ($ProfileName -ne 'prototype') {
+if ($SECTIONS -contains 'approval gates') {
     $hasNone = $false
     $gateCount = 0
     $checked = 0

@@ -11,14 +11,18 @@
 - [x] v1.2.2 release-integrity hardfix (PR #6): version/changelog/tag agreement,
   reusable CI, extracted-archive and release-to-release upgrade tests, release
   workflow. Released as `v1.2.2`.
-- [ ] PR #7 — Risk profiles and evidence contracts: `prototype`/`standard`/
+- [x] PR #7 — Risk profiles and evidence contracts: `prototype`/`standard`/
   `high-assurance` profiles, a risk-aware task template, structural task
   validators (Bash + PowerShell), lifecycle risk-classification step, and
   managed-file registration in the installers and bundle.
-  Review feedback (request changes) addressed: a shared meaningful-character
-  predicate rejects symbol-only evidence/`n/a`/approvers, and the evidence and
-  matrix tables validate exact header schemas and reject malformed/unknown
-  header rows and leading-pipe omissions (120 fixtures).
+  Review feedback (two request-changes rounds) fully addressed: a shared
+  meaningful-character predicate rejects symbol-only evidence/`n/a`/approvers,
+  evidence and matrix tables validate exact header schemas and reject
+  malformed/unknown header rows and leading-pipe omissions, Markdown-wrapped
+  placeholders are recognized, approval gates are validated for every profile,
+  and the meaningful-character predicate is locale-deterministic for Unicode.
+  Parity verified: 134 fixtures yield identical exit codes and messages on both
+  validators; Bats and Pester validator suites pass 137/137.
   See `.agentic/tasks/TASK-002-risk-profiles-and-evidence-contracts.md`.
 
 ## Recent Decisions

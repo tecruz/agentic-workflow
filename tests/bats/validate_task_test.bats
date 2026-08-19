@@ -647,3 +647,73 @@ classify() {  # classify <fixture>
     classify required-evidence-row-without-leading-pipe-invalid.md
     [ "$status" -eq 1 ]
 }
+
+@test "BLOCKED (2) for a completed task whose profile rationale is a bold-wrapped TBD" {
+    classify done-bold-tbd-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "BLOCKED (2) for a completed task whose Final is a code-wrapped Pending" {
+    classify done-code-wrapped-pending-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "BLOCKED (2) for a completed task whose Baseline is an underscore-suffixed TBD" {
+    classify done-tbd-underscore-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "INVALID (1) when an n/a rationale is a Markdown-wrapped placeholder" {
+    classify na-markdown-placeholder-rationale-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "BLOCKED (2) when an acceptance criterion is a bracket placeholder with a suffix" {
+    classify criterion-bracket-placeholder-with-suffix-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "INVALID (1) when required evidence has a no-leading-pipe row with an empty result" {
+    classify required-evidence-empty-cell-no-leading-pipe-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when required evidence has a no-leading-pipe row with a missing column" {
+    classify required-evidence-missing-column-no-leading-pipe-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when required evidence hides a pending row with an empty cell" {
+    classify required-evidence-hidden-pending-empty-cell-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when the requirement matrix has a no-leading-pipe row with an empty cell" {
+    classify requirement-matrix-empty-cell-no-leading-pipe-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "BLOCKED (2) for a completed prototype with an unchecked approval gate" {
+    classify prototype-unchecked-gate-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "VALID (0) for a completed prototype with a checked approval gate" {
+    classify prototype-checked-gate-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "INVALID (1) for a completed prototype with a malformed approval gate" {
+    classify prototype-malformed-gate-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "VALID (0) for a completed prototype with None identified approval gates" {
+    classify prototype-none-identified-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "VALID (0) for non-ASCII meaningful content" {
+    classify unicode-content-valid.md
+    [ "$status" -eq 0 ]
+}

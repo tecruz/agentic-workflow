@@ -512,6 +512,62 @@ Describe 'validate-task.ps1 risk-profile validator' {
         Invoke-Validator 'required-evidence-row-without-leading-pipe-invalid.md' | Should -Be 1
     }
 
+    It 'BLOCKED (2) for a completed task whose profile rationale is a bold-wrapped TBD' {
+        Invoke-Validator 'done-bold-tbd-blocked.md' | Should -Be 2
+    }
+
+    It 'BLOCKED (2) for a completed task whose Final is a code-wrapped Pending' {
+        Invoke-Validator 'done-code-wrapped-pending-blocked.md' | Should -Be 2
+    }
+
+    It 'BLOCKED (2) for a completed task whose Baseline is an underscore-suffixed TBD' {
+        Invoke-Validator 'done-tbd-underscore-blocked.md' | Should -Be 2
+    }
+
+    It 'INVALID (1) when an n/a rationale is a Markdown-wrapped placeholder' {
+        Invoke-Validator 'na-markdown-placeholder-rationale-invalid.md' | Should -Be 1
+    }
+
+    It 'BLOCKED (2) when an acceptance criterion is a bracket placeholder with a suffix' {
+        Invoke-Validator 'criterion-bracket-placeholder-with-suffix-blocked.md' | Should -Be 2
+    }
+
+    It 'INVALID (1) when required evidence has a no-leading-pipe row with an empty result' {
+        Invoke-Validator 'required-evidence-empty-cell-no-leading-pipe-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when required evidence has a no-leading-pipe row with a missing column' {
+        Invoke-Validator 'required-evidence-missing-column-no-leading-pipe-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when required evidence hides a pending row with an empty cell' {
+        Invoke-Validator 'required-evidence-hidden-pending-empty-cell-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when the requirement matrix has a no-leading-pipe row with an empty cell' {
+        Invoke-Validator 'requirement-matrix-empty-cell-no-leading-pipe-invalid.md' | Should -Be 1
+    }
+
+    It 'BLOCKED (2) for a completed prototype with an unchecked approval gate' {
+        Invoke-Validator 'prototype-unchecked-gate-blocked.md' | Should -Be 2
+    }
+
+    It 'VALID (0) for a completed prototype with a checked approval gate' {
+        Invoke-Validator 'prototype-checked-gate-valid.md' | Should -Be 0
+    }
+
+    It 'INVALID (1) for a completed prototype with a malformed approval gate' {
+        Invoke-Validator 'prototype-malformed-gate-invalid.md' | Should -Be 1
+    }
+
+    It 'VALID (0) for a completed prototype with None identified approval gates' {
+        Invoke-Validator 'prototype-none-identified-valid.md' | Should -Be 0
+    }
+
+    It 'VALID (0) for non-ASCII meaningful content' {
+        Invoke-Validator 'unicode-content-valid.md' | Should -Be 0
+    }
+
     It 'PowerShell and Bash classifiers agree on every fixture' {
         if (-not (Get-Command bash -ErrorAction SilentlyContinue)) { return }
         # Probe: bash must be able to invoke the validator and read the
