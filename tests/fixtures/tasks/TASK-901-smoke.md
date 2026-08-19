@@ -20,7 +20,7 @@ Ordinary maintenance work. No escalation signals apply.
 
 ## Required evidence
 
-| Criterion | Evidence required | Result |
+| AC ID | Evidence | Result |
 |---|---|---|
 | AC-1 | Unit test `asset_url_test.go` | Passed |
 | AC-2 | Static analysis via linter | Passed |

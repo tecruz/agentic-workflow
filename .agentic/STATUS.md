@@ -15,6 +15,10 @@
   `high-assurance` profiles, a risk-aware task template, structural task
   validators (Bash + PowerShell), lifecycle risk-classification step, and
   managed-file registration in the installers and bundle.
+  Review feedback (request changes) addressed: a shared meaningful-character
+  predicate rejects symbol-only evidence/`n/a`/approvers, and the evidence and
+  matrix tables validate exact header schemas and reject malformed/unknown
+  header rows and leading-pipe omissions (120 fixtures).
   See `.agentic/tasks/TASK-002-risk-profiles-and-evidence-contracts.md`.
 
 ## Recent Decisions

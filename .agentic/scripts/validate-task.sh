@@ -16,8 +16,9 @@
 #   - exact required `##` sections per profile, with `### Baseline` and
 #     `### Final` scoped inside `## Verification`
 #   - acceptance criteria declare unique `AC-N` identifiers, and the required
-#     evidence table maps every `AC-N` exactly once with nonempty evidence and
-#     a recognized result value
+#     evidence table maps every `AC-N` exactly once with meaningful evidence
+#     (at least one letter or number after trimming Markdown syntax and
+#     recognized placeholders) and a recognized result value
 #   - high-assurance tasks map every `R-N` through the requirement-to-evidence
 #     matrix and carry nonempty risk analysis, negative-path and boundary
 #     tests, integration verification, recovery plan, and independent review
@@ -205,27 +206,35 @@ table_row_is_separator() {
     [ "$saw" -eq 1 ]
 }
 
-# validate_table <section> <id-pattern> <label> <outvar> — validates a canonical
-# `| id | evidence | result |` table: exactly one header row, one separator row,
-# then canonical data rows with exactly three meaningful cells. Every
-# table-shaped row is structurally authoritative; malformed rows (extra or
-# missing columns, unknown or malformed ids, rows before the header, a second
-# header/separator) are rejected rather than silently skipped. Stores the
-# lowercased row ids into <outvar> and sets the globals TABLE_DUP and
-# HAS_UNRESOLVED. Fails on structural problems.
+# validate_table <section> <id-pattern> <label> <header-label> <outvar> —
+# validates a canonical `| <header-label> | Evidence | Result |` table: an
+# exact header row, one separator row, then canonical data rows with exactly
+# three meaningful cells. Every table-shaped row is structurally authoritative;
+# malformed rows (extra or missing columns, unknown or malformed ids, a header
+# whose labels do not match the expected schema, rows before the header, a
+# second header/separator, and pipe-delimited lines without a leading pipe)
+# are rejected rather than silently skipped. Stores the lowercased row ids
+# into <outvar> and sets the globals TABLE_DUP and HAS_UNRESOLVED. Fails on
+# structural problems.
 validate_table() {
-    local section="$1" idpat="$2" label="$3" outvar="$4"
-    local content line trimmed id ev res lres ev_low rationale ids="" seen="" lp
+    local section="$1" idpat="$2" label="$3" header_label="$4" outvar="$5"
+    local content line trimmed id ev res lres ev_low rationale ids="" seen="" lp hl h1 h2 h3
     local stage=0
     content="$(section_content "$section" || true)"
     lp="$(printf '%s' "$idpat" | lower)"
+    hl="$(printf '%s' "$header_label" | lower)"
     TABLE_DUP=0
     HAS_UNRESOLVED=0
     while IFS= read -r line || [ -n "$line" ]; do
         printf '%s' "$line" | grep -q '[^[:space:]]' || continue
         trimmed="$(printf '%s' "$line" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-        # Explanatory prose (non-table lines) is permitted but not authoritative.
-        printf '%s' "$trimmed" | grep -q '^|' || continue
+        if ! printf '%s' "$trimmed" | grep -q '^|'; then
+            # A pipe-delimited line that omitted its leading pipe is a table
+            # row; reject it rather than silently treating it as prose.
+            printf '%s' "$trimmed" | grep -qE '[^|]+\|[^|]+\|[^|]+' \
+                && fail_invalid "$label table row '$trimmed' must begin with a leading pipe."
+            continue
+        fi
         table_row_parts "$trimmed"
         id="${CELLS[0]:-}"
         if [ "$stage" -eq 0 ]; then
@@ -236,6 +245,11 @@ validate_table() {
                 fail_invalid "$label table has a data row before its header."
             fi
             [ "$CELL_COUNT" -eq 3 ] || fail_invalid "$label table row has $CELL_COUNT columns (expected 3)."
+            h1="$(printf '%s' "${CELLS[0]:-}" | lower)"
+            h2="$(printf '%s' "${CELLS[1]:-}" | lower)"
+            h3="$(printf '%s' "${CELLS[2]:-}" | lower)"
+            [ "$h1" = "$hl" ] && [ "$h2" = "evidence" ] && [ "$h3" = "result" ] \
+                || fail_invalid "$label table header must be '| $header_label | Evidence | Result |'."
             stage=1
             continue
         fi
@@ -335,6 +349,13 @@ table_row_has_content() {
     return 1
 }
 
+# has_meaningful_char <text> — returns 0 when the text contains at least one
+# letter or number. Symbol-only values ('_', '()', '+++', '^^^') carry no real
+# content regardless of which punctuation characters they use.
+has_meaningful_char() {
+    printf '%s' "$1" | grep -q '[[:alnum:]]'
+}
+
 # text_is_placeholder <text> — returns 0 when <text> is template placeholder
 # content: an exact placeholder token (optionally punctuated, e.g. 'TBD.' or
 # 'None identified.'), a placeholder label ('<label>: TBD'), a
@@ -347,6 +368,9 @@ text_is_placeholder() {
     # Stripping trailing punctuation may leave an empty value (e.g. a bare '.');
     # punctuation-only text carries no real content and is a placeholder.
     [ -n "$n" ] || return 0
+    # Symbol-only text is also a placeholder even though it is not one of the
+    # recognized placeholder tokens.
+    has_meaningful_char "$n" || return 0
     case "$n" in
         tbd|todo|pending|none\ identified|none\ provided) return 0 ;;
         tbd:*|todo:*|pending:*|none\ identified:*|none\ provided:*) return 0 ;;
@@ -709,7 +733,7 @@ if [ "$PROFILE" != "prototype" ]; then
     fi
 
     ev_ids=""
-    validate_table "required evidence" 'AC-[0-9]+' "required evidence" ev_ids
+    validate_table "required evidence" 'AC-[0-9]+' "required evidence" "AC ID" ev_ids
     [ -n "$ev_ids" ] || fail_invalid "required evidence must map at least one 'AC-N' to evidence."
     [ "$TABLE_DUP" -eq 0 ] || fail_invalid "required evidence maps a criterion more than once."
     if [ "$(sorted_unique "$ac_ids")" != "$(sorted_unique "$ev_ids")" ]; then
@@ -733,7 +757,7 @@ if [ "$PROFILE" != "prototype" ]; then
         fi
 
         m_ids=""
-        validate_table "requirement-to-evidence" 'R-[0-9]+' "requirement-to-evidence" m_ids
+        validate_table "requirement-to-evidence" 'R-[0-9]+' "requirement-to-evidence" "Requirement ID" m_ids
         [ -n "$m_ids" ] || fail_invalid "the requirement-to-evidence matrix must map at least one 'R-N' to evidence."
         [ "$TABLE_DUP" -eq 0 ] || fail_invalid "the requirement-to-evidence matrix maps a requirement more than once."
         if [ "$(sorted_unique "$r_ids")" != "$(sorted_unique "$m_ids")" ]; then
@@ -793,7 +817,7 @@ if [ "$PROFILE" != "prototype" ]; then
                     [ -n "$approver" ] || fail_invalid "approval gate '$gid' must record an approver."
                     printf '%s' "$approver" | grep -q '[<>]' \
                         && fail_invalid "approval gate '$gid' must not use template placeholders."
-                    printf '%s' "$approver" | tr -d '[:space:][.!?;:,-]' | grep -q . \
+                    has_meaningful_char "$approver" \
                         || fail_invalid "approval gate '$gid' must record a meaningful approver."
                     ;;
                 *)

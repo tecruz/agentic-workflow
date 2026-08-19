@@ -602,3 +602,48 @@ classify() {  # classify <fixture>
     classify requirement-matrix-extra-column-invalid.md
     [ "$status" -eq 1 ]
 }
+
+@test "BLOCKED (2) when a completed section contains only underscores" {
+    classify done-underscore-only-content-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "BLOCKED (2) when an evidence cell is only underscores" {
+    classify underscore-only-evidence-cell-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "INVALID (1) when an n/a rationale is symbol-only" {
+    classify na-symbol-only-rationale-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when a checked approval approver is symbol-only" {
+    classify checked-underscore-only-approver-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when a high-assurance risk table is symbol-only" {
+    classify symbol-only-risk-table-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when a malformed row is used as the evidence header" {
+    classify required-evidence-malformed-row-as-header-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when an unknown unresolved row is used as the evidence header" {
+    classify required-evidence-unknown-row-as-header-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when a malformed row is used as the matrix header" {
+    classify requirement-matrix-malformed-row-as-header-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when an evidence row omits its leading pipe" {
+    classify required-evidence-row-without-leading-pipe-invalid.md
+    [ "$status" -eq 1 ]
+}

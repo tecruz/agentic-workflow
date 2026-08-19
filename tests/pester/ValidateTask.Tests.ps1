@@ -476,6 +476,42 @@ Describe 'validate-task.ps1 risk-profile validator' {
         Invoke-Validator 'requirement-matrix-extra-column-invalid.md' | Should -Be 1
     }
 
+    It 'BLOCKED (2) when a completed section contains only underscores' {
+        Invoke-Validator 'done-underscore-only-content-blocked.md' | Should -Be 2
+    }
+
+    It 'BLOCKED (2) when an evidence cell is only underscores' {
+        Invoke-Validator 'underscore-only-evidence-cell-blocked.md' | Should -Be 2
+    }
+
+    It 'INVALID (1) when an n/a rationale is symbol-only' {
+        Invoke-Validator 'na-symbol-only-rationale-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when a checked approval approver is symbol-only' {
+        Invoke-Validator 'checked-underscore-only-approver-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when a high-assurance risk table is symbol-only' {
+        Invoke-Validator 'symbol-only-risk-table-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when a malformed row is used as the evidence header' {
+        Invoke-Validator 'required-evidence-malformed-row-as-header-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when an unknown unresolved row is used as the evidence header' {
+        Invoke-Validator 'required-evidence-unknown-row-as-header-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when a malformed row is used as the matrix header' {
+        Invoke-Validator 'requirement-matrix-malformed-row-as-header-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when an evidence row omits its leading pipe' {
+        Invoke-Validator 'required-evidence-row-without-leading-pipe-invalid.md' | Should -Be 1
+    }
+
     It 'PowerShell and Bash classifiers agree on every fixture' {
         if (-not (Get-Command bash -ErrorAction SilentlyContinue)) { return }
         # Probe: bash must be able to invoke the validator and read the

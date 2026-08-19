@@ -19,8 +19,9 @@
       - exact required `##` sections per profile, with `### Baseline` and
         `### Final` scoped inside `## Verification`
       - acceptance criteria declare unique `AC-N` identifiers, and the
-        required evidence table maps every `AC-N` exactly once with nonempty
-        evidence and a recognized result value
+        required evidence table maps every `AC-N` exactly once with meaningful
+        evidence (at least one letter or number after trimming Markdown syntax
+        and recognized placeholders) and a recognized result value
       - high-assurance tasks map every `R-N` through the requirement-to-
         evidence matrix and carry nonempty risk analysis, negative-path and
         boundary tests, integration verification, recovery plan, and
@@ -268,6 +269,14 @@ function Test-TableRowContent {
     return $false
 }
 
+# Test-MeaningfulChar — true when the text contains at least one letter or
+# number. Symbol-only values ('_', '()', '+++', '^^^') carry no real content
+# regardless of which punctuation characters they use.
+function Test-MeaningfulChar {
+    param([string]$Value)
+    return ($Value -match '[\p{L}\p{N}]')
+}
+
 # Test-TextIsPlaceholder — true when a single text value is template placeholder
 # content: an exact placeholder token (optionally punctuated, e.g. 'TBD.' or
 # 'None identified.'), a placeholder label ('<label>: TBD'), a
@@ -280,6 +289,9 @@ function Test-TextIsPlaceholder {
     # Stripping trailing punctuation may leave an empty value (e.g. a bare '.');
     # punctuation-only text carries no real content and is a placeholder.
     if (-not $n) { return $true }
+    # Symbol-only text is also a placeholder even though it is not one of the
+    # recognized placeholder tokens.
+    if (-not (Test-MeaningfulChar $n)) { return $true }
     switch -Regex ($n) {
         '^(tbd|todo|pending|none\s+identified|none\s+provided)$' { return $true }
         '^(tbd|todo|pending|none\s+identified|none\s+provided):' { return $true }
@@ -439,26 +451,35 @@ function Test-TableRowIsSeparator {
     return $saw
 }
 
-# Test-Table <section> <id-pattern> <label> — validates a canonical
-# `| id | evidence | result |` table: exactly one header row, one separator row,
-# then canonical data rows with exactly three meaningful cells. Every
-# table-shaped row is structurally authoritative; malformed rows (extra or
-# missing columns, unknown or malformed ids, rows before the header, a second
-# header/separator) are rejected rather than silently skipped. Returns the
-# lowercased row ids and sets the globals TableDup and HasUnresolved.
+# Test-Table <section> <id-pattern> <label> <header-label> — validates a
+# canonical `| <header-label> | Evidence | Result |` table: an exact header
+# row, one separator row, then canonical data rows with exactly three
+# meaningful cells. Every table-shaped row is structurally authoritative;
+# malformed rows (extra or missing columns, unknown or malformed ids, a header
+# whose labels do not match the expected schema, rows before the header, a
+# second header/separator, and pipe-delimited lines without a leading pipe)
+# are rejected rather than silently skipped. Returns the lowercased row ids
+# and sets the globals TableDup and HasUnresolved.
 function Test-Table {
-    param([string]$Section, [string]$IdPattern, [string]$Label)
+    param([string]$Section, [string]$IdPattern, [string]$Label, [string]$HeaderLabel)
     $script:TableDup = $false
     $script:HasUnresolved = $false
     $ids = [System.Collections.Generic.List[string]]::new()
     $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     $stage = 0
     $lp = $IdPattern.ToLowerInvariant()
+    $hl = $HeaderLabel.ToLowerInvariant()
     foreach ($rawLine in (Get-SectionContent $Section)) {
         if ($rawLine -notmatch '\S') { continue }
         $trimmed = $rawLine.Trim()
-        # Explanatory prose (non-table lines) is permitted but not authoritative.
-        if ($trimmed -notmatch '^\|') { continue }
+        if ($trimmed -notmatch '^\|') {
+            # A pipe-delimited line that omitted its leading pipe is a table
+            # row; reject it rather than silently treating it as prose.
+            if ($trimmed -match '[^|]+\|[^|]+\|[^|]+') {
+                Write-Invalid "$Label table row '$trimmed' must begin with a leading pipe."
+            }
+            continue
+        }
         $cells = Get-TableRowParts $trimmed
         $id = if ($cells.Count -gt 0) { $cells[0] } else { '' }
         if ($stage -eq 0) {
@@ -469,6 +490,12 @@ function Test-Table {
                 Write-Invalid "$Label table has a data row before its header."
             }
             if ($cells.Count -ne 3) { Write-Invalid "$Label table row has $($cells.Count) columns (expected 3)." }
+            $h1 = $cells[0].ToLowerInvariant()
+            $h2 = $cells[1].ToLowerInvariant()
+            $h3 = $cells[2].ToLowerInvariant()
+            if ($h1 -ne $hl -or $h2 -ne 'evidence' -or $h3 -ne 'result') {
+                Write-Invalid "$Label table header must be '| $HeaderLabel | Evidence | Result |'."
+            }
             $stage = 1
             continue
         }
@@ -602,7 +629,7 @@ if ($ProfileName -ne 'prototype') {
         Assert-CompletionDescriptions (Get-SectionContent 'acceptance criteria') 'ac-\d+' 'acceptance criterion'
     }
 
-    $evIds = Test-Table 'required evidence' 'AC-\d+' 'required evidence'
+    $evIds = Test-Table 'required evidence' 'AC-\d+' 'required evidence' 'AC ID'
     if ($evIds.Count -eq 0) { Write-Invalid "required evidence must map at least one 'AC-N' to evidence." }
     if ($script:TableDup) { Write-Invalid "required evidence maps a criterion more than once." }
     if (((Get-SortedUnique $acIds) -join ' ') -ne ((Get-SortedUnique $evIds) -join ' ')) {
@@ -623,7 +650,7 @@ if ($ProfileName -ne 'prototype') {
             Assert-CompletionDescriptions (Get-SectionContent 'requirements') 'r-\d+' 'high-assurance requirement'
         }
 
-        $mIds = Test-Table 'requirement-to-evidence' 'R-\d+' 'requirement-to-evidence'
+        $mIds = Test-Table 'requirement-to-evidence' 'R-\d+' 'requirement-to-evidence' 'Requirement ID'
         if ($mIds.Count -eq 0) { Write-Invalid "the requirement-to-evidence matrix must map at least one 'R-N' to evidence." }
         if ($script:TableDup) { Write-Invalid "the requirement-to-evidence matrix maps a requirement more than once." }
         if (((Get-SortedUnique $rIds) -join ' ') -ne ((Get-SortedUnique $mIds) -join ' ')) {
@@ -682,7 +709,7 @@ if ($ProfileName -ne 'prototype') {
                 if (-not (Test-IsoDate $approvalDate)) { Write-Invalid "approval gate '$gid' has an invalid ISO date '$approvalDate'." }
                 if (-not $approver) { Write-Invalid "approval gate '$gid' must record an approver." }
                 if ($approver -match '[<>]') { Write-Invalid "approval gate '$gid' must not use template placeholders." }
-                if (($approver -replace '[\s.!?;:,-]', '') -eq '') { Write-Invalid "approval gate '$gid' must record a meaningful approver." }
+                if (-not (Test-MeaningfulChar $approver)) { Write-Invalid "approval gate '$gid' must record a meaningful approver." }
             }
             else {
                 $unchecked++

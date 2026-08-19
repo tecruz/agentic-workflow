@@ -42,10 +42,10 @@ contents, and validator parity across Bash and PowerShell.
 | --- | --- | --- |
 | AC-1 | Profile docs present and reviewed | Passed |
 | AC-2 | Template present and matches profile requirements | Passed |
-| AC-3 | Fixture parity tests pass on both validators (111 fixtures) | Passed |
+| AC-3 | Fixture parity tests pass on both validators (120 fixtures) | Passed |
 | AC-4 | WORKFLOW.md / AGENTS.md / README.md updated | Passed |
 | AC-5 | Managed-file registration + bundle tests | Passed |
-| AC-6 | Full bats + Pester suites green (111 fixtures validated on Bash + PS) | Passed |
+| AC-6 | Full bats + Pester suites green (120 fixtures validated on Bash + PS) | Passed |
 
 ## Approval gates
 
@@ -60,7 +60,7 @@ contents, and validator parity across Bash and PowerShell.
 - `.agentic/profiles/{README,prototype,standard,high-assurance}.md`
 - `.agentic/templates/task.md`
 - `.agentic/scripts/validate-task.sh`, `.agentic/scripts/validate-task.ps1`
-- `tests/fixtures/tasks/*.md` (111 fixtures)
+- `tests/fixtures/tasks/*.md` (120 fixtures)
 - `tests/bats/validate_task_test.bats`, `tests/pester/ValidateTask.Tests.ps1`
 - `tests/bats/install_test.bats`, `tests/pester/Install.Tests.ps1`
 - `install.sh`, `install.ps1`, `scripts/build-bundle.sh`
@@ -90,9 +90,16 @@ contents, and validator parity across Bash and PowerShell.
   that normalizes to empty is placeholder content (including `n/a` rationales and
   approval identities), and every table-shaped evidence/matrix row is validated
   instead of silently filtered out (111 fixtures in total).
+- Review-feedback hardening: a shared meaningful-character predicate now requires
+  at least one letter/number, so symbol-only values (`_`, `___`, `()`, `+++`) are
+  rejected as evidence, `n/a` rationales, and approvers; the evidence and matrix
+  tables validate their exact header schema (`AC ID | Evidence | Result` and
+  `Requirement ID | Evidence | Result`), reject malformed/unknown rows used as the
+  apparent header, and reject pipe-delimited rows that omit the leading pipe
+  (9 new fixtures; 120 fixtures in total).
 - Final CI requirement: all required checks must pass on the final merge head.
   Evidence location: GitHub pull-request checks for PR #7, which also run this
-  task through both validators in `--handoff` mode (111 fixtures).
+  task through both validators in `--handoff` mode (120 fixtures).
 
 ## Remaining risks
 
