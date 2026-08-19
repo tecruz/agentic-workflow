@@ -45,7 +45,7 @@ contents, and validator parity across Bash and PowerShell.
 | AC-3 | Fixture parity tests pass on both validators (92 fixtures) | Passed |
 | AC-4 | WORKFLOW.md / AGENTS.md / README.md updated | Passed |
 | AC-5 | Managed-file registration + bundle tests | Passed |
-| AC-6 | Full bats + Pester suites green (92 fixtures validated on Bash + PS) — CI #66 | Passed |
+| AC-6 | Full bats + Pester suites green (92 fixtures validated on Bash + PS) — CI #67 | Passed |
 
 ## Approval gates
 
@@ -86,7 +86,7 @@ contents, and validator parity across Bash and PowerShell.
   `git archive | tar -x` pipe; unrelated to this PR (blame: cd4763ee).
 - `bats tests/bats` — not runnable locally (bats not installed); CI covers it.
 - Fixture smoke harnesses run via CI.
-- CI #66 green at `4f41127` across Ubuntu, macOS, and Windows; the pipeline now
+- CI #67 green at `e76aee8` across Ubuntu, macOS, and Windows; the pipeline now
   also runs this task through both validators in `--handoff` mode (92 fixtures).
 
 ## Remaining risks
