@@ -141,21 +141,30 @@ section_has_content() {
     printf '%s\n' "$content" | grep -q '[^[:space:]]'
 }
 
-# collect_ids <content> <pattern> <outvar> — stores the lowercased unique ids
-# found in the content into <outvar> and sets the global DUP_IDS when an id
-# repeats. <outvar> is written via printf -v so the result survives in the
-# caller's shell (command substitution would run this in a subshell).
-collect_ids() {
-    local content="$1" pattern="$2" outvar="$3" line id seen="" out=""
+# collect_canonical_ids <content> <lower-id-pattern> <outvar> — gathers
+# identifiers only from canonical list rows of the form
+# '- <id>: <description>' (case-insensitive) and sets the globals MULTI_IDS
+# (a row declares more than one identifier) and BAD_FORM (a list row with an
+# identifier that is not canonical). Identifiers mentioned in prose are not
+# collected, so criteria must be declared as canonical rows.
+collect_canonical_ids() {
+    local content="$1" idpat="$2" outvar="$3" line lowline id n seen="" out=""
+    MULTI_IDS=0
+    BAD_FORM=0
     DUP_IDS=0
     while IFS= read -r line || [ -n "$line" ]; do
-        for id in $(printf '%s\n' "$line" | grep -oiE "$pattern" | lower); do
-            [ -n "$id" ] || continue
-            case " $seen " in
-                *" $id "*) DUP_IDS=1 ;;
-                *) seen="$seen $id"; out="$out $id" ;;
-            esac
-        done
+        printf '%s' "$line" | grep -qE '^[[:space:]]*[-*+][[:space:]]+' || continue
+        lowline="$(printf '%s' "$line" | lower)"
+        n="$(printf '%s' "$lowline" | grep -oE "$idpat" | wc -l | tr -d '[:space:]')"
+        [ "$n" -gt 1 ] && { MULTI_IDS=1; continue; }
+        [ "$n" -eq 1 ] || continue
+        printf '%s' "$lowline" | grep -qE "^[[:space:]]*[-*+][[:space:]]*$idpat[[:space:]]*:[[:space:]]*[^[:space:]]" \
+            || { BAD_FORM=1; continue; }
+        id="$(printf '%s' "$lowline" | grep -oE "$idpat" | head -1)"
+        case " $seen " in
+            *" $id "*) DUP_IDS=1 ;;
+            *) seen="$seen $id"; out="$out $id" ;;
+        esac
     done <<< "$content"
     printf -v "$outvar" '%s' "$out"
 }
@@ -168,7 +177,7 @@ RESULT_UNRESOLVED=" pending partial blocked missing not-run "
 # <outvar> and sets the globals TABLE_DUP and HAS_UNRESOLVED. Fails on
 # structural problems.
 validate_table() {
-    local section="$1" idpat="$2" label="$3" outvar="$4" content id ev res lres ids="" seen=""
+    local section="$1" idpat="$2" label="$3" outvar="$4" content id ev res lres ev_low rationale ids="" seen=""
     content="$(section_content "$section" || true)"
     TABLE_DUP=0
     HAS_UNRESOLVED=0
@@ -186,8 +195,14 @@ validate_table() {
             *) fail_invalid "$label row '$id' has unrecognized result '$res' (allowed: passed, satisfied, n/a, pending, partial, blocked, missing, not-run)." ;;
         esac
         if [ "$lres" = "n/a" ]; then
-            printf '%s' "$ev" | grep -qiF 'n/a' \
-                || fail_invalid "$label row '$id' uses 'n/a' without an 'n/a' rationale in the evidence description."
+            # A resolved 'n/a' must carry a structured 'N/A: <reason>'
+            # rationale with meaningful text after the colon.
+            ev_low="$(printf '%s' "$ev" | lower)"
+            printf '%s' "$ev_low" | grep -qE '^[[:space:]]*n/a[[:space:]]*:[[:space:]]*[^[:space:]]' \
+                || fail_invalid "$label row '$id' uses 'n/a' without a substantive 'N/A: <reason>' rationale."
+            rationale="$(printf '%s' "$ev_low" | sed -nE 's#^[[:space:]]*n/a[[:space:]]*:[[:space:]]*(.*)[[:space:]]*$#\1#p')"
+            [ "$(content_class "$rationale")" = "content" ] \
+                || fail_invalid "$label row '$id' uses 'n/a' with a placeholder rationale."
         fi
         case " $seen " in
             *" $id "*) TABLE_DUP=1 ;;
@@ -259,14 +274,38 @@ table_row_has_content() {
     return 1
 }
 
+# text_is_placeholder <text> — returns 0 when <text> is template placeholder
+# content: an exact placeholder token (optionally punctuated, e.g. 'TBD.' or
+# 'None identified.'), a placeholder label ('<label>: TBD'), a
+# placeholder-prefixed instruction ('TODO: add tests', 'TBD test reference'),
+# a whole bracketed or angle-bracket marker, a bare date, or the
+# profile-rationale instruction. Real sentences are not placeholders.
+text_is_placeholder() {
+    local t="$1" n
+    n="$(printf '%s' "$t" | sed -E 's/^[[:space:]]*[-*+][[:space:]]+//; s/[[:space:]]+$//; s/[[:space:]]*[.!?;:,-]+$//' | lower)"
+    case "$n" in
+        tbd|todo|pending|none\ identified|none\ provided) return 0 ;;
+        tbd:*|todo:*|pending:*|none\ identified:*|none\ provided:*) return 0 ;;
+        'tbd '*|'todo '*|'pending '*) return 0 ;;
+        \[*\]) return 0 ;;
+        \<*\>) return 0 ;;
+        [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) return 0 ;;
+    esac
+    if printf '%s' "$n" | grep -qE '^[^:]+:[[:space:]]*(tbd|todo|pending|none[[:space:]]+identified|none[[:space:]]+provided)$'; then
+        return 0
+    fi
+    case "$(printf '%s' "$n" | tr -cd '[:alnum:]')" in
+        explainwhythislevelappliesandidentifyanyescalationsignals) return 0 ;;
+    esac
+    return 1
+}
+
 # content_class <content> — classifies authoritative content lines as
 # "content" (real evidence), "placeholder" (lines exist but none are real),
 # or "empty" (no lines at all). Headings, table separators, blank bullets,
-# and placeholder text such as TBD / TODO / Pending / None provided do not
-# count as content. Unchanged template markers — a whole bracketed token,
-# an angle-bracket token, a bare ISO date, or the profile-rationale
-# instruction — also count as placeholders. A table counts only once a data
-# row with at least one real cell follows its header.
+# and placeholder text (see text_is_placeholder) do not count as content.
+# A table counts only once a data row with at least one real cell follows
+# its header.
 content_class() {
     local line text table_header_seen saw_lines
     table_header_seen=0
@@ -288,11 +327,7 @@ content_class() {
         fi
         text="$(printf '%s' "$line" | sed -E 's/^[[:space:]]*[-*+][[:space:]]+//; s/[[:space:]]+$//')"
         [ -n "$text" ] || continue
-        printf '%s' "$text" | grep -qiE '^(tbd|todo|pending|none[[:space:]]+provided|none[[:space:]]+identified)([[:space:]]*:.*)?$|^[^:]+:[[:space:]]*(tbd|todo|pending|none[[:space:]]+provided|none[[:space:]]+identified)[[:space:]]*$|^\[.*\]$|^<.*>$|^[0-9]{4}-[0-9]{2}-[0-9]{2}$|^(tbd|todo|pending)[[:space:]]+.*$' \
-            && continue
-        case "$(printf '%s' "$text" | lower | tr -cd '[:alnum:]')" in
-            explainwhythislevelappliesandidentifyanyescalationsignals) continue ;;
-        esac
+        text_is_placeholder "$text" && continue
         echo content
         return 0
     done <<< "$1"
@@ -363,7 +398,7 @@ verify_completion_evidence_none() {
     cls="$(content_class "$content")"
     [ "$cls" = "content" ] && return 0
     if [ "$cls" = "placeholder" ]; then
-        normalized="$(printf '%s' "$content" | lower | sed -E 's/^[[:space:]]*[-*+][[:space:]]+//' | tr -d '[:space:]')"
+        normalized="$(printf '%s' "$content" | lower | sed -E 's/^[[:space:]]*[-*+][[:space:]]+//' | tr -cd '[:alnum:]')"
         [ "$normalized" = "noneidentified" ] && return 0
     fi
     case "$cls" in
@@ -372,14 +407,17 @@ verify_completion_evidence_none() {
     esac
 }
 
-# check_completion_descriptions <content> <id-pattern> <kind> — a completed task
-# must give every declared identifier a real, non-placeholder description.
+# check_completion_descriptions <content> <lower-id-pattern> <kind> — a
+# completed task must give every declared identifier a real, non-placeholder
+# description.
 check_completion_descriptions() {
-    local content="$1" idpat="$2" kind="$3" line id desc
+    local content="$1" idpat="$2" kind="$3" line lowline id desc
     while IFS= read -r line || [ -n "$line" ]; do
-        id="$(printf '%s' "$line" | grep -oiE "$idpat" | head -1 | lower)"
+        printf '%s' "$line" | grep -qE '^[[:space:]]*[-*+][[:space:]]+' || continue
+        lowline="$(printf '%s' "$line" | lower)"
+        id="$(printf '%s' "$lowline" | grep -oE "$idpat" | head -1)"
         [ -n "$id" ] || continue
-        desc="$(printf '%s' "$line" | sed -nE "s/^.*$idpat[[:space:]]*:?[[:space:]]*(.*)[[:space:]]*$/\1/p")"
+        desc="$(printf '%s' "$lowline" | sed -nE "s/^[[:space:]]*[-*+][[:space:]]*$idpat[[:space:]]*:[[:space:]]*(.*)[[:space:]]*$/\1/p")"
         if [ -z "$desc" ] || [ "$(content_class "$desc")" = "placeholder" ]; then
             fail_blocked "$kind '$id' has a placeholder description."
         fi
@@ -587,11 +625,13 @@ fi
 if [ "$PROFILE" != "prototype" ]; then
     ac_content="$(section_content "acceptance criteria" || true)"
     ac_ids=""
-    collect_ids "$ac_content" 'AC-[0-9]+' ac_ids
+    collect_canonical_ids "$ac_content" 'ac-[0-9]+' ac_ids
+    [ "$MULTI_IDS" -eq 0 ] || fail_invalid "an acceptance criterion list entry declares more than one 'AC-N' identifier."
+    [ "$BAD_FORM" -eq 0 ] || fail_invalid "acceptance criteria must use the form '- AC-N: <description>'."
     [ -n "$ac_ids" ] || fail_invalid "acceptance criteria must declare at least one 'AC-N' identifier."
     [ "$DUP_IDS" -eq 0 ] || fail_invalid "acceptance criteria declare duplicate 'AC-N' identifiers."
     if [ "$COMPLETED" -eq 1 ]; then
-        check_completion_descriptions "$ac_content" 'AC-[0-9]+' "acceptance criterion"
+        check_completion_descriptions "$ac_content" 'ac-[0-9]+' "acceptance criterion"
     fi
 
     ev_ids=""
@@ -608,11 +648,13 @@ if [ "$PROFILE" != "prototype" ]; then
     if [ "$PROFILE" = "high-assurance" ]; then
         req_content="$(section_content "requirements" || true)"
         r_ids=""
-        collect_ids "$req_content" 'R-[0-9]+' r_ids
+        collect_canonical_ids "$req_content" 'r-[0-9]+' r_ids
+        [ "$MULTI_IDS" -eq 0 ] || fail_invalid "a high-assurance requirement list entry declares more than one 'R-N' identifier."
+        [ "$BAD_FORM" -eq 0 ] || fail_invalid "high-assurance requirements must use the form '- R-N: <description>'."
         [ -n "$r_ids" ] || fail_invalid "high-assurance requirements must declare at least one 'R-N' identifier."
         [ "$DUP_IDS" -eq 0 ] || fail_invalid "high-assurance requirements declare duplicate 'R-N' identifiers."
         if [ "$COMPLETED" -eq 1 ]; then
-            check_completion_descriptions "$req_content" 'R-[0-9]+' "high-assurance requirement"
+            check_completion_descriptions "$req_content" 'r-[0-9]+' "high-assurance requirement"
         fi
 
         m_ids=""
@@ -646,7 +688,7 @@ if [ "$PROFILE" != "prototype" ]; then
         gl="$(printf '%s' "$gl" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
         [ -n "$gl" ] || continue
         gl_low="$(printf '%s' "$gl" | lower)"
-        body_low="$(printf '%s\n' "$gl_low" | sed -E 's/^[-*+][[:space:]]+//')"
+        body_low="$(printf '%s\n' "$gl_low" | sed -E 's/^[-*+][[:space:]]+//; s/[[:space:]]+$//; s/[[:space:]]*[.!?;:,-]+$//')"
         if [ "$body_low" = "none identified" ]; then
             has_none=1
             continue

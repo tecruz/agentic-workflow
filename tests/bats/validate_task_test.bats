@@ -427,3 +427,83 @@ classify() {  # classify <fixture>
     classify high-assurance-real-risk-table-valid.md
     [ "$status" -eq 0 ]
 }
+
+@test "BLOCKED (2) when every section is a punctuated placeholder" {
+    classify done-tbd-period-everywhere-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "INVALID (1) when high-assurance approvals use the punctuated None identified sentinel" {
+    classify high-assurance-none-identified-period-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "BLOCKED (2) when the Final is a punctuated Pending placeholder" {
+    classify done-pending-period-final-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "VALID (0) when a real sentence merely mentions TBD as a word" {
+    classify done-real-sentence-containing-tbd-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "VALID (0) for a lowercase acceptance criterion declaration" {
+    classify lowercase-criterion-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "VALID (0) for a lowercase high-assurance requirement declaration" {
+    classify lowercase-requirement-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "INVALID (1) when one list entry declares multiple AC identifiers" {
+    classify multiple-ac-ids-one-line-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when one list entry declares multiple R identifiers" {
+    classify multiple-r-ids-one-line-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "BLOCKED (2) when the first criterion is a placeholder and the second is real" {
+    classify first-id-placeholder-second-id-real-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "INVALID (1) when an AC identifier appears only in prose" {
+    classify criterion-id-mentioned-in-prose-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "VALID (0) for a substantive n/a rationale" {
+    classify na-evidence-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "INVALID (1) for a bare n/a evidence cell" {
+    classify na-evidence-bare-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "BLOCKED (2) for a placeholder n/a rationale" {
+    classify na-evidence-placeholder-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "VALID (0) for a substantive n/a matrix rationale" {
+    classify na-matrix-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "INVALID (1) for a bare n/a matrix cell" {
+    classify na-matrix-bare-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "BLOCKED (2) for a placeholder n/a matrix rationale" {
+    classify na-matrix-placeholder-blocked.md
+    [ "$status" -eq 2 ]
+}

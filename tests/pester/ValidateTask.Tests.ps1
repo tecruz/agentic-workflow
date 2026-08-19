@@ -336,6 +336,70 @@ Describe 'validate-task.ps1 risk-profile validator' {
         Invoke-Validator 'high-assurance-real-risk-table-valid.md' | Should -Be 0
     }
 
+    It 'BLOCKED (2) when every section is a punctuated placeholder' {
+        Invoke-Validator 'done-tbd-period-everywhere-blocked.md' | Should -Be 2
+    }
+
+    It 'INVALID (1) when high-assurance approvals use the punctuated None identified sentinel' {
+        Invoke-Validator 'high-assurance-none-identified-period-invalid.md' | Should -Be 1
+    }
+
+    It 'BLOCKED (2) when the Final is a punctuated Pending placeholder' {
+        Invoke-Validator 'done-pending-period-final-blocked.md' | Should -Be 2
+    }
+
+    It 'VALID (0) when a real sentence merely mentions TBD as a word' {
+        Invoke-Validator 'done-real-sentence-containing-tbd-valid.md' | Should -Be 0
+    }
+
+    It 'VALID (0) for a lowercase acceptance criterion declaration' {
+        Invoke-Validator 'lowercase-criterion-valid.md' | Should -Be 0
+    }
+
+    It 'VALID (0) for a lowercase high-assurance requirement declaration' {
+        Invoke-Validator 'lowercase-requirement-valid.md' | Should -Be 0
+    }
+
+    It 'INVALID (1) when one list entry declares multiple AC identifiers' {
+        Invoke-Validator 'multiple-ac-ids-one-line-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when one list entry declares multiple R identifiers' {
+        Invoke-Validator 'multiple-r-ids-one-line-invalid.md' | Should -Be 1
+    }
+
+    It 'BLOCKED (2) when the first criterion is a placeholder and the second is real' {
+        Invoke-Validator 'first-id-placeholder-second-id-real-blocked.md' | Should -Be 2
+    }
+
+    It 'INVALID (1) when an AC identifier appears only in prose' {
+        Invoke-Validator 'criterion-id-mentioned-in-prose-invalid.md' | Should -Be 1
+    }
+
+    It 'VALID (0) for a substantive n/a rationale' {
+        Invoke-Validator 'na-evidence-valid.md' | Should -Be 0
+    }
+
+    It 'INVALID (1) for a bare n/a evidence cell' {
+        Invoke-Validator 'na-evidence-bare-invalid.md' | Should -Be 1
+    }
+
+    It 'BLOCKED (2) for a placeholder n/a rationale' {
+        Invoke-Validator 'na-evidence-placeholder-blocked.md' | Should -Be 2
+    }
+
+    It 'VALID (0) for a substantive n/a matrix rationale' {
+        Invoke-Validator 'na-matrix-valid.md' | Should -Be 0
+    }
+
+    It 'INVALID (1) for a bare n/a matrix cell' {
+        Invoke-Validator 'na-matrix-bare-invalid.md' | Should -Be 1
+    }
+
+    It 'BLOCKED (2) for a placeholder n/a matrix rationale' {
+        Invoke-Validator 'na-matrix-placeholder-blocked.md' | Should -Be 2
+    }
+
     It 'PowerShell and Bash classifiers agree on every fixture' {
         if (-not (Get-Command bash -ErrorAction SilentlyContinue)) { return }
         # Probe: bash must be able to invoke the validator and read the

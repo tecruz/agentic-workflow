@@ -268,14 +268,33 @@ function Test-TableRowContent {
     return $false
 }
 
+# Test-TextIsPlaceholder — true when a single text value is template placeholder
+# content: an exact placeholder token (optionally punctuated, e.g. 'TBD.' or
+# 'None identified.'), a placeholder label ('<label>: TBD'), a
+# placeholder-prefixed instruction ('TODO: add tests', 'TBD test reference'),
+# a whole bracketed or angle-bracket marker, a bare date, or the
+# profile-rationale instruction. Real sentences are not placeholders.
+function Test-TextIsPlaceholder {
+    param([string]$Text)
+    $n = (($Text -replace '^\s*[-*+]\s+', '').Trim() -replace '\s*[.!?;:,-]+$', '').ToLowerInvariant()
+    switch -Regex ($n) {
+        '^(tbd|todo|pending|none\s+identified|none\s+provided)$' { return $true }
+        '^(tbd|todo|pending|none\s+identified|none\s+provided):' { return $true }
+        '^(tbd|todo|pending)\s' { return $true }
+        '^[^:]+:\s*(tbd|todo|pending|none\s+identified|none\s+provided)$' { return $true }
+        '^\[.*\]$' { return $true }
+        '^<.*>$' { return $true }
+        '^\d{4}-\d{2}-\d{2}$' { return $true }
+    }
+    if (($n -replace '[^a-z0-9]', '') -eq 'explainwhythislevelappliesandidentifyanyescalationsignals') { return $true }
+    return $false
+}
+
 # Get-ContentClass — classifies authoritative content lines as 'content'
 # (real evidence), 'placeholder' (lines exist but none are real), or 'empty'.
-# Headings, table separators, blank bullets, and placeholder text such as
-# TBD / TODO / Pending / None provided do not count as content. Unchanged
-# template markers — a whole bracketed token, an angle-bracket token, a bare
-# ISO date, or the profile-rationale instruction — also count as placeholders.
-# A table counts only once a data row with at least one real cell follows its
-# header.
+# Headings, table separators, blank bullets, and placeholder text (see
+# Test-TextIsPlaceholder) do not count as content. A table counts only once a
+# data row with at least one real cell follows its header.
 function Get-ContentClass {
     param([string[]]$Content)
     $tableHeaderSeen = $false
@@ -295,8 +314,7 @@ function Get-ContentClass {
         }
         $text = ($line -replace '^\s*[-*+]\s+', '').Trim()
         if (-not $text) { continue }
-        if ($text -match '^(tbd|todo|pending|none\s+provided|none\s+identified)(\s*:.*)?$|^[^:]+:\s*(tbd|todo|pending|none\s+provided|none\s+identified)\s*$|^\[.*\]$|^<.*>$|^\d{4}-\d{2}-\d{2}$|^(tbd|todo|pending)\s+.*$') { continue }
-        if (($text.ToLowerInvariant() -replace '[^a-z0-9]', '') -eq 'explainwhythislevelappliesandidentifyanyescalationsignals') { continue }
+        if (Test-TextIsPlaceholder $text) { continue }
         return 'content'
     }
     if (-not $sawLines) { return 'empty' }
@@ -330,7 +348,7 @@ function Assert-VerificationEvidenceNone {
     $cls = Get-ContentClass $Content
     if ($cls -eq 'content') { return }
     if ($cls -eq 'placeholder') {
-        $normalized = (($Content -join "`n").ToLowerInvariant() -replace '^\s*[-*+]\s+', '' -replace '\s', '')
+        $normalized = (($Content -join "`n").ToLowerInvariant() -replace '^\s*[-*+]\s+', '' -replace '[^a-z0-9]', '')
         if ($normalized -eq 'noneidentified') { return }
     }
     if ($cls -eq 'empty') { Write-Invalid "completed task must record verification evidence under '$Kind'." }
@@ -342,26 +360,41 @@ function Assert-VerificationEvidenceNone {
 function Assert-CompletionDescriptions {
     param([string[]]$ContentLines, [string]$IdPattern, [string]$Kind)
     foreach ($line in $ContentLines) {
-        $id = [regex]::Match($line, $IdPattern, 'IgnoreCase').Value.ToLowerInvariant()
-        if (-not $id) { continue }
-        $desc = ([regex]::Match($line, "^.*$IdPattern\s*:?\s*(.*?)\s*$", 'IgnoreCase')).Groups[1].Value
+        if ($line -notmatch '^\s*[-*+]\s+') { continue }
+        $lowLine = $line.ToLowerInvariant()
+        $idMatch = [regex]::Match($lowLine, $IdPattern)
+        if (-not $idMatch.Success) { continue }
+        $id = $idMatch.Value
+        $desc = ([regex]::Match($lowLine, "^\s*[-*+]\s*$IdPattern\s*:\s*(.*?)\s*$")).Groups[1].Value
         if (-not $desc -or ((Get-ContentClass @($desc)) -eq 'placeholder')) {
             Write-Blocked "$Kind '$id' has a placeholder description."
         }
     }
 }
 
-function Get-Ids {
-    param([string[]]$ContentLines, [string]$Pattern)
+# Get-CanonicalIds — gathers identifiers only from canonical list rows of the
+# form '- <id>: <description>' (case-insensitive) and sets the script-scope
+# globals MultiIds (a row declares more than one identifier), BadForm (a list
+# row with an identifier that is not canonical), and DupIds. Identifiers
+# mentioned in prose are not collected, so criteria must be declared as
+# canonical rows.
+function Get-CanonicalIds {
+    param([string[]]$ContentLines, [string]$IdPattern)
+    $script:MultiIds = $false
+    $script:BadForm = $false
     $script:DupIds = $false
     $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     $out = [System.Collections.Generic.List[string]]::new()
     foreach ($line in $ContentLines) {
-        foreach ($m in [regex]::Matches($line, $Pattern, 'IgnoreCase')) {
-            $id = $m.Value.ToLowerInvariant()
-            if (-not $seen.Add($id)) { $script:DupIds = $true }
-            if (-not $out.Contains($id)) { $out.Add($id) }
-        }
+        if ($line -notmatch '^\s*[-*+]\s+') { continue }
+        $lowLine = $line.ToLowerInvariant()
+        $idMatches = [regex]::Matches($lowLine, $IdPattern)
+        if ($idMatches.Count -gt 1) { $script:MultiIds = $true; continue }
+        if ($idMatches.Count -eq 0) { continue }
+        if ($lowLine -notmatch "^\s*[-*+]\s*$IdPattern\s*:\s*\S") { $script:BadForm = $true; continue }
+        $id = $idMatches[0].Value
+        if (-not $seen.Add($id)) { $script:DupIds = $true }
+        elseif (-not $out.Contains($id)) { $out.Add($id) }
     }
     return , $out.ToArray()
 }
@@ -396,8 +429,17 @@ function Test-Table {
         if ($AllowedResults -notcontains $lres) {
             Write-Invalid "$Label row '$idLower' has unrecognized result '$res' (allowed: passed, satisfied, n/a, pending, partial, blocked, missing, not-run)."
         }
-        if ($lres -eq 'n/a' -and $ev -notmatch 'n/a') {
-            Write-Invalid "$Label row '$idLower' uses 'n/a' without an 'n/a' rationale in the evidence description."
+        if ($lres -eq 'n/a') {
+            # A resolved 'n/a' must carry a structured 'N/A: <reason>'
+            # rationale with meaningful text after the colon.
+            $evLower = $ev.ToLowerInvariant()
+            if ($evLower -notmatch '^\s*n/a\s*:\s*\S') {
+                Write-Invalid "$Label row '$idLower' uses 'n/a' without a substantive 'N/A: <reason>' rationale."
+            }
+            $rationale = ([regex]::Match($evLower, '^\s*n/a\s*:\s*(.*?)\s*$')).Groups[1].Value
+            if ((Get-ContentClass @($rationale)) -ne 'content') {
+                Write-Invalid "$Label row '$idLower' uses 'n/a' with a placeholder rationale."
+            }
         }
         if (-not $seen.Add($idLower)) { $script:TableDup = $true }
         if (-not $ids.Contains($idLower)) { $ids.Add($idLower) }
@@ -479,11 +521,13 @@ if ($ProfileName -eq 'prototype') {
 # Standard and high-assurance evidence contracts.
 # ---------------------------------------------------------------------------
 if ($ProfileName -ne 'prototype') {
-    $acIds = Get-Ids (Get-SectionContent 'acceptance criteria') 'AC-\d+'
+    $acIds = Get-CanonicalIds (Get-SectionContent 'acceptance criteria') 'ac-\d+'
+    if ($script:MultiIds) { Write-Invalid "an acceptance criterion list entry declares more than one 'AC-N' identifier." }
+    if ($script:BadForm) { Write-Invalid "acceptance criteria must use the form '- AC-N: <description>'." }
     if ($acIds.Count -eq 0) { Write-Invalid "acceptance criteria must declare at least one 'AC-N' identifier." }
     if ($script:DupIds) { Write-Invalid "acceptance criteria declare duplicate 'AC-N' identifiers." }
     if ($Completed) {
-        Assert-CompletionDescriptions (Get-SectionContent 'acceptance criteria') 'AC-\d+' 'acceptance criterion'
+        Assert-CompletionDescriptions (Get-SectionContent 'acceptance criteria') 'ac-\d+' 'acceptance criterion'
     }
 
     $evIds = Test-Table 'required evidence' 'AC-\d+' 'required evidence'
@@ -497,11 +541,13 @@ if ($ProfileName -ne 'prototype') {
     }
 
     if ($ProfileName -eq 'high-assurance') {
-        $rIds = Get-Ids (Get-SectionContent 'requirements') 'R-\d+'
+        $rIds = Get-CanonicalIds (Get-SectionContent 'requirements') 'r-\d+'
+        if ($script:MultiIds) { Write-Invalid "a high-assurance requirement list entry declares more than one 'R-N' identifier." }
+        if ($script:BadForm) { Write-Invalid "high-assurance requirements must use the form '- R-N: <description>'." }
         if ($rIds.Count -eq 0) { Write-Invalid "high-assurance requirements must declare at least one 'R-N' identifier." }
         if ($script:DupIds) { Write-Invalid "high-assurance requirements declare duplicate 'R-N' identifiers." }
         if ($Completed) {
-            Assert-CompletionDescriptions (Get-SectionContent 'requirements') 'R-\d+' 'high-assurance requirement'
+            Assert-CompletionDescriptions (Get-SectionContent 'requirements') 'r-\d+' 'high-assurance requirement'
         }
 
         $mIds = Test-Table 'requirement-to-evidence' 'R-\d+' 'requirement-to-evidence'
@@ -533,7 +579,7 @@ if ($ProfileName -ne 'prototype') {
         $gl = $rawLine.Trim()
         if (-not $gl) { continue }
         $glLow = $gl.ToLowerInvariant()
-        $bodyLow = ($glLow -replace '^[-*+]\s+', '')
+        $bodyLow = (($glLow -replace '^[-*+]\s+', '').Trim() -replace '\s*[.!?;:,-]+$', '')
         if ($bodyLow -eq 'none identified') { $hasNone = $true; continue }
         if ($glLow -match '^[-*+]\s*\[[ xX]\]') {
             if ($glLow -notmatch '^[-*+]\s*\[[ xX]\]\s*ag-\d+\s*:') {
