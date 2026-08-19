@@ -277,6 +277,9 @@ function Test-TableRowContent {
 function Test-TextIsPlaceholder {
     param([string]$Text)
     $n = (($Text -replace '^\s*[-*+]\s+', '').Trim() -replace '\s*[.!?;:,-]+$', '').ToLowerInvariant()
+    # Stripping trailing punctuation may leave an empty value (e.g. a bare '.');
+    # punctuation-only text carries no real content and is a placeholder.
+    if (-not $n) { return $true }
     switch -Regex ($n) {
         '^(tbd|todo|pending|none\s+identified|none\s+provided)$' { return $true }
         '^(tbd|todo|pending|none\s+identified|none\s+provided):' { return $true }
@@ -410,23 +413,83 @@ function Get-CanonicalIds {
 $AllowedResults = @('passed', 'satisfied', 'n/a', 'pending', 'partial', 'blocked', 'missing', 'not-run')
 $UnresolvedResults = @('pending', 'partial', 'blocked', 'missing', 'not-run')
 
+# Get-TableRowParts <trimmed-line> — splits a Markdown table row into its trimmed
+# cells (leading/trailing pipe stripped, cells split on '|') and returns an array.
+function Get-TableRowParts {
+    param([string]$Row)
+    $body = $Row -replace '^\s*\|', '' -replace '\|\s*$', ''
+    if (-not $body) { return @() }
+    $cells = @()
+    foreach ($c in ($body -split '\|')) { $cells += $c.Trim() }
+    return , $cells
+}
+
+# Test-TableRowIsSeparator <cells> — true when every non-empty cell is a
+# Markdown `---` (or `:---:` etc.) separator and at least one cell is non-empty.
+function Test-TableRowIsSeparator {
+    param([string[]]$Cells)
+    if ($Cells.Count -eq 0) { return $false }
+    $saw = $false
+    foreach ($c in $Cells) {
+        if ($c) {
+            if ($c -notmatch '^:?-+:?$') { return $false }
+            $saw = $true
+        }
+    }
+    return $saw
+}
+
 # Test-Table <section> <id-pattern> <label> — validates a canonical
-# `| id | evidence | result |` table. Returns the lowercased row ids and sets
-# the globals TableDup and HasUnresolved. Fails on structural problems.
+# `| id | evidence | result |` table: exactly one header row, one separator row,
+# then canonical data rows with exactly three meaningful cells. Every
+# table-shaped row is structurally authoritative; malformed rows (extra or
+# missing columns, unknown or malformed ids, rows before the header, a second
+# header/separator) are rejected rather than silently skipped. Returns the
+# lowercased row ids and sets the globals TableDup and HasUnresolved.
 function Test-Table {
     param([string]$Section, [string]$IdPattern, [string]$Label)
     $script:TableDup = $false
     $script:HasUnresolved = $false
     $ids = [System.Collections.Generic.List[string]]::new()
     $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($row in (Get-SectionContent $Section)) {
-        if ($row -notmatch '^\s*\|.*\|.*\|.*\|\s*$') { continue }
-        $parts = $row -split '\|'
-        if ($parts.Count -ne 5) { continue }
-        $id = $parts[1].Trim()
-        $ev = $parts[2].Trim()
-        $res = $parts[3].Trim()
-        if ($id -notmatch "^$IdPattern$") { continue }
+    $stage = 0
+    $lp = $IdPattern.ToLowerInvariant()
+    foreach ($rawLine in (Get-SectionContent $Section)) {
+        if ($rawLine -notmatch '\S') { continue }
+        $trimmed = $rawLine.Trim()
+        # Explanatory prose (non-table lines) is permitted but not authoritative.
+        if ($trimmed -notmatch '^\|') { continue }
+        $cells = Get-TableRowParts $trimmed
+        $id = if ($cells.Count -gt 0) { $cells[0] } else { '' }
+        if ($stage -eq 0) {
+            if (Test-TableRowIsSeparator $cells) {
+                Write-Invalid "$Label table must have a header row before its separator."
+            }
+            if ($id.ToLowerInvariant() -match "^$lp$") {
+                Write-Invalid "$Label table has a data row before its header."
+            }
+            if ($cells.Count -ne 3) { Write-Invalid "$Label table row has $($cells.Count) columns (expected 3)." }
+            $stage = 1
+            continue
+        }
+        if ($stage -eq 1) {
+            if (-not (Test-TableRowIsSeparator $cells)) {
+                Write-Invalid "$Label table is missing its separator row."
+            }
+            if ($cells.Count -ne 3) { Write-Invalid "$Label table separator has $($cells.Count) columns (expected 3)." }
+            $stage = 2
+            continue
+        }
+        # Canonical data row.
+        if (Test-TableRowIsSeparator $cells) {
+            Write-Invalid "$Label table must not contain a second header or separator."
+        }
+        if ($cells.Count -ne 3) { Write-Invalid "$Label table row has $($cells.Count) columns (expected 3)." }
+        $ev = $cells[1]
+        $res = $cells[2]
+        if ($id -notmatch "^$IdPattern$") {
+            Write-Invalid "$Label row '$id' has an unrecognized identifier."
+        }
         $idLower = $id.ToLowerInvariant()
         if (-not $ev) { Write-Invalid "$Label row '$idLower' has an empty evidence description." }
         if ($script:Completed -and ((Get-ContentClass @($ev)) -eq 'placeholder')) {
@@ -619,6 +682,7 @@ if ($ProfileName -ne 'prototype') {
                 if (-not (Test-IsoDate $approvalDate)) { Write-Invalid "approval gate '$gid' has an invalid ISO date '$approvalDate'." }
                 if (-not $approver) { Write-Invalid "approval gate '$gid' must record an approver." }
                 if ($approver -match '[<>]') { Write-Invalid "approval gate '$gid' must not use template placeholders." }
+                if (($approver -replace '[\s.!?;:,-]', '') -eq '') { Write-Invalid "approval gate '$gid' must record a meaningful approver." }
             }
             else {
                 $unchecked++

@@ -432,6 +432,50 @@ Describe 'validate-task.ps1 risk-profile validator' {
         Invoke-Validator 'consecutive-empty-tables-invalid.md' | Should -Be 1
     }
 
+    It 'BLOCKED (2) when a completed section contains only punctuation' {
+        Invoke-Validator 'done-punctuation-only-content-blocked.md' | Should -Be 2
+    }
+
+    It 'BLOCKED (2) when an evidence cell is only punctuation' {
+        Invoke-Validator 'punctuation-only-evidence-cell-blocked.md' | Should -Be 2
+    }
+
+    It 'INVALID (1) when an n/a rationale is only punctuation' {
+        Invoke-Validator 'na-punctuation-only-rationale-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when a checked approval approver is only punctuation' {
+        Invoke-Validator 'checked-punctuation-only-approver-invalid.md' | Should -Be 1
+    }
+
+    It 'BLOCKED (2) when a Files changed table row is only punctuation' {
+        Invoke-Validator 'punctuation-only-table-row-blocked.md' | Should -Be 2
+    }
+
+    It 'INVALID (1) when required evidence contains an unknown ID' {
+        Invoke-Validator 'required-evidence-unknown-id-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when required evidence contains an extra column' {
+        Invoke-Validator 'required-evidence-extra-column-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when required evidence contains a malformed ID' {
+        Invoke-Validator 'required-evidence-malformed-id-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when required evidence hides a duplicate unresolved row' {
+        Invoke-Validator 'required-evidence-hidden-unresolved-duplicate-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when the requirement matrix contains an unknown ID' {
+        Invoke-Validator 'requirement-matrix-unknown-id-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when the requirement matrix contains an extra column' {
+        Invoke-Validator 'requirement-matrix-extra-column-invalid.md' | Should -Be 1
+    }
+
     It 'PowerShell and Bash classifiers agree on every fixture' {
         if (-not (Get-Command bash -ErrorAction SilentlyContinue)) { return }
         # Probe: bash must be able to invoke the validator and read the

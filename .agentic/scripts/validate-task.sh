@@ -173,17 +173,87 @@ collect_canonical_ids() {
 RESULT_ALLOWED=" passed satisfied n/a pending partial blocked missing not-run "
 RESULT_UNRESOLVED=" pending partial blocked missing not-run "
 
+# table_row_parts <trimmed-line> — splits a Markdown table row into its trimmed
+# cells (leading/trailing pipe stripped, cells split on '|') and sets the
+# globals CELLS (array) and CELL_COUNT.
+table_row_parts() {
+    local row="$1" body i
+    CELLS=()
+    body="$(printf '%s' "$row" | sed -E 's/^[[:space:]]*\|//; s/\|[[:space:]]*$//')"
+    if [ -z "$body" ]; then
+        CELL_COUNT=0
+        return
+    fi
+    IFS='|' read -r -a CELLS <<< "$body"
+    for i in "${!CELLS[@]}"; do
+        CELLS[$i]="$(printf '%s' "${CELLS[$i]}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+    done
+    CELL_COUNT="${#CELLS[@]}"
+}
+
+# table_row_is_separator — returns 0 when every non-empty cell of CELLS is a
+# Markdown `---` (or `:---:` etc.) separator and at least one cell is non-empty.
+table_row_is_separator() {
+    local c saw=0
+    [ "$CELL_COUNT" -gt 0 ] || return 1
+    for c in "${CELLS[@]}"; do
+        if [ -n "$c" ]; then
+            printf '%s' "$c" | grep -qE '^:?-+:?$' || return 1
+            saw=1
+        fi
+    done
+    [ "$saw" -eq 1 ]
+}
+
 # validate_table <section> <id-pattern> <label> <outvar> — validates a canonical
-# `| id | evidence | result |` table. Stores the lowercased row ids into
-# <outvar> and sets the globals TABLE_DUP and HAS_UNRESOLVED. Fails on
-# structural problems.
+# `| id | evidence | result |` table: exactly one header row, one separator row,
+# then canonical data rows with exactly three meaningful cells. Every
+# table-shaped row is structurally authoritative; malformed rows (extra or
+# missing columns, unknown or malformed ids, rows before the header, a second
+# header/separator) are rejected rather than silently skipped. Stores the
+# lowercased row ids into <outvar> and sets the globals TABLE_DUP and
+# HAS_UNRESOLVED. Fails on structural problems.
 validate_table() {
-    local section="$1" idpat="$2" label="$3" outvar="$4" content id ev res lres ev_low rationale ids="" seen=""
+    local section="$1" idpat="$2" label="$3" outvar="$4"
+    local content line trimmed id ev res lres ev_low rationale ids="" seen="" lp
+    local stage=0
     content="$(section_content "$section" || true)"
+    lp="$(printf '%s' "$idpat" | lower)"
     TABLE_DUP=0
     HAS_UNRESOLVED=0
-    while IFS=$'\t' read -r id ev res || [ -n "$id" ]; do
-        [ -n "$id" ] || continue
+    while IFS= read -r line || [ -n "$line" ]; do
+        printf '%s' "$line" | grep -q '[^[:space:]]' || continue
+        trimmed="$(printf '%s' "$line" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+        # Explanatory prose (non-table lines) is permitted but not authoritative.
+        printf '%s' "$trimmed" | grep -q '^|' || continue
+        table_row_parts "$trimmed"
+        id="${CELLS[0]:-}"
+        if [ "$stage" -eq 0 ]; then
+            if table_row_is_separator; then
+                fail_invalid "$label table must have a header row before its separator."
+            fi
+            if printf '%s' "$id" | lower | grep -qE "^$lp\$"; then
+                fail_invalid "$label table has a data row before its header."
+            fi
+            [ "$CELL_COUNT" -eq 3 ] || fail_invalid "$label table row has $CELL_COUNT columns (expected 3)."
+            stage=1
+            continue
+        fi
+        if [ "$stage" -eq 1 ]; then
+            table_row_is_separator || fail_invalid "$label table is missing its separator row."
+            [ "$CELL_COUNT" -eq 3 ] || fail_invalid "$label table separator has $CELL_COUNT columns (expected 3)."
+            stage=2
+            continue
+        fi
+        # Canonical data row.
+        if table_row_is_separator; then
+            fail_invalid "$label table must not contain a second header or separator."
+        fi
+        [ "$CELL_COUNT" -eq 3 ] || fail_invalid "$label table row has $CELL_COUNT columns (expected 3)."
+        ev="${CELLS[1]:-}"
+        res="${CELLS[2]:-}"
+        printf '%s' "$id" | lower | grep -qE "^$lp\$" \
+            || fail_invalid "$label row '$id' has an unrecognized identifier."
         id="$(printf '%s' "$id" | lower)"
         [ -n "$ev" ] || fail_invalid "$label row '$id' has an empty evidence description."
         if [ "$COMPLETED" -eq 1 ] && [ "$(content_class "$ev")" = "placeholder" ]; then
@@ -212,17 +282,7 @@ validate_table() {
         case " $RESULT_UNRESOLVED " in
             *" $lres "*) HAS_UNRESOLVED=1 ;;
         esac
-    done < <(printf '%s\n' "$content" | awk -F'|' -v pat="$idpat" '
-        NF == 5 {
-            c = $2; e = $3; r = $4
-            gsub(/^[ \t]+|[ \t]+$/, "", c)
-            gsub(/^[ \t]+|[ \t]+$/, "", e)
-            gsub(/^[ \t]+|[ \t]+$/, "", r)
-            lc = tolower(c)
-            lp = tolower(pat)
-            if (lc ~ "^" lp "$") print lc "\t" e "\t" r
-        }
-    ')
+    done <<< "$content"
     printf -v "$outvar" '%s' "$ids"
 }
 
@@ -284,6 +344,9 @@ table_row_has_content() {
 text_is_placeholder() {
     local t="$1" n
     n="$(printf '%s' "$t" | sed -E 's/^[[:space:]]*[-*+][[:space:]]+//; s/[[:space:]]+$//; s/[[:space:]]*[.!?;:,-]+$//' | lower)"
+    # Stripping trailing punctuation may leave an empty value (e.g. a bare '.');
+    # punctuation-only text carries no real content and is a placeholder.
+    [ -n "$n" ] || return 0
     case "$n" in
         tbd|todo|pending|none\ identified|none\ provided) return 0 ;;
         tbd:*|todo:*|pending:*|none\ identified:*|none\ provided:*) return 0 ;;
@@ -730,6 +793,8 @@ if [ "$PROFILE" != "prototype" ]; then
                     [ -n "$approver" ] || fail_invalid "approval gate '$gid' must record an approver."
                     printf '%s' "$approver" | grep -q '[<>]' \
                         && fail_invalid "approval gate '$gid' must not use template placeholders."
+                    printf '%s' "$approver" | tr -d '[:space:][.!?;:,-]' | grep -q . \
+                        || fail_invalid "approval gate '$gid' must record a meaningful approver."
                     ;;
                 *)
                     unchecked=$(( unchecked + 1 ))

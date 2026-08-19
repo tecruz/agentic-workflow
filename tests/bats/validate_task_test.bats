@@ -547,3 +547,58 @@ classify() {  # classify <fixture>
     classify consecutive-empty-tables-invalid.md
     [ "$status" -eq 1 ]
 }
+
+@test "BLOCKED (2) when a completed section contains only punctuation" {
+    classify done-punctuation-only-content-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "BLOCKED (2) when an evidence cell is only punctuation" {
+    classify punctuation-only-evidence-cell-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "INVALID (1) when an n/a rationale is only punctuation" {
+    classify na-punctuation-only-rationale-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when a checked approval approver is only punctuation" {
+    classify checked-punctuation-only-approver-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "BLOCKED (2) when a Files changed table row is only punctuation" {
+    classify punctuation-only-table-row-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "INVALID (1) when required evidence contains an unknown ID" {
+    classify required-evidence-unknown-id-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when required evidence contains an extra column" {
+    classify required-evidence-extra-column-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when required evidence contains a malformed ID" {
+    classify required-evidence-malformed-id-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when required evidence hides a duplicate unresolved row" {
+    classify required-evidence-hidden-unresolved-duplicate-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when the requirement matrix contains an unknown ID" {
+    classify requirement-matrix-unknown-id-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when the requirement matrix contains an extra column" {
+    classify requirement-matrix-extra-column-invalid.md
+    [ "$status" -eq 1 ]
+}

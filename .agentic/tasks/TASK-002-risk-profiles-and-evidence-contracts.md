@@ -42,10 +42,10 @@ contents, and validator parity across Bash and PowerShell.
 | --- | --- | --- |
 | AC-1 | Profile docs present and reviewed | Passed |
 | AC-2 | Template present and matches profile requirements | Passed |
-| AC-3 | Fixture parity tests pass on both validators (100 fixtures) | Passed |
+| AC-3 | Fixture parity tests pass on both validators (111 fixtures) | Passed |
 | AC-4 | WORKFLOW.md / AGENTS.md / README.md updated | Passed |
 | AC-5 | Managed-file registration + bundle tests | Passed |
-| AC-6 | Full bats + Pester suites green (100 fixtures validated on Bash + PS) | Passed |
+| AC-6 | Full bats + Pester suites green (111 fixtures validated on Bash + PS) | Passed |
 
 ## Approval gates
 
@@ -60,7 +60,7 @@ contents, and validator parity across Bash and PowerShell.
 - `.agentic/profiles/{README,prototype,standard,high-assurance}.md`
 - `.agentic/templates/task.md`
 - `.agentic/scripts/validate-task.sh`, `.agentic/scripts/validate-task.ps1`
-- `tests/fixtures/tasks/*.md` (100 fixtures)
+- `tests/fixtures/tasks/*.md` (111 fixtures)
 - `tests/bats/validate_task_test.bats`, `tests/pester/ValidateTask.Tests.ps1`
 - `tests/bats/install_test.bats`, `tests/pester/Install.Tests.ps1`
 - `install.sh`, `install.ps1`, `scripts/build-bundle.sh`
@@ -86,9 +86,13 @@ contents, and validator parity across Bash and PowerShell.
   `git archive | tar -x` pipe; unrelated to this PR (blame: cd4763ee).
 - `bats tests/bats` — not runnable locally (bats not installed); CI covers it.
 - Fixture smoke harnesses run via CI.
+- Task-validator hardening closes the two remaining review bypasses: punctuation
+  that normalizes to empty is placeholder content (including `n/a` rationales and
+  approval identities), and every table-shaped evidence/matrix row is validated
+  instead of silently filtered out (111 fixtures in total).
 - Final CI requirement: all required checks must pass on the final merge head.
   Evidence location: GitHub pull-request checks for PR #7, which also run this
-  task through both validators in `--handoff` mode (100 fixtures).
+  task through both validators in `--handoff` mode (111 fixtures).
 
 ## Remaining risks
 

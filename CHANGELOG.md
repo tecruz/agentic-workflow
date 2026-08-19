@@ -20,6 +20,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     second empty table is no longer mistaken for the first table's data row.
   - Eight new shared fixtures cover all three behaviors in both Bash and
     PowerShell (100 total), and the parity tests keep the validators identical.
+- **Task validator evidence-integrity hardening (PR #7 follow-up).** Closes two
+  false-success paths in `validate-task.sh` / `validate-task.ps1`:
+  - Punctuation-only text is now placeholder content: a value that normalizes to
+    empty after trailing punctuation is stripped (a bare `.`), so punctuation-only
+    criteria, evidence, verification, risk, and `n/a` rationale statements are no
+    longer counted as substantive evidence, and a punctuation-only approval
+    identity is rejected because it records no meaningful approver.
+  - The evidence table (`## Required evidence`) and requirement matrix
+    (`## Requirement-to-evidence`) now validate every table-shaped row instead of
+    silently filtering malformed rows out: unknown or malformed identifiers,
+    extra or missing columns, duplicate rows, and rows that do not belong to the
+    declared identifier set are rejected rather than ignored, so visibly
+    unresolved evidence can no longer be hidden behind a malformed row.
+  - Eleven new shared fixtures cover both behaviors in Bash and PowerShell
+    (111 total), and the parity tests keep the validators identical.
 
 ## [1.3.0] - 2026-08-18
 
