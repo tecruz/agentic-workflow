@@ -391,13 +391,15 @@ table_row_has_content() {
 # the Unicode-category test because neither GNU nor BSD grep exposes Unicode
 # categories without PCRE support.
 has_meaningful_char() {
-    printf '%s' "$1" | grep -qE '[A-Za-z0-9]' && return 0
+    if LC_ALL=C grep -qE '[A-Za-z0-9]' <<< "$1"; then
+        return 0
+    fi
     [ -n "$1" ] || return 1
     # Pure-ASCII text that reached this point has no ASCII letter or number,
     # so it has no Unicode Letter or Number either: ASCII symbols are never
     # Letters/Numbers. Classify it without perl, so the perl dependency is
     # consulted only for content that actually contains non-ASCII bytes.
-    if ! printf '%s' "$1" | LC_ALL=C grep -q '[^[:print:]]'; then
+    if ! LC_ALL=C grep -q '[^[:print:]]' <<< "$1"; then
         return 1
     fi
     # The Unicode-category test needs perl; if it is missing, the environment
@@ -407,7 +409,7 @@ has_meaningful_char() {
     # with perl missing, so the error cannot be swallowed by a subshell.
     command -v perl >/dev/null 2>&1 \
         || fail_invalid "perl is required to classify non-ASCII content; install perl or keep evidence ASCII-only."
-    printf '%s' "$1" | perl -CS -ne 'exit 0 if /[\p{L}\p{N}]/; exit 1' 2>/dev/null
+    perl -CS -0777 -ne 'exit(/[\p{L}\p{N}]/ ? 0 : 1)' <<< "$1" 2>/dev/null
 }
 
 # text_is_placeholder <text> — returns 0 when <text> is template placeholder
@@ -693,10 +695,12 @@ done < "$TASK_FILE"
 # error cannot be swallowed and a task that requires non-ASCII classification
 # can never reach a VALID result on a machine that cannot perform it.
 # ---------------------------------------------------------------------------
-if ! command -v perl >/dev/null 2>&1 \
-    && [ "${#CONTENT_LINES[@]}" -gt 0 ] \
-    && printf '%s\n' "${CONTENT_LINES[@]}" | LC_ALL=C grep -q '[^[:print:]]'; then
-    fail_invalid "perl is required to classify non-ASCII content; install perl or keep evidence ASCII-only."
+if ! command -v perl >/dev/null 2>&1 && [ "${#CONTENT_LINES[@]}" -gt 0 ]; then
+    for line in "${CONTENT_LINES[@]}"; do
+        if LC_ALL=C grep -q '[^[:print:]]' <<< "$line"; then
+            fail_invalid "perl is required to classify non-ASCII content; install perl or keep evidence ASCII-only."
+        fi
+    done
 fi
 
 # ---------------------------------------------------------------------------

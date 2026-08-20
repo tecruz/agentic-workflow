@@ -92,7 +92,7 @@ classify() {  # classify <fixture>
     rm -rf "$priv"
     [ "$status" -eq 1 ]
     [[ "$output" == *"INVALID: perl is required"* ]]
-    [[ "$output" != *"VALID:"* ]]
+    [[ "$output" != *"VALID: profile="* ]]
 }
 
 @test "INVALID (1) with a clear perl error in --handoff mode when non-ASCII content needs perl and perl is unavailable" {
@@ -108,7 +108,117 @@ classify() {  # classify <fixture>
     rm -rf "$priv"
     [ "$status" -eq 1 ]
     [[ "$output" == *"INVALID: perl is required"* ]]
-    [[ "$output" != *"VALID:"* ]]
+    [[ "$output" != *"VALID: profile="* ]]
+}
+
+@test "INVALID (1) with a clear perl error for a large task (>128 KiB) with non-ASCII content when perl is unavailable" {
+    local saved_path priv t real large_task
+    saved_path="$PATH"
+    priv="$(mktemp -d)"
+    for t in bash tr sed grep wc head sort awk; do
+        real="$(command -v "$t")" || { rm -rf "$priv"; skip "tool '$t' unavailable"; }
+        ln -s "$real" "$priv/$t"
+    done
+    large_task="$(mktemp)"
+    cat << 'EOF' > "$large_task"
+# Status
+- Status: done
+- Updated: 2026-08-20
+
+## Risk profile
+- Profile: standard
+- Rationale: standard task for testing large task non-ascii pipefail hazard.
+
+## Acceptance criteria
+- AC-1: 测试 non-ASCII criterion near the beginning.
+
+## Required evidence
+| Criterion | Evidence | Result |
+| --- | --- | --- |
+| AC-1 | 测试 non-ASCII evidence near the beginning | content |
+
+## Approval gates
+- [x] Approved by lead on 2026-08-20
+
+## Verification
+### Baseline
+- baseline: completed
+
+### Final
+- final: completed
+
+## Files changed
+- script: validate-task.sh
+
+## Remaining risks
+- None identified
+EOF
+    while [ $(wc -c < "$large_task") -lt 131072 ]; do
+        echo "padding line to exceed pipe buffer size..." >> "$large_task"
+    done
+
+    PATH="$priv" run bash "$VALIDATE" "$large_task"
+    local exit_code=$status
+    PATH="$saved_path"
+    rm -rf "$priv" "$large_task"
+    [ "$exit_code" -eq 1 ]
+    [[ "$output" == *"INVALID: perl is required"* ]]
+    [[ "$output" != *"VALID: profile="* ]]
+}
+
+@test "INVALID (1) with a clear perl error in --handoff mode for a large task (>128 KiB) with non-ASCII content when perl is unavailable" {
+    local saved_path priv t real large_task
+    saved_path="$PATH"
+    priv="$(mktemp -d)"
+    for t in bash tr sed grep wc head sort awk; do
+        real="$(command -v "$t")" || { rm -rf "$priv"; skip "tool '$t' unavailable"; }
+        ln -s "$real" "$priv/$t"
+    done
+    large_task="$(mktemp)"
+    cat << 'EOF' > "$large_task"
+# Status
+- Status: done
+- Updated: 2026-08-20
+
+## Risk profile
+- Profile: standard
+- Rationale: standard task for testing large task non-ascii pipefail hazard in handoff mode.
+
+## Acceptance criteria
+- AC-1: 测试 non-ASCII criterion near the beginning.
+
+## Required evidence
+| Criterion | Evidence | Result |
+| --- | --- | --- |
+| AC-1 | 测试 non-ASCII evidence near the beginning | content |
+
+## Approval gates
+- [x] Approved by lead on 2026-08-20
+
+## Verification
+### Baseline
+- baseline: completed
+
+### Final
+- final: completed
+
+## Files changed
+- script: validate-task.sh
+
+## Remaining risks
+- None identified
+EOF
+    while [ $(wc -c < "$large_task") -lt 131072 ]; do
+        echo "padding line to exceed pipe buffer size..." >> "$large_task"
+    done
+
+    PATH="$priv" run bash "$VALIDATE" --handoff "$large_task"
+    local exit_code=$status
+    PATH="$saved_path"
+    rm -rf "$priv" "$large_task"
+    [ "$exit_code" -eq 1 ]
+    [[ "$output" == *"INVALID: perl is required"* ]]
+    [[ "$output" != *"VALID: profile="* ]]
 }
 
 @test "INVALID (1) for a prototype task missing the no-production-deployment declaration" {
