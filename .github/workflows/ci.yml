@@ -183,6 +183,18 @@ jobs:
           Install-Module Pester -RequiredVersion 5.6.0 -Scope CurrentUser -Force -SkipPublisherCheck
           Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force -SkipPublisherCheck
 
+      - name: Diagnose and pin PowerShell
+        run: |
+          echo "bundled pwsh: $(command -v pwsh) $(pwsh --version)"
+          pwsh -NoProfile -Command "exit 0"; echo "trivial pwsh exit=$?"
+          # The bundled ubuntu-latest pwsh has been observed to segfault (exit 139)
+          # when running the task validator, so install a pinned, known-good build
+          # and prepend it to PATH for the parity runner below.
+          curl -sL https://github.com/PowerShell/PowerShell/releases/download/v7.4.6/powershell-7.4.6-linux-x64.tar.gz -o /tmp/pwsh.tgz
+          mkdir -p /tmp/pwsh-7.4.6
+          tar -xzf /tmp/pwsh.tgz -C /tmp/pwsh-7.4.6
+          echo "/tmp/pwsh-7.4.6" >> "$GITHUB_PATH"
+
       - name: Run cross-language parity
         run: |
           bash tests/parity/run-parity.sh
