@@ -1,9 +1,9 @@
-# TASK-049: Done prototype with empty Task goal
+# TASK-152: Prototype with exact handoff declarations
 
 ## Status
 
 Status: done
-Updated: 2026-08-18
+Updated: 2026-08-19
 ## Risk profile
 
 Profile: prototype
@@ -12,6 +12,8 @@ Profile: prototype
 
 User-requested spike; no production impact.
 ## Task goal
+
+Prove that the media pipeline keeps 30 fps on the reference device.
 
 ## Smoke verification
 

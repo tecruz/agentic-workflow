@@ -171,6 +171,26 @@ collect_canonical_ids() {
     printf -v "$outvar" '%s' "$out"
 }
 
+# check_canonical_section <content> <idpat> <label> <entry-form> — every
+# candidate entry line in a canonical-only section must be a canonical list
+# item '- <ID>: <description>'. A candidate entry is a line that starts a list
+# item (bullet, numbered, or bare '<ID>:' declaration); those are exactly the
+# lines that could declare a criterion or requirement. Bare, numbered, or
+# prose-declared identifiers are rejected rather than skipped, so a visible
+# criterion cannot silently escape the evidence contract by changing its list
+# syntax. Continuation lines and notes paragraphs (no leading list marker) are
+# allowed: they belong to the preceding canonical item.
+check_canonical_section() {
+    local content="$1" idpat="$2" label="$3" entryform="$4" line lowline
+    while IFS= read -r line || [ -n "$line" ]; do
+        printf '%s' "$line" | grep -q '[^[:space:]]' || continue
+        lowline="$(printf '%s' "$line" | lower)"
+        printf '%s' "$lowline" | grep -qE '^([-*+][[:space:]]*|[0-9]+[.)][[:space:]]+|(ac|r)-[0-9]+[[:space:]]*:)' || continue
+        printf '%s' "$lowline" | grep -qE "^[-*+][[:space:]]*$idpat[[:space:]]*:[[:space:]]*[^[:space:]]" \
+            || fail_invalid "$label must contain only canonical '$entryform' entries; prose belongs in a separate Notes section."
+    done <<< "$content"
+}
+
 RESULT_ALLOWED=" passed satisfied n/a pending partial blocked missing not-run "
 RESULT_UNRESOLVED=" pending partial blocked missing not-run "
 
@@ -353,15 +373,18 @@ table_row_has_content() {
 }
 
 # has_meaningful_char <text> — returns 0 when the text contains at least one
-# meaningful character: an ASCII letter/number or any non-ASCII byte.
-# Symbol-only values ('_', '()', '+++', '^^^') carry no real content.
-# Locale policy (deterministic parity with the PowerShell \p{L}\p{N} check):
-# LC_ALL=C makes [^[:space:][:punct:]] match only ASCII alphanumerics plus
-# any non-ASCII byte, so Unicode letters/digits are meaningful regardless of
-# the caller's locale. Non-ASCII punctuation is accepted as meaningful too,
-# which matches PowerShell's treatment of any non-ASCII character.
+# meaningful character: a Unicode category Letter or Number (any script), which
+# includes ASCII letters and digits. Symbol-only values ('_', '()', '+++',
+# '^^^'), Unicode punctuation ('—', '…'), emoji, and invisible format
+# characters (zero-width space) are not Letters or Numbers and carry no real
+# content. Deterministic parity with the PowerShell [\p{L}\p{N}] check: the
+# ASCII fast path avoids spawning perl for the common case, and perl performs
+# the Unicode-category test because neither GNU nor BSD grep exposes Unicode
+# categories without PCRE support.
 has_meaningful_char() {
-    printf '%s' "$1" | LC_ALL=C grep -q '[^[:space:][:punct:]]'
+    printf '%s' "$1" | grep -qE '[A-Za-z0-9]' && return 0
+    [ -n "$1" ] || return 1
+    printf '%s' "$1" | perl -CS -ne 'exit 0 if /[\p{L}\p{N}]/; exit 1' 2>/dev/null
 }
 
 # text_is_placeholder <text> — returns 0 when <text> is template placeholder
@@ -691,7 +714,7 @@ REQUIRED_SECTIONS=()
 REQUIRED_SUBSECTIONS=()
 case "$PROFILE" in
     prototype)
-        REQUIRED_SECTIONS=( "status" "risk profile" "profile rationale" "task goal" "smoke verification" "known limitations" "handoff" )
+        REQUIRED_SECTIONS=( "status" "risk profile" "profile rationale" "task goal" "smoke verification" "known limitations" "approval gates" "handoff" )
         ;;
     standard)
         REQUIRED_SECTIONS=( "status" "risk profile" "profile rationale" "acceptance criteria" "required evidence" "approval gates" "verification" "files changed" "remaining risks" )
@@ -728,11 +751,38 @@ fi
 # Prototype contract.
 # ---------------------------------------------------------------------------
 if [ "$PROFILE" = "prototype" ]; then
+    # The two handoff declarations must appear as exact normalized declaration
+    # lines, each exactly once. Substring matches are not enough: a line that
+    # carries the phrase but adds negation or commentary ("... not established
+    # — this statement is false.", "... confirmed? No.") is rejected, and a
+    # phrase that appears only inside prose is not counted. Insignificant
+    # casing and surrounding whitespace are ignored; a leading list marker is
+    # stripped so a bulleted declaration still counts as a declaration line.
+    readiness_decl=0
+    no_deploy_decl=0
     handoff="$(section_content "handoff" || true)"
-    printf '%s\n' "$handoff" | grep -qiE 'production[[:space:]]+readiness[[:space:]]*:[[:space:]]*not[[:space:]]+established' \
-        || fail_invalid "prototype handoff must state 'Production readiness: not established'."
-    printf '%s\n' "$handoff" | grep -qiE 'no[[:space:]]+production[[:space:]]+deployment[[:space:]]+or[[:space:]]+irreversible[[:space:]]+operation[[:space:]]*:[[:space:]]*confirmed' \
-        || fail_invalid "prototype handoff must declare 'No production deployment or irreversible operation: confirmed'."
+    while IFS= read -r dl || [ -n "$dl" ]; do
+        d="$(printf '%s' "$dl" | sed -E 's/^[[:space:]]*[-*+][[:space:]]+//' | lower | tr -s '[:space:]' ' ' | sed -e 's/^ //' -e 's/ $//')"
+        [ -n "$d" ] || continue
+        case "$d" in
+            'production readiness: not established')
+                readiness_decl=$(( readiness_decl + 1 )) ;;
+            'no production deployment or irreversible operation: confirmed')
+                no_deploy_decl=$(( no_deploy_decl + 1 )) ;;
+        esac
+        if printf '%s' "$d" | grep -qE '^production[[:space:]]+readiness[[:space:]]*:' \
+            && [ "$d" != 'production readiness: not established' ]; then
+            fail_invalid "prototype handoff declaration 'Production readiness' must appear as the exact line 'Production readiness: not established'."
+        fi
+        if printf '%s' "$d" | grep -qE '^no[[:space:]]+production[[:space:]]+deployment[[:space:]]+or[[:space:]]+irreversible[[:space:]]+operation[[:space:]]*:' \
+            && [ "$d" != 'no production deployment or irreversible operation: confirmed' ]; then
+            fail_invalid "prototype handoff declaration 'No production deployment or irreversible operation' must appear as the exact line 'No production deployment or irreversible operation: confirmed'."
+        fi
+    done <<< "$handoff"
+    [ "$readiness_decl" -eq 1 ] \
+        || fail_invalid "prototype handoff must state 'Production readiness: not established' exactly once."
+    [ "$no_deploy_decl" -eq 1 ] \
+        || fail_invalid "prototype handoff must declare 'No production deployment or irreversible operation: confirmed' exactly once."
     if [ "$COMPLETED" -eq 1 ]; then
         verify_completion_evidence "## Task goal" "$(section_content "task goal" || true)"
         verify_completion_evidence "## Known limitations" "$(section_content "known limitations" || true)"
@@ -751,6 +801,7 @@ if [ "$PROFILE" != "prototype" ]; then
     [ "$MULTI_IDS" -eq 0 ] || fail_invalid "an acceptance criterion list entry declares more than one 'AC-N' identifier."
     [ "$BAD_FORM" -eq 0 ] || fail_invalid "acceptance criteria must use the form '- AC-N: <description>'."
     [ "$UNNUMBERED" -eq 0 ] || fail_invalid "every acceptance criterion list entry must begin with exactly one 'AC-N:' identifier; explanatory prose belongs in a separate Notes section."
+    check_canonical_section "$ac_content" 'ac-[0-9]+' "acceptance criteria" 'AC-N: <description>'
     [ -n "$ac_ids" ] || fail_invalid "acceptance criteria must declare at least one 'AC-N' identifier."
     [ "$DUP_IDS" -eq 0 ] || fail_invalid "acceptance criteria declare duplicate 'AC-N' identifiers."
     if [ "$COMPLETED" -eq 1 ]; then
@@ -775,6 +826,7 @@ if [ "$PROFILE" != "prototype" ]; then
         [ "$MULTI_IDS" -eq 0 ] || fail_invalid "a high-assurance requirement list entry declares more than one 'R-N' identifier."
         [ "$BAD_FORM" -eq 0 ] || fail_invalid "high-assurance requirements must use the form '- R-N: <description>'."
         [ "$UNNUMBERED" -eq 0 ] || fail_invalid "every high-assurance requirement list entry must begin with exactly one 'R-N:' identifier; explanatory prose belongs in a separate Notes section."
+        check_canonical_section "$req_content" 'r-[0-9]+' "high-assurance requirements" 'R-N: <description>'
         [ -n "$r_ids" ] || fail_invalid "high-assurance requirements must declare at least one 'R-N' identifier."
         [ "$DUP_IDS" -eq 0 ] || fail_invalid "high-assurance requirements declare duplicate 'R-N' identifiers."
         if [ "$COMPLETED" -eq 1 ]; then

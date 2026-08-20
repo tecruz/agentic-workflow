@@ -42,10 +42,10 @@ contents, and validator parity across Bash and PowerShell.
 | --- | --- | --- |
 | AC-1 | Profile docs present and reviewed | Passed |
 | AC-2 | Template present and matches profile requirements | Passed |
-| AC-3 | Fixture parity tests pass on both validators (134 fixtures) | Passed |
+| AC-3 | Fixture parity tests pass on both validators (151 fixtures) | Passed |
 | AC-4 | WORKFLOW.md / AGENTS.md / README.md updated | Passed |
 | AC-5 | Managed-file registration + bundle tests | Passed |
-| AC-6 | Full bats + Pester suites green (134 fixtures validated on Bash + PS) | Passed |
+| AC-6 | Full bats + Pester suites green (151 fixtures validated on Bash + PS) | Passed |
 
 ## Approval gates
 
@@ -60,7 +60,7 @@ contents, and validator parity across Bash and PowerShell.
 - `.agentic/profiles/{README,prototype,standard,high-assurance}.md`
 - `.agentic/templates/task.md`
 - `.agentic/scripts/validate-task.sh`, `.agentic/scripts/validate-task.ps1`
-- `tests/fixtures/tasks/*.md` (134 fixtures)
+- `tests/fixtures/tasks/*.md` (151 fixtures)
 - `tests/bats/validate_task_test.bats`, `tests/pester/ValidateTask.Tests.ps1`
 - `tests/bats/install_test.bats`, `tests/pester/Install.Tests.ps1`
 - `install.sh`, `install.ps1`, `scripts/build-bundle.sh`
@@ -108,19 +108,30 @@ contents, and validator parity across Bash and PowerShell.
   (`LC_ALL=C` byte-level match, ASCII alnum or any non-ASCII byte) matching
   PowerShell, so Unicode content is accepted identically; (5) separator rows
   require exactly three `-{3,}` cells. 14 new fixtures; 134 fixtures in total.
+- Third review round (request changes) fully addressed in both validators:
+  (1) the meaningful-character predicate is Unicode-letter/number aware in both
+  languages (`\p{L}\p{N}`), so emoji, punctuation, and zero-width characters are
+  no longer meaningful evidence while Chinese letters and Arabic-Indic digits are;
+  (2) `## Approval gates` is required for prototype tasks (17 prototype fixtures
+  updated); (3) prototype safety declarations must appear as exact normalized
+  lines, each exactly once, so negated, duplicated, or prose-only declarations are
+  rejected; (4) acceptance criteria and high-assurance requirements admit only
+  canonical `AC-N:`/`R-N:` list entries, so bare, numbered, and prose-declared
+  bullets are rejected while wrapped/continuation lines of a canonical item are
+  still accepted. 17 new fixtures; 151 fixtures in total.
 - Final verification on this machine:
   - `bash -n` on `install.sh`, `.agentic/scripts/verify.sh`, `.agentic/scripts/validate-task.sh` — OK.
   - PowerShell parse check on `install.ps1`, `verify.ps1`, `validate-task.ps1` — OK.
-  - `bats tests/bats/validate_task_test.bats` — 137/137 pass.
-  - `Invoke-Pester tests/pester/ValidateTask.Tests.ps1` — 137/137 pass.
-  - Fixture parity harness: all 134 fixtures yield identical exit codes and
+  - `bats tests/bats/validate_task_test.bats` — 154/154 pass.
+  - `Invoke-Pester tests/pester/ValidateTask.Tests.ps1` — 154/154 pass.
+  - Fixture parity harness: all 151 fixtures yield identical exit codes and
     identical diagnostic messages under Bash vs PowerShell.
   - Remaining local failures are pre-existing environment issues only:
     `install_test.bats` 79/87/89 (missing `zip` in WSL, identical on baseline)
     and the release-to-release upgrade Pester test (Windows bsdtar pipe quirk).
 - Final CI requirement: all required checks must pass on the final merge head.
   Evidence location: GitHub pull-request checks for PR #7, which also run this
-  task through both validators in `--handoff` mode (120 fixtures).
+  task through both validators in `--handoff` mode (151 fixtures).
 
 ## Remaining risks
 

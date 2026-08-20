@@ -1,9 +1,9 @@
-# TASK-049: Done prototype with empty Task goal
+# TASK-156: Prototype with declarations only in prose
 
 ## Status
 
 Status: done
-Updated: 2026-08-18
+Updated: 2026-08-19
 ## Risk profile
 
 Profile: prototype
@@ -12,6 +12,8 @@ Profile: prototype
 
 User-requested spike; no production impact.
 ## Task goal
+
+Prove that the media pipeline keeps 30 fps on the reference device.
 
 ## Smoke verification
 
@@ -27,8 +29,7 @@ User-requested spike; no production impact.
 
 ## Handoff
 
-Production readiness: not established
-
-No production deployment or irreversible operation: confirmed
+The handoff narrative states that production readiness was not established and
+that no production deployment or irreversible operation was confirmed.
 
 - Notes handed to the product team in `proto/README.md`.

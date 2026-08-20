@@ -15,14 +15,19 @@
   `high-assurance` profiles, a risk-aware task template, structural task
   validators (Bash + PowerShell), lifecycle risk-classification step, and
   managed-file registration in the installers and bundle.
-  Review feedback (two request-changes rounds) fully addressed: a shared
+  Review feedback (three request-changes rounds) fully addressed: a shared
   meaningful-character predicate rejects symbol-only evidence/`n/a`/approvers,
   evidence and matrix tables validate exact header schemas and reject
   malformed/unknown header rows and leading-pipe omissions, Markdown-wrapped
   placeholders are recognized, approval gates are validated for every profile,
-  and the meaningful-character predicate is locale-deterministic for Unicode.
-  Parity verified: 134 fixtures yield identical exit codes and messages on both
-  validators; Bats and Pester validator suites pass 137/137.
+  the meaningful-character predicate is locale-deterministic for Unicode
+  letters/numbers (emoji, punctuation, and zero-width are not meaningful),
+  prototype tasks must declare an Approval gates section with exact safety
+  declaration lines, and acceptance criteria/requirements admit only canonical
+  `AC-N:`/`R-N:` list entries (bare, numbered, and prose-declared bullets are
+  rejected; wrapped/continuation lines of a canonical item are accepted).
+  Parity verified: 151 fixtures yield identical exit codes and messages on both
+  validators; Bats and Pester validator suites pass 154/154.
   See `.agentic/tasks/TASK-002-risk-profiles-and-evidence-contracts.md`.
 
 ## Recent Decisions

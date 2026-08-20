@@ -1,9 +1,9 @@
-# TASK-049: Done prototype with empty Task goal
+# TASK-155: Prototype with a duplicated readiness declaration
 
 ## Status
 
 Status: done
-Updated: 2026-08-18
+Updated: 2026-08-19
 ## Risk profile
 
 Profile: prototype
@@ -12,6 +12,8 @@ Profile: prototype
 
 User-requested spike; no production impact.
 ## Task goal
+
+Prove that the media pipeline keeps 30 fps on the reference device.
 
 ## Smoke verification
 
@@ -27,6 +29,7 @@ User-requested spike; no production impact.
 
 ## Handoff
 
+Production readiness: not established
 Production readiness: not established
 
 No production deployment or irreversible operation: confirmed

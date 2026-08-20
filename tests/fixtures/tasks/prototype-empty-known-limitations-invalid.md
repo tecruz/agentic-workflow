@@ -21,6 +21,10 @@ Prove that the media pipeline keeps 30 fps on the reference device.
 
 ## Known limitations
 
+## Approval gates
+
+- None identified
+
 ## Handoff
 
 Production readiness: not established

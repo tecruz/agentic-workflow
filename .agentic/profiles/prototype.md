@@ -33,6 +33,8 @@ A prototype task file must include:
 - **Task goal** - what the experiment or spike is trying to learn.
 - **Smoke verification** - the basic smoke check that the prototype runs.
 - **Known limitations** - what the prototype does not cover.
+- **Approval gates** - either `- None identified` or structured `AG-N`
+  records. A lower profile never overrides mandatory approval constraints.
 - **Handoff** - outcome, smoke verification result, known limitations, and
   both declarations below.
 

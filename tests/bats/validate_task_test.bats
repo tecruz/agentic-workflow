@@ -717,3 +717,88 @@ classify() {  # classify <fixture>
     classify unicode-content-valid.md
     [ "$status" -eq 0 ]
 }
+
+@test "VALID (0) for a complete standard task whose Final is a Chinese sentence" {
+    classify unicode-letter-content-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "VALID (0) for a complete standard task whose Final uses Arabic-Indic digits" {
+    classify unicode-digit-content-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "BLOCKED (2) for a completed task whose Final is only Unicode punctuation" {
+    classify unicode-punctuation-only-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "BLOCKED (2) for a required evidence row whose description is an emoji" {
+    classify emoji-only-evidence-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "BLOCKED (2) for a completed task whose Final is only zero-width spaces" {
+    classify zero-width-only-content-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "INVALID (1) for a checked approval gate whose approver is an emoji" {
+    classify emoji-only-approver-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a completed prototype missing the Approval gates section" {
+    classify prototype-missing-approval-section-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "VALID (0) for a completed prototype with the exact safety declarations" {
+    classify prototype-exact-declarations-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "INVALID (1) for a prototype whose readiness declaration is negated" {
+    classify prototype-negated-readiness-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a prototype whose no-deployment declaration is negated" {
+    classify prototype-negated-no-deployment-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a prototype that declares readiness more than once" {
+    classify prototype-duplicate-declaration-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a prototype whose readiness declaration appears only in prose" {
+    classify prototype-declaration-only-in-prose-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a bare acceptance criterion with no AC-N identifier" {
+    classify bare-criterion-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a numbered acceptance criterion with a literal numeric label" {
+    classify numbered-criterion-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a bare high-assurance requirement with no R-N identifier" {
+    classify bare-requirement-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a numbered high-assurance requirement with a literal numeric label" {
+    classify numbered-requirement-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when canonical criteria are mixed with a bare bullet" {
+    classify mixed-canonical-and-bare-criteria-invalid.md
+    [ "$status" -eq 1 ]
+}

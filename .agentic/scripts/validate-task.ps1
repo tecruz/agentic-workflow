@@ -269,15 +269,15 @@ function Test-TableRowContent {
     return $false
 }
 
-# Test-MeaningfulChar — true when the text contains at least one meaningful
-# character: an ASCII letter/number or any non-ASCII character. Symbol-only
-# values ('_', '()', '+++', '^^^') carry no real content.
-# Locale policy (deterministic parity with the Bash check, which runs under
-# LC_ALL=C so [^[:space:][:punct:]] is ASCII-only): any non-ASCII character
-# is meaningful regardless of Unicode category.
+# Test-MeaningfulChar — true when the text contains at least one Unicode
+# Letter or Number (any script), or an ASCII letter/digit. Symbol-only values
+# ('_', '()', '+++', '^^^'), Unicode punctuation ('—', '…'), emoji, and
+# invisible format characters (zero-width space) carry no real content and are
+# rejected. This is the authoritative letter-or-number test: a Unicode
+# category Letter or Number, never "any non-ASCII character".
 function Test-MeaningfulChar {
     param([string]$Value)
-    return ($Value -match '[A-Za-z0-9]' -or $Value -match '[^\x00-\x7F]')
+    return ($Value -match '[\p{L}\p{N}]')
 }
 
 # Test-TextIsPlaceholder — true when a single text value is template placeholder
@@ -446,6 +446,27 @@ function Get-CanonicalIds {
     return , $out.ToArray()
 }
 
+# Assert-CanonicalSection — every candidate entry line in a canonical-only
+# section must be a canonical list item '- <ID>: <description>'. A candidate
+# entry is a line that starts a list item (bullet, numbered, or bare '<ID>:'
+# declaration); those are exactly the lines that could declare a criterion or
+# requirement. Bare, numbered, or prose-declared identifiers are rejected
+# rather than skipped, so a visible criterion cannot silently escape the
+# evidence contract by changing its list syntax. Continuation lines and notes
+# paragraphs (no leading list marker) are allowed: they belong to the
+# preceding canonical item.
+function Assert-CanonicalSection {
+    param([string[]]$ContentLines, [string]$IdPattern, [string]$Label, [string]$EntryForm)
+    foreach ($line in $ContentLines) {
+        if ($line -notmatch '\S') { continue }
+        $lowLine = $line.ToLowerInvariant()
+        if ($lowLine -notmatch '^([-*+]\s*|\d+[.)]\s+|(ac|r)-\d+\s*:)') { continue }
+        if ($lowLine -notmatch "^[-*+]\s*$IdPattern\s*:\s*\S") {
+            Write-Invalid "$Label must contain only canonical '$EntryForm' entries; prose belongs in a separate Notes section."
+        }
+    }
+}
+
 $AllowedResults = @('passed', 'satisfied', 'n/a', 'pending', 'partial', 'blocked', 'missing', 'not-run')
 $UnresolvedResults = @('pending', 'partial', 'blocked', 'missing', 'not-run')
 
@@ -584,7 +605,7 @@ $requiredSections = @()
 $requiredSubsections = @()
 switch ($ProfileName) {
     'prototype' {
-        $requiredSections = @('status', 'risk profile', 'profile rationale', 'task goal', 'smoke verification', 'known limitations', 'handoff')
+        $requiredSections = @('status', 'risk profile', 'profile rationale', 'task goal', 'smoke verification', 'known limitations', 'approval gates', 'handoff')
     }
     'standard' {
         $requiredSections = @('status', 'risk profile', 'profile rationale', 'acceptance criteria', 'required evidence', 'approval gates', 'verification', 'files changed', 'remaining risks')
@@ -628,13 +649,32 @@ if ($ProfileName -ne 'prototype' -and $Completed) {
 # Prototype contract.
 # ---------------------------------------------------------------------------
 if ($ProfileName -eq 'prototype') {
-    $handoffLines = Get-SectionContent 'handoff'
-    $handoffText = ($handoffLines -join "`n")
-    if ($handoffText -notmatch 'production\s+readiness\s*:\s*not\s+established') {
-        Write-Invalid "prototype handoff must state 'Production readiness: not established'."
+    # The two handoff declarations must appear as exact normalized declaration
+    # lines, each exactly once. Substring matches are not enough: a line that
+    # carries the phrase but adds negation or commentary ("... not established
+    # — this statement is false.", "... confirmed? No.") is rejected, and a
+    # phrase that appears only inside prose is not counted. Insignificant
+    # casing and surrounding whitespace are ignored; a leading list marker is
+    # stripped so a bulleted declaration still counts as a declaration line.
+    $readinessDecl = 0
+    $noDeployDecl = 0
+    foreach ($dl in (Get-SectionContent 'handoff')) {
+        $d = ((($dl -replace '^\s*[-*+]\s+', '').Trim() -replace '\s+', ' ').Trim()).ToLowerInvariant()
+        if (-not $d) { continue }
+        if ($d -eq 'production readiness: not established') { $readinessDecl++ }
+        elseif ($d -eq 'no production deployment or irreversible operation: confirmed') { $noDeployDecl++ }
+        if ($d -match '^production\s+readiness\s*:' -and $d -ne 'production readiness: not established') {
+            Write-Invalid "prototype handoff declaration 'Production readiness' must appear as the exact line 'Production readiness: not established'."
+        }
+        if ($d -match '^no\s+production\s+deployment\s+or\s+irreversible\s+operation\s*:' -and $d -ne 'no production deployment or irreversible operation: confirmed') {
+            Write-Invalid "prototype handoff declaration 'No production deployment or irreversible operation' must appear as the exact line 'No production deployment or irreversible operation: confirmed'."
+        }
     }
-    if ($handoffText -notmatch 'no\s+production\s+deployment\s+or\s+irreversible\s+operation\s*:\s*confirmed') {
-        Write-Invalid "prototype handoff must declare 'No production deployment or irreversible operation: confirmed'."
+    if ($readinessDecl -ne 1) {
+        Write-Invalid "prototype handoff must state 'Production readiness: not established' exactly once."
+    }
+    if ($noDeployDecl -ne 1) {
+        Write-Invalid "prototype handoff must declare 'No production deployment or irreversible operation: confirmed' exactly once."
     }
     if ($Completed) {
         Assert-VerificationEvidence '## Task goal' (Get-SectionContent 'task goal')
@@ -652,6 +692,7 @@ if ($ProfileName -ne 'prototype') {
     if ($script:MultiIds) { Write-Invalid "an acceptance criterion list entry declares more than one 'AC-N' identifier." }
     if ($script:BadForm) { Write-Invalid "acceptance criteria must use the form '- AC-N: <description>'." }
     if ($script:Unnumbered) { Write-Invalid "every acceptance criterion list entry must begin with exactly one 'AC-N:' identifier; explanatory prose belongs in a separate Notes section." }
+    Assert-CanonicalSection (Get-SectionContent 'acceptance criteria') 'ac-\d+' 'acceptance criteria' 'AC-N: <description>'
     if ($acIds.Count -eq 0) { Write-Invalid "acceptance criteria must declare at least one 'AC-N' identifier." }
     if ($script:DupIds) { Write-Invalid "acceptance criteria declare duplicate 'AC-N' identifiers." }
     if ($Completed) {
@@ -673,6 +714,7 @@ if ($ProfileName -ne 'prototype') {
         if ($script:MultiIds) { Write-Invalid "a high-assurance requirement list entry declares more than one 'R-N' identifier." }
         if ($script:BadForm) { Write-Invalid "high-assurance requirements must use the form '- R-N: <description>'." }
         if ($script:Unnumbered) { Write-Invalid "every high-assurance requirement list entry must begin with exactly one 'R-N:' identifier; explanatory prose belongs in a separate Notes section." }
+        Assert-CanonicalSection (Get-SectionContent 'requirements') 'r-\d+' 'high-assurance requirements' 'R-N: <description>'
         if ($rIds.Count -eq 0) { Write-Invalid "high-assurance requirements must declare at least one 'R-N' identifier." }
         if ($script:DupIds) { Write-Invalid "high-assurance requirements declare duplicate 'R-N' identifiers." }
         if ($Completed) {

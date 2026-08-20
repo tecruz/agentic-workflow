@@ -1,9 +1,9 @@
-# TASK-049: Done prototype with empty Task goal
+# TASK-151: Prototype missing the approval gates section
 
 ## Status
 
 Status: done
-Updated: 2026-08-18
+Updated: 2026-08-19
 ## Risk profile
 
 Profile: prototype
@@ -13,6 +13,8 @@ Profile: prototype
 User-requested spike; no production impact.
 ## Task goal
 
+Prove that the media pipeline keeps 30 fps on the reference device.
+
 ## Smoke verification
 
 - Played a 90s clip at 30 fps on the reference device.
@@ -20,10 +22,6 @@ User-requested spike; no production impact.
 ## Known limitations
 
 - Only the reference device was tested.
-
-## Approval gates
-
-- None identified
 
 ## Handoff
 

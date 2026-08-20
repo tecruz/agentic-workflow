@@ -568,6 +568,74 @@ Describe 'validate-task.ps1 risk-profile validator' {
         Invoke-Validator 'unicode-content-valid.md' | Should -Be 0
     }
 
+    It 'VALID (0) for a complete standard task whose Final is a Chinese sentence' {
+        Invoke-Validator 'unicode-letter-content-valid.md' | Should -Be 0
+    }
+
+    It 'VALID (0) for a complete standard task whose Final uses Arabic-Indic digits' {
+        Invoke-Validator 'unicode-digit-content-valid.md' | Should -Be 0
+    }
+
+    It 'BLOCKED (2) for a completed task whose Final is only Unicode punctuation' {
+        Invoke-Validator 'unicode-punctuation-only-blocked.md' | Should -Be 2
+    }
+
+    It 'BLOCKED (2) for a required evidence row whose description is an emoji' {
+        Invoke-Validator 'emoji-only-evidence-blocked.md' | Should -Be 2
+    }
+
+    It 'BLOCKED (2) for a completed task whose Final is only zero-width spaces' {
+        Invoke-Validator 'zero-width-only-content-blocked.md' | Should -Be 2
+    }
+
+    It 'INVALID (1) for a checked approval gate whose approver is an emoji' {
+        Invoke-Validator 'emoji-only-approver-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) for a completed prototype missing the Approval gates section' {
+        Invoke-Validator 'prototype-missing-approval-section-invalid.md' | Should -Be 1
+    }
+
+    It 'VALID (0) for a completed prototype with the exact safety declarations' {
+        Invoke-Validator 'prototype-exact-declarations-valid.md' | Should -Be 0
+    }
+
+    It 'INVALID (1) for a prototype whose readiness declaration is negated' {
+        Invoke-Validator 'prototype-negated-readiness-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) for a prototype whose no-deployment declaration is negated' {
+        Invoke-Validator 'prototype-negated-no-deployment-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) for a prototype that declares readiness more than once' {
+        Invoke-Validator 'prototype-duplicate-declaration-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) for a prototype whose readiness declaration appears only in prose' {
+        Invoke-Validator 'prototype-declaration-only-in-prose-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) for a bare acceptance criterion with no AC-N identifier' {
+        Invoke-Validator 'bare-criterion-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) for a numbered acceptance criterion with a literal numeric label' {
+        Invoke-Validator 'numbered-criterion-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) for a bare high-assurance requirement with no R-N identifier' {
+        Invoke-Validator 'bare-requirement-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) for a numbered high-assurance requirement with a literal numeric label' {
+        Invoke-Validator 'numbered-requirement-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when canonical criteria are mixed with a bare bullet' {
+        Invoke-Validator 'mixed-canonical-and-bare-criteria-invalid.md' | Should -Be 1
+    }
+
     It 'PowerShell and Bash classifiers agree on every fixture' {
         if (-not (Get-Command bash -ErrorAction SilentlyContinue)) { return }
         # Probe: bash must be able to invoke the validator and read the
