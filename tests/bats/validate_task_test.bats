@@ -9,8 +9,6 @@ REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
 VALIDATE="$REPO_ROOT/.agentic/scripts/validate-task.sh"
 FIXTURES="$REPO_ROOT/tests/fixtures/tasks"
 
-have() { command -v "$1" >/dev/null 2>&1; }
-
 classify() {  # classify <fixture>
     run bash "$VALIDATE" "$FIXTURES/$1" >/dev/null 2>&1
 }
@@ -75,27 +73,42 @@ classify() {  # classify <fixture>
     [ "$status" -eq 1 ]
 }
 
-@test "Bash and PowerShell classifiers agree on every fixture" {
-    have pwsh || skip "pwsh not available"
-    local f bash_code ps_code bash_out ps_out
-    for f in "$FIXTURES"/*.md; do
-        run bash "$VALIDATE" "$f"
-        bash_code=$status
-        bash_out="$output"
-        run pwsh -NoProfile -File "$REPO_ROOT/.agentic/scripts/validate-task.ps1" "$f"
-        ps_code=$status
-        ps_out="$output"
-        if [ "$bash_code" -ne "$ps_code" ]; then
-            echo "classification mismatch for '$(basename "$f")': bash=$bash_code ps=$ps_code" >&2
-            return 1
-        fi
-        if [ "$bash_out" != "$ps_out" ]; then
-            echo "message mismatch for '$(basename "$f")'." >&2
-            echo "  bash: $bash_out" >&2
-            echo "  ps:   $ps_out" >&2
-            return 1
-        fi
+@test "INVALID (1) with a clear perl error when non-ASCII content needs perl and perl is unavailable" {
+    # The Perl dependency check must run in the parent validator process, not
+    # inside a command-substitution subshell: content_class is called via
+    # `$(...)` for criterion descriptions and evidence cells, so an `exit`
+    # raised there would be swallowed and the task could reach VALID despite
+    # emitting an INVALID diagnostic. Hide perl from PATH and confirm the task
+    # is rejected in the parent instead of being misclassified.
+    local saved_path priv t real
+    saved_path="$PATH"
+    priv="$(mktemp -d)"
+    for t in bash tr sed grep wc head sort awk; do
+        real="$(command -v "$t")" || { rm -rf "$priv"; skip "tool '$t' unavailable"; }
+        ln -s "$real" "$priv/$t"
     done
+    PATH="$priv" run bash "$VALIDATE" "$FIXTURES/non-ascii-criterion-evidence-valid.md"
+    PATH="$saved_path"
+    rm -rf "$priv"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"INVALID: perl is required"* ]]
+    [[ "$output" != *"VALID:"* ]]
+}
+
+@test "INVALID (1) with a clear perl error in --handoff mode when non-ASCII content needs perl and perl is unavailable" {
+    local saved_path priv t real
+    saved_path="$PATH"
+    priv="$(mktemp -d)"
+    for t in bash tr sed grep wc head sort awk; do
+        real="$(command -v "$t")" || { rm -rf "$priv"; skip "tool '$t' unavailable"; }
+        ln -s "$real" "$priv/$t"
+    done
+    PATH="$priv" run bash "$VALIDATE" --handoff "$FIXTURES/non-ascii-criterion-evidence-valid.md"
+    PATH="$saved_path"
+    rm -rf "$priv"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"INVALID: perl is required"* ]]
+    [[ "$output" != *"VALID:"* ]]
 }
 
 @test "INVALID (1) for a prototype task missing the no-production-deployment declaration" {

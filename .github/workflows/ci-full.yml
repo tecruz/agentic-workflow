@@ -23,8 +23,8 @@ on:
 jobs:
   # ── Full Bats suite (Linux) ────────────────────────────────────────────
   full-bats-linux:
-    name: Full Bats (Ubuntu)
-    runs-on: ubuntu-latest
+    name: Full Bats (Ubuntu 22.04)
+    runs-on: ubuntu-22.04
     timeout-minutes: 35
     steps:
       # actions/checkout@v5
@@ -119,9 +119,13 @@ jobs:
         run: bash .agentic/scripts/verify.sh
 
   # ── Validator parity (single run) ──────────────────────────────────────
+  # The parity job invokes pwsh -NoProfile -File per fixture through
+  # run-golden.sh / run-parity.sh; that invocation path segfaults (exit 139)
+  # on ubuntu-latest, so it runs on ubuntu-22.04 instead. It needs only pwsh,
+  # not the Pester/PSScriptAnalyzer modules, which run-parity.sh never imports.
   validator-parity:
-    name: Validator parity (Ubuntu)
-    runs-on: ubuntu-latest
+    name: Validator parity (Ubuntu 22.04)
+    runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
       # actions/checkout@v5
@@ -130,12 +134,6 @@ jobs:
           ref: ${{ inputs.ref || '' }}
           fetch-depth: 0
           persist-credentials: false
-
-      - name: Install Pester and PSScriptAnalyzer
-        shell: pwsh
-        run: |
-          Install-Module Pester -RequiredVersion 5.6.0 -Scope CurrentUser -Force -SkipPublisherCheck
-          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force -SkipPublisherCheck
 
       - name: Run cross-language parity
         run: |

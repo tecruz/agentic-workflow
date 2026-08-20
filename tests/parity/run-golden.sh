@@ -31,6 +31,7 @@ esac
 [ -f "$GOLDEN" ] || { echo "run-golden.sh: golden expectations not found: $GOLDEN" >&2; exit 2; }
 
 FAILURES=0
+seen=""
 
 run_one() {  # run_one <fixture> — sets globals code/out for the validator
     local f="$1"
@@ -47,6 +48,26 @@ run_one() {  # run_one <fixture> — sets globals code/out for the validator
 
 while IFS=$'\t' read -r name expected_code expected_msg || [ -n "$name" ]; do
     printf '%s' "$name" | grep -qE '^[[:space:]]*(#|$)' && continue
+    # A fixture must have exactly one golden row: reject duplicate names so a
+    # stale or conflicting expectation cannot hide behind an earlier one.
+    case " $seen " in
+        *" $name "*)
+            echo "  DUPLICATE GOLDEN ROW: $name"
+            FAILURES=$((FAILURES + 1))
+            continue
+            ;;
+        *) seen="$seen $name" ;;
+    esac
+    # Exit codes are limited to the validator's contract: 0 VALID, 1 INVALID,
+    # 2 BLOCKED. Anything else is a manifest error, not a fixture expectation.
+    case "$expected_code" in
+        0|1|2) ;;
+        *)
+            echo "  INVALID GOLDEN EXIT CODE: $name expected=$expected_code"
+            FAILURES=$((FAILURES + 1))
+            continue
+            ;;
+    esac
     expected_msg="${expected_msg%$'\r'}"
     if [ ! -f "$FIXTURES/$name" ]; then
         echo "  MISSING FIXTURE: $name"
@@ -64,6 +85,18 @@ while IFS=$'\t' read -r name expected_code expected_msg || [ -n "$name" ]; do
         FAILURES=$((FAILURES + 1))
     fi
 done < "$GOLDEN"
+
+# Reverse completeness check: every task fixture must be listed exactly once in
+# the golden manifest. A fixture without a golden row escapes the contract, and
+# a golden row for a nonexistent fixture is already reported above.
+golden_names="$(awk -F '\t' '!/^[[:space:]]*(#|$)/ && NF >= 1 { print $1 }' "$GOLDEN" | sort)"
+fixture_names="$(cd "$FIXTURES" && for f in *.md; do [ -f "$f" ] && printf '%s\n' "$f"; done | sort)"
+diff_lines="$(comm -3 <(printf '%s\n' "$golden_names") <(printf '%s\n' "$fixture_names"))"
+if [ -n "$diff_lines" ]; then
+    echo "  GOLDEN/FIXTURE MISMATCH (fixtures without a golden row, or golden rows without a fixture):"
+    printf '%s\n' "$diff_lines" | sed 's/^/    /'
+    FAILURES=$((FAILURES + 1))
+fi
 
 if [ "$FAILURES" -ne 0 ]; then
     echo "$FAILURES golden assertion(s) failed for the $LANG validator" >&2

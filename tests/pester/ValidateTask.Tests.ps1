@@ -647,26 +647,4 @@ Describe 'validate-task.ps1 risk-profile validator' {
     It 'VALID (0) when a canonical entry has a continuation prose line with no identifier' {
         Invoke-Validator 'continuation-without-id-valid.md' | Should -Be 0
     }
-
-    It 'PowerShell and Bash classifiers agree on every fixture' {
-        if (-not (Get-Command bash -ErrorAction SilentlyContinue)) { return }
-        # Probe: bash must be able to invoke the validator and read the
-        # fixtures. On Windows hosts where 'bash' is WSL, Windows paths are
-        # not resolvable; in that case skip the cross-language comparison.
-        $bashValidator = Join-Path $repoRoot '.agentic' 'scripts' 'validate-task.sh'
-        $probeFixture = Join-Path $fixtures 'prototype-valid.md'
-        bash $bashValidator $probeFixture *> $null
-        if ($LASTEXITCODE -notin 0, 1, 2) { return }
-        Get-ChildItem -LiteralPath $fixtures -Filter *.md | ForEach-Object {
-            # Run both validators as subprocesses so their stderr is captured:
-            # the PowerShell validator writes failures via [Console]::Error,
-            # which PowerShell stream redirection does not capture in-process.
-            $psOut = (pwsh -NoProfile -File $validate (Join-Path $fixtures $_.Name) 2>&1 | Out-String)
-            $psCode = $LASTEXITCODE
-            $bashOut = (bash $bashValidator $_.FullName 2>&1 | Out-String)
-            $bashCode = $LASTEXITCODE
-            $psCode | Should -Be $bashCode
-            $psOut.Trim() | Should -Be $bashOut.Trim()
-        }
-    }
 }

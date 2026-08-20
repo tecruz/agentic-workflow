@@ -89,6 +89,7 @@ na-matrix-valid.md	0	VALID: profile=high-assurance
 na-punctuation-only-rationale-invalid.md	1	INVALID: required evidence row 'ac-1' uses 'n/a' with a placeholder rationale.
 na-symbol-only-rationale-invalid.md	1	INVALID: required evidence row 'ac-1' uses 'n/a' with a placeholder rationale.
 negated-approval.md	1	INVALID: malformed approval entry in '## Approval gates': '- Not approved'.
+non-ascii-criterion-evidence-valid.md	0	VALID: profile=standard
 none-identified-substring-invalid.md	1	INVALID: malformed approval entry in '## Approval gates': '- None identified yet; security approval is still pending.'.
 none-plus-pending-prose-invalid.md	1	INVALID: malformed approval entry in '## Approval gates': 'Security approval is still pending.'.
 numbered-criterion-invalid.md	1	INVALID: acceptance criteria must contain only canonical 'AC-N: <description>' list entries; identifiers may not appear in prose or non-canonical lines.

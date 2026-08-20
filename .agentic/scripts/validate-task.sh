@@ -393,9 +393,18 @@ table_row_has_content() {
 has_meaningful_char() {
     printf '%s' "$1" | grep -qE '[A-Za-z0-9]' && return 0
     [ -n "$1" ] || return 1
+    # Pure-ASCII text that reached this point has no ASCII letter or number,
+    # so it has no Unicode Letter or Number either: ASCII symbols are never
+    # Letters/Numbers. Classify it without perl, so the perl dependency is
+    # consulted only for content that actually contains non-ASCII bytes.
+    if ! printf '%s' "$1" | LC_ALL=C grep -q '[^[:print:]]'; then
+        return 1
+    fi
     # The Unicode-category test needs perl; if it is missing, the environment
     # cannot classify non-ASCII evidence. Fail with a clear error instead of
-    # silently rejecting content the PowerShell validator would accept.
+    # silently rejecting content the PowerShell validator would accept. The
+    # parent-process pre-flight below guarantees this branch is never reached
+    # with perl missing, so the error cannot be swallowed by a subshell.
     command -v perl >/dev/null 2>&1 \
         || fail_invalid "perl is required to classify non-ASCII content; install perl or keep evidence ASCII-only."
     printf '%s' "$1" | perl -CS -ne 'exit 0 if /[\p{L}\p{N}]/; exit 1' 2>/dev/null
@@ -675,6 +684,20 @@ while IFS= read -r line || [ -n "$line" ]; do
     fi
     CONTENT_LINES+=("$line")
 done < "$TASK_FILE"
+
+# ---------------------------------------------------------------------------
+# Perl pre-flight: content_class and has_meaningful_char are reached through
+# command substitution, so an `exit` raised inside them exits the substitution
+# subshell, not this validator. When authoritative content contains non-ASCII
+# bytes and perl is unavailable, fail here in the parent process so the perl
+# error cannot be swallowed and a task that requires non-ASCII classification
+# can never reach a VALID result on a machine that cannot perform it.
+# ---------------------------------------------------------------------------
+if ! command -v perl >/dev/null 2>&1 \
+    && [ "${#CONTENT_LINES[@]}" -gt 0 ] \
+    && printf '%s\n' "${CONTENT_LINES[@]}" | LC_ALL=C grep -q '[^[:print:]]'; then
+    fail_invalid "perl is required to classify non-ASCII content; install perl or keep evidence ASCII-only."
+fi
 
 # ---------------------------------------------------------------------------
 # Profile and status declarations.
