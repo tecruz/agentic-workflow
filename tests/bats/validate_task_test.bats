@@ -802,3 +802,18 @@ classify() {  # classify <fixture>
     classify mixed-canonical-and-bare-criteria-invalid.md
     [ "$status" -eq 1 ]
 }
+
+@test "INVALID (1) when canonical criteria are followed by prose that mentions an AC identifier" {
+    classify canonical-plus-prose-ac-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when canonical high-assurance requirements are followed by prose that mentions an R identifier" {
+    classify canonical-plus-prose-r-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "VALID (0) when a canonical entry has a continuation prose line with no identifier" {
+    classify continuation-without-id-valid.md
+    [ "$status" -eq 0 ]
+}

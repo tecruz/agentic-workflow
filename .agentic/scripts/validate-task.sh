@@ -171,23 +171,32 @@ collect_canonical_ids() {
     printf -v "$outvar" '%s' "$out"
 }
 
-# check_canonical_section <content> <idpat> <label> <entry-form> — every
-# candidate entry line in a canonical-only section must be a canonical list
-# item '- <ID>: <description>'. A candidate entry is a line that starts a list
-# item (bullet, numbered, or bare '<ID>:' declaration); those are exactly the
-# lines that could declare a criterion or requirement. Bare, numbered, or
-# prose-declared identifiers are rejected rather than skipped, so a visible
-# criterion cannot silently escape the evidence contract by changing its list
-# syntax. Continuation lines and notes paragraphs (no leading list marker) are
-# allowed: they belong to the preceding canonical item.
+# check_canonical_section <content> <idpat> <label> <entry-form> — every line in
+# a canonical-only section that is a candidate entry or mentions an identifier
+# token must be a canonical list item '- <ID>: <description>'. A candidate entry
+# is a line that starts a list item (bullet, numbered, or bare '<ID>:'
+# declaration); those are exactly the lines that could declare a criterion or
+# requirement. Any line that contains an identifier token anywhere (for example
+# 'AC-2' embedded in a paragraph) must also be a canonical entry, so a prose
+# mention cannot declare an extra criterion or requirement that escapes the
+# evidence contract. Bare, numbered, and prose-declared identifiers are rejected
+# rather than skipped. Continuation lines and notes paragraphs that contain no
+# identifier token are allowed: they belong to the preceding canonical item.
 check_canonical_section() {
-    local content="$1" idpat="$2" label="$3" entryform="$4" line lowline
+    local content="$1" idpat="$2" label="$3" entryform="$4" line lowline idbound
+    # An identifier token is delimited by non-alphanumerics so that a prose
+    # fragment such as 'R-2D2' is not mistaken for a requirement identifier.
+    idbound="(^|[^a-z0-9])${idpat}($|[^a-z0-9])"
     while IFS= read -r line || [ -n "$line" ]; do
         printf '%s' "$line" | grep -q '[^[:space:]]' || continue
         lowline="$(printf '%s' "$line" | lower)"
+        if printf '%s' "$lowline" | grep -qE "$idbound"; then
+            printf '%s' "$lowline" | grep -qE "^[-*+][[:space:]]*$idpat[[:space:]]*:[[:space:]]*[^[:space:]]" \
+                || fail_invalid "$label must contain only canonical '$entryform' list entries; identifiers may not appear in prose or non-canonical lines."
+        fi
         printf '%s' "$lowline" | grep -qE '^([-*+][[:space:]]*|[0-9]+[.)][[:space:]]+|(ac|r)-[0-9]+[[:space:]]*:)' || continue
         printf '%s' "$lowline" | grep -qE "^[-*+][[:space:]]*$idpat[[:space:]]*:[[:space:]]*[^[:space:]]" \
-            || fail_invalid "$label must contain only canonical '$entryform' entries; prose belongs in a separate Notes section."
+            || fail_invalid "$label must contain only canonical '$entryform' list entries; identifiers may not appear in prose or non-canonical lines."
     done <<< "$content"
 }
 
@@ -384,6 +393,11 @@ table_row_has_content() {
 has_meaningful_char() {
     printf '%s' "$1" | grep -qE '[A-Za-z0-9]' && return 0
     [ -n "$1" ] || return 1
+    # The Unicode-category test needs perl; if it is missing, the environment
+    # cannot classify non-ASCII evidence. Fail with a clear error instead of
+    # silently rejecting content the PowerShell validator would accept.
+    command -v perl >/dev/null 2>&1 \
+        || fail_invalid "perl is required to classify non-ASCII content; install perl or keep evidence ASCII-only."
     printf '%s' "$1" | perl -CS -ne 'exit 0 if /[\p{L}\p{N}]/; exit 1' 2>/dev/null
 }
 

@@ -1,45 +1,44 @@
 #!/usr/bin/env bash
-# run-parity.sh — single cross-language parity check for validators.
-#   Compares Bash and PowerShell classifiers on every task fixture,
-#   and compares Bash and PowerShell detection contracts on every
-#   golden fixture.  Runs once instead of per-OS per-framework.
-set -euo pipefail
+# run-parity.sh — cross-language validator parity + golden expectations.
+#   For every task fixture, requires the Bash validator and the PowerShell
+#   validator to each match the golden expectation (exit code and message) in
+#   task-expectations.tsv, then compares the two detection contracts on every
+#   golden fixture. Matching the same golden file proves each validator is
+#   correct against the expected classification — not merely that the two
+#   implementations agree with each other. Runs once instead of per-OS
+#   per-framework.
+set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-FIXTURES="$REPO_ROOT/tests/fixtures/tasks"
-GOLDEN="$REPO_ROOT/tests/fixtures/golden"
-VALIDATE_SH="$REPO_ROOT/.agentic/scripts/validate-task.sh"
-VALIDATE_PS="$REPO_ROOT/.agentic/scripts/validate-task.ps1"
-VERIFY_SH="$REPO_ROOT/.agentic/scripts/verify.sh"
-VERIFY_PS="$REPO_ROOT/.agentic/scripts/verify.ps1"
+
+have() { command -v "$1" >/dev/null 2>&1; }
+
+if ! have pwsh; then
+    echo "SKIP: pwsh not available"
+    exit 0
+fi
 
 FAILURES=0
 
-has() { command -v "$1" >/dev/null 2>&1; }
-
-# ── 1. Task fixture parity ──────────────────────────────────────────────
-echo "=== Task fixture parity ==="
-
-have pwsh || { echo "SKIP: pwsh not available"; exit 0; }
-
-for f in "$FIXTURES"/*.md; do
-    name="$(basename "$f")"
-    bash_out="$(bash "$VALIDATE_SH" "$f" 2>&1)" && bash_code=0 || bash_code=$?
-    ps_out="$(pwsh -NoProfile -File "$VALIDATE_PS" "$f" 2>&1)" && ps_code=0 || ps_code=$?
-
-    if [ "$bash_code" -ne "$ps_code" ]; then
-        echo "  CODE MISMATCH: $name  bash=$bash_code ps=$ps_code"
-        FAILURES=$((FAILURES + 1))
-    elif [ "$bash_out" != "$ps_out" ]; then
-        echo "  OUTPUT MISMATCH: $name"
-        echo "    bash: $bash_out"
-        echo "    ps:   $ps_out"
+run_golden() {  # run_golden <lang> <validator>
+    if ! bash "$REPO_ROOT/tests/parity/run-golden.sh" "$1" "$2"; then
         FAILURES=$((FAILURES + 1))
     fi
-done
+}
+
+# ── 1. Task fixture golden expectations ──────────────────────────────────
+echo "=== Task fixture golden expectations (Bash) ==="
+run_golden bash "$REPO_ROOT/.agentic/scripts/validate-task.sh"
+
+echo "=== Task fixture golden expectations (PowerShell) ==="
+run_golden pwsh "$REPO_ROOT/.agentic/scripts/validate-task.ps1"
 
 # ── 2. Detection parity ────────────────────────────────────────────────
 echo "=== Detection parity ==="
+
+GOLDEN="$REPO_ROOT/tests/fixtures/golden"
+VERIFY_SH="$REPO_ROOT/.agentic/scripts/verify.sh"
+VERIFY_PS="$REPO_ROOT/.agentic/scripts/verify.ps1"
 
 for gold in "$GOLDEN"/*.tsv; do
     name="$(basename "$gold" .tsv)"

@@ -21,6 +21,12 @@ language, framework, or which agent tool you use.
 
 - **Linux / macOS / WSL**: `bash` 4+ with `sha256sum` (or `shasum` on macOS).
 - **Windows**: [PowerShell 7+](https://github.com/PowerShell/PowerShell).
+- **Perl** (Linux / macOS / WSL): required by the Bash task validator
+  (`validate-task.sh`) only when a task's evidence contains non-ASCII content.
+  Perl performs the Unicode letter/number classification that `grep` cannot;
+  ASCII-only tasks never invoke it. Without perl the validator rejects such a
+  task with a clear message rather than silently disagreeing with the
+  PowerShell validator.
 - Node.js, Rust, Python, Go, or .NET toolchains only if you want the verifier
   to run that stack's checks.
 

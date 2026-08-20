@@ -113,7 +113,10 @@ END_MARKER='<!-- @@AGENTIC-PROTOCOL-END@@ -->'
 while [ $# -gt 0 ]; do
     case "$1" in
         --plan) PLAN=1 ;;
-        --update) UPDATE=1 ;;
+        --update)
+            # shellcheck disable=SC2034
+            UPDATE=1
+            ;;
         --prune) PRUNE=1 ;;
         --prune-unverified-legacy) PRUNE_UNVERIFIED_LEGACY=1 ;;
         --uninstall) UNINSTALL=1 ;;

@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Golden-expectation CI + canonical-section hardening (PR #7 review round).**
+  - Fast CI now validates every task fixture against a checked-in golden
+    expectation file (`tests/parity/task-expectations.tsv`) that records the
+    expected exit code and diagnostic message per fixture, so the PR gate proves
+    each validator classifies each fixture correctly instead of only matching
+    the two implementations to each other. `tests/parity/run-golden.sh` runs
+    either validator against the golden file; `run-parity.sh` /
+    `run-parity.ps1` drive both validators plus the detection parity.
+  - Acceptance criteria and high-assurance Requirements now reject any
+    `AC-N` / `R-N` identifier that appears in prose or a non-canonical list
+    line (not only list items that fail to declare an identifier), so a
+    prose-declared extra criterion or requirement can no longer escape the
+    evidence contract.
+  - Three new shared fixtures cover both rejections and the valid continuation
+    case (154 total), with matching Bats and Pester tests.
+  - The macOS compatibility job now runs the Bash task validator over the full
+    fixture set against the golden file, exercising the validator under Bash
+    3.2 on the compact PR gate.
+  - ShellCheck is no longer globally soft-failing: targeted suppressions
+    (the known SC1087 false positive plus two inline SC2034 directives for
+    intentional dead assignments) let it run as a blocking check.
+  - The Bash validator's Perl dependency for non-ASCII classification is now
+    documented in the README requirements.
+
 ### Fixed
 - **Task validator contract hardening (PR #7 follow-up).** Closes three
   evidence-contract bypasses in `validate-task.sh` / `validate-task.ps1`:

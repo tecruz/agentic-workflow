@@ -636,6 +636,18 @@ Describe 'validate-task.ps1 risk-profile validator' {
         Invoke-Validator 'mixed-canonical-and-bare-criteria-invalid.md' | Should -Be 1
     }
 
+    It 'INVALID (1) when canonical criteria are followed by prose that mentions an AC identifier' {
+        Invoke-Validator 'canonical-plus-prose-ac-invalid.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when canonical high-assurance requirements are followed by prose that mentions an R identifier' {
+        Invoke-Validator 'canonical-plus-prose-r-invalid.md' | Should -Be 1
+    }
+
+    It 'VALID (0) when a canonical entry has a continuation prose line with no identifier' {
+        Invoke-Validator 'continuation-without-id-valid.md' | Should -Be 0
+    }
+
     It 'PowerShell and Bash classifiers agree on every fixture' {
         if (-not (Get-Command bash -ErrorAction SilentlyContinue)) { return }
         # Probe: bash must be able to invoke the validator and read the

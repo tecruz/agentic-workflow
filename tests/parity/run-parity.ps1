@@ -1,48 +1,80 @@
-# run-parity.ps1 — single cross-language parity check for validators.
-#   Compares PowerShell and Bash classifiers on every task fixture,
-#   and compares PowerShell and Bash detection contracts on every
-#   golden fixture.  Runs once instead of per-OS per-framework.
+# run-parity.ps1 — cross-language validator parity + golden expectations.
+#   For every task fixture, requires the PowerShell validator and the Bash
+#   validator to each match the golden expectation (exit code and message) in
+#   task-expectations.tsv, then compares the two detection contracts on every
+#   golden fixture. Matching the same golden file proves each validator is
+#   correct against the expected classification — not merely that the two
+#   implementations agree with each other. Runs once instead of per-OS
+#   per-framework.
 param()
 
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $fixtures = Join-Path $repoRoot 'tests' 'fixtures' 'tasks'
-$golden   = Join-Path $repoRoot 'tests' 'fixtures' 'golden'
+$goldenFile = Join-Path $repoRoot 'tests' 'parity' 'task-expectations.tsv'
 $validatePS = Join-Path $repoRoot '.agentic' 'scripts' 'validate-task.ps1'
 $validateSH = Join-Path $repoRoot '.agentic' 'scripts' 'validate-task.sh'
 $verifyPS   = Join-Path $repoRoot '.agentic' 'scripts' 'verify.ps1'
 $verifySH   = Join-Path $repoRoot '.agentic' 'scripts' 'verify.sh'
 
-$failures = 0
-
-# ── 1. Task fixture parity ──────────────────────────────────────────────
-Write-Host '=== Task fixture parity ==='
-
 if (-not (Get-Command bash -ErrorAction SilentlyContinue)) {
     Write-Host 'SKIP: bash not available'
     exit 0
 }
+if (-not (Test-Path -LiteralPath $goldenFile)) {
+    Write-Error "golden expectations not found: $goldenFile"
+    exit 2
+}
 
-Get-ChildItem -LiteralPath $fixtures -Filter *.md | ForEach-Object {
-    $name = $_.Name
-    $bashOut = (bash $validateSH $_.FullName 2>&1 | Out-String).Trim()
-    $bashCode = $LASTEXITCODE
-    $psOut = (pwsh -NoProfile -File $validatePS $_.FullName 2>&1 | Out-String).Trim()
-    $psCode = $LASTEXITCODE
+# Load golden expectations: fixture-name -> @{ Code; Message }
+$script:golden = @{}
+foreach ($line in Get-Content -LiteralPath $goldenFile) {
+    if (-not $line -or $line.TrimStart().StartsWith('#')) { continue }
+    $parts = $line -split "`t", 3
+    if ($parts.Count -lt 3) { continue }
+    $script:golden[$parts[0]] = @{ Code = [int]$parts[1]; Message = $parts[2].Trim() }
+}
 
-    if ($bashCode -ne $psCode) {
-        Write-Host "  CODE MISMATCH: $name  bash=$bashCode ps=$psCode"
-        $failures++
-    }
-    elseif ($psOut -ne $bashOut) {
-        Write-Host "  OUTPUT MISMATCH: $name"
-        Write-Host "    bash: $bashOut"
-        Write-Host "    ps:   $psOut"
-        $failures++
+$script:failures = 0
+
+function Invoke-GoldenCheck([string]$lang, [string]$validator) {
+    Write-Host "=== Task fixture golden expectations ($lang) ==="
+    foreach ($f in Get-ChildItem -LiteralPath $fixtures -Filter *.md) {
+        $name = $f.Name
+        $expect = $script:golden[$name]
+        if ($null -eq $expect) {
+            Write-Host "  NO GOLDEN ENTRY: $name"
+            $script:failures++
+            continue
+        }
+        if ($lang -eq 'pwsh') {
+            $out = (pwsh -NoProfile -File $validator $f.FullName 2>&1 | Out-String).Trim()
+            $code = $LASTEXITCODE
+        }
+        else {
+            $out = (bash $validator $f.FullName 2>&1 | Out-String).Trim()
+            $code = $LASTEXITCODE
+        }
+        if ($code -ne $expect.Code) {
+            Write-Host "  CODE MISMATCH ($lang): $name  expected=$($expect.Code) got=$code"
+            $script:failures++
+        }
+        elseif ($out -ne $expect.Message) {
+            Write-Host "  MESSAGE MISMATCH ($lang): $name"
+            Write-Host "    expected: $($expect.Message)"
+            Write-Host "    got:      $out"
+            $script:failures++
+        }
     }
 }
 
+# ── 1. Task fixture golden expectations ─────────────────────────────────
+Invoke-GoldenCheck 'pwsh' $validatePS
+Invoke-GoldenCheck 'bash' $validateSH
+
 # ── 2. Detection parity ────────────────────────────────────────────────
 Write-Host '=== Detection parity ==='
+
+$golden = Join-Path $repoRoot 'tests' 'fixtures' 'golden'
 
 Get-ChildItem -LiteralPath $golden -Filter *.tsv | ForEach-Object {
     $name = [System.IO.Path]::GetFileNameWithoutExtension($_.Name)
@@ -75,13 +107,13 @@ Get-ChildItem -LiteralPath $golden -Filter *.tsv | ForEach-Object {
 
     if ($psChecks -ne $bashChecks) {
         Write-Host "  DETECTION MISMATCH: $name"
-        $failures++
+        $script:failures++
     }
 }
 
 # ── Result ──────────────────────────────────────────────────────────────
-if ($failures -gt 0) {
-    Write-Error "$failures parity assertion(s) failed"
+if ($script:failures -gt 0) {
+    Write-Error "$($script:failures) parity assertion(s) failed"
     exit 1
 }
 Write-Host 'All parity checks passed.'

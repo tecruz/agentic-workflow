@@ -446,23 +446,33 @@ function Get-CanonicalIds {
     return , $out.ToArray()
 }
 
-# Assert-CanonicalSection — every candidate entry line in a canonical-only
-# section must be a canonical list item '- <ID>: <description>'. A candidate
-# entry is a line that starts a list item (bullet, numbered, or bare '<ID>:'
-# declaration); those are exactly the lines that could declare a criterion or
-# requirement. Bare, numbered, or prose-declared identifiers are rejected
-# rather than skipped, so a visible criterion cannot silently escape the
-# evidence contract by changing its list syntax. Continuation lines and notes
-# paragraphs (no leading list marker) are allowed: they belong to the
-# preceding canonical item.
+# Assert-CanonicalSection — every line in a canonical-only section that is a
+# candidate entry or mentions an identifier token must be a canonical list item
+# '- <ID>: <description>'. A candidate entry is a line that starts a list item
+# (bullet, numbered, or bare '<ID>:' declaration); those are exactly the lines
+# that could declare a criterion or requirement. Any line that contains an
+# identifier token anywhere (for example 'AC-2' embedded in a paragraph) must
+# also be a canonical entry, so a prose mention cannot declare an extra
+# criterion or requirement that escapes the evidence contract. Bare, numbered,
+# and prose-declared identifiers are rejected rather than skipped. Continuation
+# lines and notes paragraphs that contain no identifier token are allowed: they
+# belong to the preceding canonical item.
 function Assert-CanonicalSection {
     param([string[]]$ContentLines, [string]$IdPattern, [string]$Label, [string]$EntryForm)
+    # An identifier token is delimited by non-alphanumerics so that a prose
+    # fragment such as 'R-2D2' is not mistaken for a requirement identifier.
+    $idBound = '(^|[^a-z0-9])' + $IdPattern + '($|[^a-z0-9])'
     foreach ($line in $ContentLines) {
         if ($line -notmatch '\S') { continue }
         $lowLine = $line.ToLowerInvariant()
+        if ($lowLine -match $idBound) {
+            if ($lowLine -notmatch "^[-*+]\s*$IdPattern\s*:\s*\S") {
+                Write-Invalid "$Label must contain only canonical '$EntryForm' list entries; identifiers may not appear in prose or non-canonical lines."
+            }
+        }
         if ($lowLine -notmatch '^([-*+]\s*|\d+[.)]\s+|(ac|r)-\d+\s*:)') { continue }
         if ($lowLine -notmatch "^[-*+]\s*$IdPattern\s*:\s*\S") {
-            Write-Invalid "$Label must contain only canonical '$EntryForm' entries; prose belongs in a separate Notes section."
+            Write-Invalid "$Label must contain only canonical '$EntryForm' list entries; identifiers may not appear in prose or non-canonical lines."
         }
     }
 }

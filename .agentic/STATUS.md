@@ -15,7 +15,7 @@
   `high-assurance` profiles, a risk-aware task template, structural task
   validators (Bash + PowerShell), lifecycle risk-classification step, and
   managed-file registration in the installers and bundle.
-  Review feedback (three request-changes rounds) fully addressed: a shared
+  Review feedback (four request-changes rounds) fully addressed: a shared
   meaningful-character predicate rejects symbol-only evidence/`n/a`/approvers,
   evidence and matrix tables validate exact header schemas and reject
   malformed/unknown header rows and leading-pipe omissions, Markdown-wrapped
@@ -23,10 +23,17 @@
   the meaningful-character predicate is locale-deterministic for Unicode
   letters/numbers (emoji, punctuation, and zero-width are not meaningful),
   prototype tasks must declare an Approval gates section with exact safety
-  declaration lines, and acceptance criteria/requirements admit only canonical
+  declaration lines, acceptance criteria/requirements admit only canonical
   `AC-N:`/`R-N:` list entries (bare, numbered, and prose-declared bullets are
-  rejected; wrapped/continuation lines of a canonical item are accepted).
-  Parity verified: 151 fixtures yield identical exit codes and messages on both
+  rejected; wrapped/continuation lines of a canonical item are accepted), any
+  `AC-N`/`R-N` identifier appearing in prose or a non-canonical line is
+  rejected, fast CI validates every fixture against a checked-in golden
+  expectation file (exit code + message) so the PR gate proves correct
+  classification rather than mere cross-language agreement, the macOS job runs
+  the Bash validator over the full fixture set under Bash 3.2, ShellCheck is a
+  blocking check with targeted suppressions, and the Bash validator's Perl
+  requirement for non-ASCII content is documented in the README.
+  Parity verified: 154 fixtures yield identical exit codes and messages on both
   validators; Bats and Pester validator suites pass 154/154.
   See `.agentic/tasks/TASK-002-risk-profiles-and-evidence-contracts.md`.
 

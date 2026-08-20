@@ -42,10 +42,10 @@ contents, and validator parity across Bash and PowerShell.
 | --- | --- | --- |
 | AC-1 | Profile docs present and reviewed | Passed |
 | AC-2 | Template present and matches profile requirements | Passed |
-| AC-3 | Fixture parity tests pass on both validators (151 fixtures) | Passed |
+| AC-3 | Fixture parity tests pass on both validators (154 fixtures) | Passed |
 | AC-4 | WORKFLOW.md / AGENTS.md / README.md updated | Passed |
 | AC-5 | Managed-file registration + bundle tests | Passed |
-| AC-6 | Full bats + Pester suites green (151 fixtures validated on Bash + PS) | Passed |
+| AC-6 | Full bats + Pester suites green (154 fixtures validated on Bash + PS) | Passed |
 
 ## Approval gates
 
@@ -60,7 +60,7 @@ contents, and validator parity across Bash and PowerShell.
 - `.agentic/profiles/{README,prototype,standard,high-assurance}.md`
 - `.agentic/templates/task.md`
 - `.agentic/scripts/validate-task.sh`, `.agentic/scripts/validate-task.ps1`
-- `tests/fixtures/tasks/*.md` (151 fixtures)
+- `tests/fixtures/tasks/*.md` (154 fixtures)
 - `tests/bats/validate_task_test.bats`, `tests/pester/ValidateTask.Tests.ps1`
 - `tests/bats/install_test.bats`, `tests/pester/Install.Tests.ps1`
 - `install.sh`, `install.ps1`, `scripts/build-bundle.sh`
@@ -119,19 +119,36 @@ contents, and validator parity across Bash and PowerShell.
   canonical `AC-N:`/`R-N:` list entries, so bare, numbered, and prose-declared
   bullets are rejected while wrapped/continuation lines of a canonical item are
   still accepted. 17 new fixtures; 151 fixtures in total.
+- Fourth review round (request changes) fully addressed in both validators:
+  (1) any `AC-N` / `R-N` identifier that appears in prose or a non-canonical
+  list line is now rejected, not only list items that fail to declare an
+  identifier, so a prose-declared extra criterion or requirement can no longer
+  escape the evidence contract; (2) fast CI validates every task fixture
+  against a checked-in golden expectation file
+  (`tests/parity/task-expectations.tsv`, expected exit code + message per
+  fixture), so the PR gate proves correct classification instead of only
+  cross-language agreement; (3) the macOS job runs the Bash task validator over
+  the full fixture set under Bash 3.2; (4) ShellCheck is a blocking check with
+  targeted suppressions (SC1087 false positive, two inline SC2034 directives)
+  instead of a global soft fail; (5) the Bash validator's Perl requirement for
+  non-ASCII content classification is documented in the README. 3 new fixtures;
+  154 fixtures in total.
 - Final verification on this machine:
   - `bash -n` on `install.sh`, `.agentic/scripts/verify.sh`, `.agentic/scripts/validate-task.sh` — OK.
   - PowerShell parse check on `install.ps1`, `verify.ps1`, `validate-task.ps1` — OK.
-  - `bats tests/bats/validate_task_test.bats` — 154/154 pass.
-  - `Invoke-Pester tests/pester/ValidateTask.Tests.ps1` — 154/154 pass.
-  - Fixture parity harness: all 151 fixtures yield identical exit codes and
-    identical diagnostic messages under Bash vs PowerShell.
-  - Remaining local failures are pre-existing environment issues only:
-    `install_test.bats` 79/87/89 (missing `zip` in WSL, identical on baseline)
-    and the release-to-release upgrade Pester test (Windows bsdtar pipe quirk).
+  - `shellcheck -e SC1087 -S warning install.sh .agentic/scripts/verify.sh .agentic/scripts/validate-task.sh` — exit 0.
+  - `bats tests/bats/validate_task_test.bats` — 157/157 pass.
+  - `Invoke-Pester tests/pester/ValidateTask.Tests.ps1` — 157/157 pass.
+  - Golden harness: all 154 fixtures yield the expected exit code and identical
+    diagnostic message under both Bash and PowerShell.
+  - Full Pester suite (all three files): 264 passed, 1 failed, 4 skipped. The
+    single failure is the pre-existing release-to-release upgrade test, which
+    aborts locally because Windows bsdtar cannot read the `git archive | tar -x`
+    pipe; unrelated to this PR. `install_test.bats` / `verify_test.bats` are
+    covered by CI and were not re-run locally this round.
 - Final CI requirement: all required checks must pass on the final merge head.
   Evidence location: GitHub pull-request checks for PR #7, which also run this
-  task through both validators in `--handoff` mode (151 fixtures).
+  task through both validators in `--handoff` mode (154 fixtures).
 
 ## Remaining risks
 
