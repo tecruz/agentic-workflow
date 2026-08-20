@@ -1,0 +1,165 @@
+name: CI (Full)
+
+# Full verification suite: complete Bats + Pester on all platforms, installer
+# lifecycle, migration, and release archive tests.  Triggered on master pushes,
+# nightly schedule, manual dispatch, or by the release workflow.
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main, master]
+  schedule:
+    - cron: '0 3 * * *'  # nightly at 03:00 UTC
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Commit SHA to check out (for reusable workflow calls)'
+        required: false
+        type: string
+
+jobs:
+  # ── Full Bats suite (Linux) ────────────────────────────────────────────
+  full-bats-linux:
+    name: Full Bats (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      # actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.ref || '' }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install bats
+        run: |
+          curl -fsSL https://github.com/bats-core/bats-core/archive/refs/tags/v1.11.1.tar.gz | tar xz -C /tmp
+          echo "/tmp/bats-core-1.11.1/bin" >> "$GITHUB_PATH"
+
+      - name: Install tools
+        run: |
+          attempt=0
+          while [ "$attempt" -lt 3 ]; do
+            if sudo apt-get update -o Acquire::Retries=5 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20; then
+              break
+            fi
+            attempt=$((attempt + 1))
+            sleep 10
+          done
+          sudo apt-get install -y shellcheck zip
+
+      - name: Install Pester and PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Install-Module Pester -RequiredVersion 5.6.0 -Scope CurrentUser -Force -SkipPublisherCheck
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force -SkipPublisherCheck
+
+      - name: Run the framework's own checks
+        run: bash .agentic/scripts/verify.sh
+
+  # ── Full Pester suite (Windows) ────────────────────────────────────────
+  full-pester-windows:
+    name: Full Pester (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      # actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.ref || '' }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install bats-core
+        shell: pwsh
+        run: |
+          $tmp = Join-Path $env:RUNNER_TEMP 'bats'
+          New-Item -ItemType Directory -Force $tmp | Out-Null
+          Invoke-WebRequest -Uri 'https://github.com/bats-core/bats-core/archive/refs/tags/v1.11.1.tar.gz' -OutFile (Join-Path $tmp 'bats.tar.gz')
+          tar -xzf (Join-Path $tmp 'bats.tar.gz') -C $tmp
+          $dir = (Get-ChildItem -LiteralPath $tmp -Directory | Select-Object -First 1).FullName
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value (Join-Path $dir 'bin')
+
+      - name: Install Pester and PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Install-Module Pester -RequiredVersion 5.6.0 -Scope CurrentUser -Force -SkipPublisherCheck
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force -SkipPublisherCheck
+
+      - name: Run the framework's own checks
+        shell: pwsh
+        run: pwsh -NoProfile -File .agentic/scripts/verify.ps1
+
+  # ── Full Bats suite (macOS) ────────────────────────────────────────────
+  full-macos:
+    name: Full Bats (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 35
+    steps:
+      # actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.ref || '' }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install bats
+        run: brew install bats-core
+
+      - name: Install Pester and PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Install-Module Pester -RequiredVersion 5.6.0 -Scope CurrentUser -Force -SkipPublisherCheck
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force -SkipPublisherCheck
+
+      - name: Run the framework's own checks
+        run: bash .agentic/scripts/verify.sh
+
+  # ── Validator parity (single run) ──────────────────────────────────────
+  validator-parity:
+    name: Validator parity (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.ref || '' }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Pester and PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Install-Module Pester -RequiredVersion 5.6.0 -Scope CurrentUser -Force -SkipPublisherCheck
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force -SkipPublisherCheck
+
+      - name: Run cross-language parity
+        run: |
+          bash tests/parity/run-parity.sh
+
+  # ── Aggregator ─────────────────────────────────────────────────────────
+  ci-required:
+    name: ci-required (full)
+    if: always()
+    needs:
+      - full-bats-linux
+      - full-pester-windows
+      - full-macos
+      - validator-parity
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify all required jobs succeeded
+        run: |
+          results="${{ needs.full-bats-linux.result }} ${{ needs.full-pester-windows.result }} ${{ needs.full-macos.result }} ${{ needs.validator-parity.result }}"
+          echo "Job results: $results"
+          for r in $results; do
+            if [ "$r" != "success" ]; then
+              echo "::error One or more required jobs did not succeed: $results"
+              exit 1
+            fi
+          done

@@ -1,5 +1,9 @@
 name: CI
 
+# Fast pull-request checks.  Runs the lightweight subset: linting, syntax
+# validation, fixture smoke harnesses, and one cross-language parity run.
+# The full Bats/Pester lifecycle suite lives in ci-full.yml.
+
 # Pinned third-party actions by full commit SHA; the trailing comment records the
 # released tag that SHA points at so dependabot can bump the SHA + comment together.
 # Policy: never move these tags without updating the SHAs in the same commit.
@@ -19,14 +23,16 @@ on:
         required: false
         type: string
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  bash-verifier:
-    name: verify.sh (Linux / macOS)
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
+  # ── Lint ────────────────────────────────────────────────────────────────
+  lint:
+    name: Lint (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       # actions/checkout@v5
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -35,78 +41,45 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      # actions/setup-node@v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
-        with:
-          node-version: 24
-
-      - name: Install bats
+      - name: Install tools
         run: |
-          if [ "$RUNNER_OS" = "Linux" ]; then
-            # Download bats from the GitHub release instead of apt: GitHub's
-            # ubuntu-24.04 apt mirror is flaky and has stalled apt-get update.
-            curl -fsSL https://github.com/bats-core/bats-core/archive/refs/tags/v1.11.1.tar.gz | tar xz -C /tmp
-            echo "/tmp/bats-core-1.11.1/bin" >> "$GITHUB_PATH"
-            # zip is a single small package; bound the apt update with retries
-            # and timeouts so a slow mirror cannot stall the job.
-            attempt=0
-            while [ "$attempt" -lt 3 ]; do
-              if sudo apt-get update -o Acquire::Retries=5 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20; then
-                break
-              fi
-              attempt=$((attempt + 1))
-              sleep 10
-            done
-            sudo apt-get install -y zip
-          else
-            brew install bats-core
-          fi
-
-      - name: Install shellcheck
-        run: |
-          if [ "$RUNNER_OS" = "Linux" ]; then
-            attempt=0
-            while [ "$attempt" -lt 3 ]; do
-              if sudo apt-get update -o Acquire::Retries=5 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20; then
-                break
-              fi
-              attempt=$((attempt + 1))
-              sleep 10
-            done
-            sudo apt-get install -y shellcheck
-          else
-            brew install shellcheck
-          fi
+          attempt=0
+          while [ "$attempt" -lt 3 ]; do
+            if sudo apt-get update -o Acquire::Retries=5 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20; then
+              break
+            fi
+            attempt=$((attempt + 1))
+            sleep 10
+          done
+          sudo apt-get install -y shellcheck zip
 
       - name: Install actionlint
-        run: |
-          if [ "$RUNNER_OS" = "Linux" ]; then
-            curl -sL https://github.com/rhysd/actionlint/releases/download/v1.7.7/actionlint_1.7.7_linux_amd64.tar.gz | tar xz -C /usr/local/bin actionlint
-          else
-            brew install actionlint
-          fi
-
-      - name: Install Pester and PSScriptAnalyzer for PowerShell 7
-        shell: pwsh
-        run: |
-          Install-Module Pester -RequiredVersion 5.6.0 -Scope CurrentUser -Force -SkipPublisherCheck
-          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force -SkipPublisherCheck
+        run: curl -sL https://github.com/rhysd/actionlint/releases/download/v1.7.7/actionlint_1.7.7_linux_amd64.tar.gz | tar xz -C /usr/local/bin actionlint
 
       - name: Lint GitHub Actions workflows
         run: actionlint
 
-      - name: Run the framework's own checks
-        run: bash .agentic/scripts/verify.sh
+      - name: ShellCheck
+        run: shellcheck install.sh .agentic/scripts/verify.sh .agentic/scripts/validate-task.sh
 
-      - name: PSScriptAnalyzer
-        shell: pwsh
+  # ── Bash fast (Ubuntu) ─────────────────────────────────────────────────
+  bash-fast:
+    name: Bash fast (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.ref || '' }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Bash syntax checks
         run: |
-          $results = @()
-          foreach ($f in @('install.ps1', '.agentic/scripts/verify.ps1', '.agentic/scripts/validate-task.ps1')) {
-            $results += Invoke-ScriptAnalyzer -Path $f -Severity Error
-          }
-          $results | Format-Table -AutoSize
-          if ($results) { exit 1 }
+          bash -n install.sh
+          bash -n .agentic/scripts/verify.sh
+          bash -n .agentic/scripts/validate-task.sh
 
       - name: Validate the completed task in handoff mode
         run: bash .agentic/scripts/validate-task.sh --handoff .agentic/tasks/TASK-002-risk-profiles-and-evidence-contracts.md
@@ -114,9 +87,11 @@ jobs:
       - name: Run fixture smoke harness
         run: bash tests/fixtures/run-fixtures.sh .agentic/scripts/verify.sh
 
-  powershell-verifier:
-    name: verify.ps1 (Windows)
+  # ── PowerShell fast (Windows) ──────────────────────────────────────────
+  powershell-fast:
+    name: PowerShell fast (Windows)
     runs-on: windows-latest
+    timeout-minutes: 15
     steps:
       # actions/checkout@v5
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -125,30 +100,21 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      # actions/setup-node@v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
-        with:
-          node-version: 24
-
-      - name: Install bats-core
-        shell: pwsh
-        run: |
-          $tmp = Join-Path $env:RUNNER_TEMP 'bats'
-          New-Item -ItemType Directory -Force $tmp | Out-Null
-          Invoke-WebRequest -Uri 'https://github.com/bats-core/bats-core/archive/refs/tags/v1.11.1.tar.gz' -OutFile (Join-Path $tmp 'bats.tar.gz')
-          tar -xzf (Join-Path $tmp 'bats.tar.gz') -C $tmp
-          $dir = (Get-ChildItem -LiteralPath $tmp -Directory | Select-Object -First 1).FullName
-          Add-Content -LiteralPath $env:GITHUB_PATH -Value (Join-Path $dir 'bin')
-
       - name: Install Pester and PSScriptAnalyzer
         shell: pwsh
         run: |
           Install-Module Pester -RequiredVersion 5.6.0 -Scope CurrentUser -Force -SkipPublisherCheck
           Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force -SkipPublisherCheck
 
-      - name: Run the framework's own checks
+      - name: PowerShell syntax check
         shell: pwsh
-        run: pwsh -NoProfile -File .agentic/scripts/verify.ps1
+        run: |
+          $err = $false
+          foreach ($f in @('install.ps1', '.agentic/scripts/verify.ps1', '.agentic/scripts/validate-task.ps1')) {
+            try { [scriptblock]::Create((Get-Content -Raw -LiteralPath $f)) | Out-Null }
+            catch { Write-Error $_.Exception.Message; $err = $true }
+          }
+          if ($err) { exit 1 }
 
       - name: PSScriptAnalyzer
         shell: pwsh
@@ -167,3 +133,72 @@ jobs:
       - name: Run fixture smoke harness
         shell: pwsh
         run: pwsh -NoProfile -File tests/fixtures/run-fixtures.ps1 .agentic/scripts/verify.ps1
+
+  # ── macOS compatibility ────────────────────────────────────────────────
+  macos-compat:
+    name: macOS compatibility
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      # actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.ref || '' }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Bash 3.2 syntax check
+        run: |
+          bash -n install.sh
+          bash -n .agentic/scripts/verify.sh
+          bash -n .agentic/scripts/validate-task.sh
+
+      - name: Run fixture smoke harness
+        run: bash tests/fixtures/run-fixtures.sh .agentic/scripts/verify.sh
+
+  # ── Validator parity (single run) ──────────────────────────────────────
+  validator-parity:
+    name: Validator parity (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.ref || '' }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Pester and PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Install-Module Pester -RequiredVersion 5.6.0 -Scope CurrentUser -Force -SkipPublisherCheck
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force -SkipPublisherCheck
+
+      - name: Run cross-language parity
+        run: |
+          bash tests/parity/run-parity.sh
+
+  # ── Aggregator ─────────────────────────────────────────────────────────
+  ci-required:
+    name: ci-required
+    if: always()
+    needs:
+      - lint
+      - bash-fast
+      - powershell-fast
+      - macos-compat
+      - validator-parity
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify all required jobs succeeded
+        run: |
+          results="${{ needs.lint.result }} ${{ needs.bash-fast.result }} ${{ needs.powershell-fast.result }} ${{ needs.macos-compat.result }} ${{ needs.validator-parity.result }}"
+          echo "Job results: $results"
+          for r in $results; do
+            if [ "$r" != "success" ]; then
+              echo "::error One or more required jobs did not succeed: $results"
+              exit 1
+            fi
+          done
