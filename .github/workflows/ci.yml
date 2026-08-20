@@ -49,8 +49,12 @@ jobs:
             echo "/tmp/bats-core-1.11.1/bin" >> "$GITHUB_PATH"
             # zip is a single small package; bound the apt update with retries
             # and timeouts so a slow mirror cannot stall the job.
-            for i in 1 2 3; do
-              sudo apt-get update -o Acquire::Retries=5 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 && break
+            attempt=0
+            while [ "$attempt" -lt 3 ]; do
+              if sudo apt-get update -o Acquire::Retries=5 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20; then
+                break
+              fi
+              attempt=$((attempt + 1))
               sleep 10
             done
             sudo apt-get install -y zip
@@ -61,8 +65,12 @@ jobs:
       - name: Install shellcheck
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
-            for i in 1 2 3; do
-              sudo apt-get update -o Acquire::Retries=5 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 && break
+            attempt=0
+            while [ "$attempt" -lt 3 ]; do
+              if sudo apt-get update -o Acquire::Retries=5 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20; then
+                break
+              fi
+              attempt=$((attempt + 1))
               sleep 10
             done
             sudo apt-get install -y shellcheck
