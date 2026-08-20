@@ -2,7 +2,7 @@
 
 A technology-agnostic, tool-agnostic agentic workflow you can drop into your
 project. It gives every AI coding agent the same operating instructions, the
-same 5-phase execution loop, and the same definition of "done" — regardless of
+same development loop, and the same definition of "done" — regardless of
 language, framework, or which agent tool you use.
 
 - **Technology-independent**: the verifier auto-detects the project stack
@@ -21,6 +21,12 @@ language, framework, or which agent tool you use.
 
 - **Linux / macOS / WSL**: `bash` 4+ with `sha256sum` (or `shasum` on macOS).
 - **Windows**: [PowerShell 7+](https://github.com/PowerShell/PowerShell).
+- **Perl** (Linux / macOS / WSL): required by the Bash task validator
+  (`validate-task.sh`) only when a task's evidence contains non-ASCII content.
+  Perl performs the Unicode letter/number classification that `grep` cannot;
+  ASCII-only tasks never invoke it. Without perl the validator rejects such a
+  task with a clear message rather than silently disagreeing with the
+  PowerShell validator.
 - Node.js, Rust, Python, Go, or .NET toolchains only if you want the verifier
   to run that stack's checks.
 
@@ -140,33 +146,68 @@ the framework's own checks, tests, CI, and docs so adopters start clean:
 
 ```bash
 bash scripts/build-bundle.sh                    # assemble + archive
-bash dist/agentic-workflow-1.2.2/install.sh /path/to/your-project
+bash dist/agentic-workflow-1.3.0/install.sh /path/to/your-project
 ```
 
 ---
 
 ## How It Works
 
-Every agent session follows the same 5-phase loop:
+Every agent session follows the same development loop:
 
 ```
-DISCOVER → PLAN → IMPLEMENT → VERIFY → HANDOFF
+DISCOVER → CLASSIFY RISK → PLAN → IMPLEMENT → VERIFY → HANDOFF
 ```
 
 1. **Discover** — read `AGENTS.md`, project state, and existing patterns
    before touching code.
-2. **Plan** — decompose the request into atomic, verifiable steps and record
-   them in `.agentic/tasks/`.
-3. **Implement** — minimal, style-matching changes per `.agentic/rules/`.
-4. **Verify** — run the project's checks. Self-heal failures with at most
+2. **Classify Risk** — select a risk profile (`.agentic/profiles/`). The
+   default is `standard`; escalate to `high-assurance` for authentication,
+   payments, secrets, data migrations, production infrastructure, irreversible
+   operations, public API compatibility, privacy, or safety-critical behavior.
+   Use `prototype` only for user-requested experiments with no production
+   impact.
+3. **Plan** — decompose the request into atomic, verifiable steps and record
+   them in `.agentic/tasks/` using `.agentic/templates/task.md`, declaring the
+   risk profile and its required evidence.
+4. **Implement** — minimal, style-matching changes per `.agentic/rules/`.
+5. **Verify** — run the project's checks. Self-heal failures with at most
    three evidence-based repair cycles; never weaken a test to go green.
-5. **Handoff** — report files changed, verification commands with exit codes
-   and results, pre-existing failures, environment blockers, remaining risks,
-   and commit status. Commits happen only when explicitly requested or
+6. **Handoff** — mark the task `done` under `## Status`, then validate it with
+   `.agentic/scripts/validate-task.sh --handoff` / `validate-task.ps1 -Handoff`
+   (the handoff gate requires `Status: done`, resolved evidence, and checked
+   approval gates), then report files changed, verification commands with exit
+   codes and results, pre-existing failures, environment blockers, remaining
+   risks, and commit status. Commits happen only when explicitly requested or
    permitted by project policy.
 
 Full details: [`.agentic/WORKFLOW.md`](.agentic/WORKFLOW.md). Canonical agent
 instructions: [`AGENTS.md`](AGENTS.md).
+
+---
+
+## Risk Profiles
+
+Every task declares a **risk profile** that determines the evidence it must
+carry, the verification depth, the handoff contents, and the approval gates:
+
+| Profile | Intended for | Required evidence |
+| :--- | :--- | :--- |
+| `prototype` | Experiments, spikes, disposable prototypes | task goal, smoke verification, known limitations, no production deployment, readiness *not* established |
+| `standard` | Default for ordinary product and maintenance work | acceptance criteria, baseline + final verification, changed files, remaining risks |
+| `high-assurance` | Authentication, payments, secrets, migrations, production infrastructure, public API compatibility, privacy, safety-critical behavior | explicit requirements, risk analysis, requirement-to-evidence matrix, negative-path + integration tests, recovery plan, approval records, independent review, final verification |
+
+- The default profile is **`standard`**.
+- Agents escalate automatically when escalation signals apply and never
+  downgrade silently; a lower profile never overrides safety or approval
+  constraints.
+- Profile selection does **not** change which checks run — `.agentic/checks.tsv`
+  stays the authoritative definition of done. Profiles govern which evidence a
+  task must produce and which approvals must be recorded.
+- `.agentic/scripts/validate-task.sh` / `validate-task.ps1` check a task file's
+  structural contract only (exit `0` VALID, `1` INVALID, `2` BLOCKED when a
+  completed task is missing required evidence or approvals). They never judge
+  whether the prose is sufficient — that belongs to human or behavioral review.
 
 ---
 
@@ -244,23 +285,26 @@ CI on any mismatch. Both the Bats and Pester suites run on all three platforms;
 ├── scripts/
 │   └── build-bundle.sh            # Packages the clean adopter distribution
 ├── tests/
-│   ├── bats/                      # Bats suites (verify.sh + install.sh)
-│   ├── pester/                    # Pester suites (verify.ps1 + install.ps1)
+│   ├── bats/                      # Bats suites (verify.sh + install.sh + validate-task.sh)
+│   ├── pester/                    # Pester suites (verify.ps1 + install.ps1 + validate-task.ps1)
 │   └── fixtures/                  # Fixture projects + smoke harnesses
 ├── docs/decisions/                # This repository's ADRs
 └── .agentic/
     ├── VERSION                    # Protocol version
-    ├── WORKFLOW.md                # The 5-phase loop, in detail
+    ├── WORKFLOW.md                # The development loop, in detail
     ├── ARCHITECTURE.md            # Fill-in template describing the host project
     ├── STATUS.md                  # Index of current project state
     ├── checks.tsv                 # Authoritative check list (auto-detect fallback)
     ├── rules/                     # Technology-agnostic standards
+    ├── profiles/                  # Risk profiles (prototype, standard, high-assurance)
     ├── tasks/                     # One file per task
     ├── decisions/                 # Immutable Architecture Decision Records
-    ├── templates/                 # Feature spec, bug report, refactor plan
+    ├── templates/                 # Feature spec, bug report, refactor plan, task file
     └── scripts/
         ├── verify.sh              # Verifier (Linux/macOS)
-        └── verify.ps1             # Verifier (Windows)
+        ├── verify.ps1             # Verifier (Windows)
+        ├── validate-task.sh       # Task-file validator (Linux/macOS)
+        └── validate-task.ps1      # Task-file validator (Windows)
 ```
 
 ---

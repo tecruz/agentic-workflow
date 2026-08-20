@@ -113,7 +113,10 @@ END_MARKER='<!-- @@AGENTIC-PROTOCOL-END@@ -->'
 while [ $# -gt 0 ]; do
     case "$1" in
         --plan) PLAN=1 ;;
-        --update) UPDATE=1 ;;
+        --update)
+            # shellcheck disable=SC2034
+            UPDATE=1
+            ;;
         --prune) PRUNE=1 ;;
         --prune-unverified-legacy) PRUNE_UNVERIFIED_LEGACY=1 ;;
         --uninstall) UNINSTALL=1 ;;
@@ -160,11 +163,18 @@ MANAGED_FILES=(
     ".agentic/rules/03-testing-verification.md"
     ".agentic/rules/04-git-conventions.md"
     ".agentic/rules/05-security-safety.md"
+    ".agentic/profiles/README.md"
+    ".agentic/profiles/prototype.md"
+    ".agentic/profiles/standard.md"
+    ".agentic/profiles/high-assurance.md"
     ".agentic/scripts/verify.sh"
     ".agentic/scripts/verify.ps1"
+    ".agentic/scripts/validate-task.sh"
+    ".agentic/scripts/validate-task.ps1"
     ".agentic/templates/FEATURE_SPEC.md"
     ".agentic/templates/BUG_REPORT.md"
     ".agentic/templates/REFACTOR_PLAN.md"
+    ".agentic/templates/task.md"
     ".agentic/templates/checks.tsv"
     ".agentic/tasks/README.md"
     ".agentic/decisions/README.md"

@@ -1,0 +1,942 @@
+#!/usr/bin/env bats
+
+# validate-task.sh — risk-profile and evidence-contract validator tests.
+# Runs against the fixture task files under tests/fixtures/tasks. Expected
+# classifications are deterministic and language-independent:
+#   0 = VALID, 1 = INVALID, 2 = BLOCKED.
+
+REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+VALIDATE="$REPO_ROOT/.agentic/scripts/validate-task.sh"
+FIXTURES="$REPO_ROOT/tests/fixtures/tasks"
+
+classify() {  # classify <fixture>
+    run bash "$VALIDATE" "$FIXTURES/$1" >/dev/null 2>&1
+}
+
+@test "VALID (0) for a complete prototype task" {
+    classify prototype-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "INVALID (1) for a prototype task whose handoff lacks the production-readiness warning" {
+    classify prototype-missing-warning.md
+    [ "$status" -eq 1 ]
+}
+
+@test "VALID (0) for a complete standard task" {
+    classify standard-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "INVALID (1) for a standard task missing its baseline verification" {
+    classify standard-missing-baseline.md
+    [ "$status" -eq 1 ]
+}
+
+@test "VALID (0) for a complete high-assurance task" {
+    classify high-assurance-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "INVALID (1) for a high-assurance task missing risk analysis" {
+    classify high-assurance-missing-risk-analysis.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a high-assurance task missing a recovery plan" {
+    classify high-assurance-missing-recovery-plan.md
+    [ "$status" -eq 1 ]
+}
+
+@test "BLOCKED (2) for a completed task with Pending required evidence" {
+    classify completed-with-pending-evidence.md
+    [ "$status" -eq 2 ]
+}
+
+@test "INVALID (1) for a task declaring an unknown profile" {
+    classify unknown-profile.md
+    [ "$status" -eq 1 ]
+}
+
+@test "VALID (0) for a completed high-assurance task with approvals recorded" {
+    classify high-assurance-completed-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "BLOCKED (2) for a completed high-assurance task lacking approval records" {
+    classify high-assurance-completed-missing-approval.md
+    [ "$status" -eq 2 ]
+}
+
+@test "INVALID (1) when the task file does not exist" {
+    run bash "$VALIDATE" "$FIXTURES/does-not-exist.md" >/dev/null 2>&1
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) with a clear perl error when non-ASCII content needs perl and perl is unavailable" {
+    # The Perl dependency check must run in the parent validator process, not
+    # inside a command-substitution subshell: content_class is called via
+    # `$(...)` for criterion descriptions and evidence cells, so an `exit`
+    # raised there would be swallowed and the task could reach VALID despite
+    # emitting an INVALID diagnostic. Hide perl from PATH and confirm the task
+    # is rejected in the parent instead of being misclassified.
+    local saved_path priv t real
+    saved_path="$PATH"
+    priv="$(mktemp -d)"
+    for t in bash tr sed grep wc head sort awk; do
+        real="$(command -v "$t")" || { rm -rf "$priv"; skip "tool '$t' unavailable"; }
+        ln -s "$real" "$priv/$t"
+    done
+    PATH="$priv" run bash "$VALIDATE" "$FIXTURES/non-ascii-criterion-evidence-valid.md"
+    PATH="$saved_path"
+    rm -rf "$priv"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"INVALID: perl is required"* ]]
+    [[ "$output" != *"VALID: profile="* ]]
+}
+
+@test "INVALID (1) with a clear perl error in --handoff mode when non-ASCII content needs perl and perl is unavailable" {
+    local saved_path priv t real
+    saved_path="$PATH"
+    priv="$(mktemp -d)"
+    for t in bash tr sed grep wc head sort awk; do
+        real="$(command -v "$t")" || { rm -rf "$priv"; skip "tool '$t' unavailable"; }
+        ln -s "$real" "$priv/$t"
+    done
+    PATH="$priv" run bash "$VALIDATE" --handoff "$FIXTURES/non-ascii-criterion-evidence-valid.md"
+    PATH="$saved_path"
+    rm -rf "$priv"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"INVALID: perl is required"* ]]
+    [[ "$output" != *"VALID: profile="* ]]
+}
+
+@test "INVALID (1) with a clear perl error for a large task (>128 KiB) with non-ASCII content when perl is unavailable" {
+    local saved_path priv t real large_task
+    saved_path="$PATH"
+    priv="$(mktemp -d)"
+    for t in bash tr sed grep wc head sort awk; do
+        real="$(command -v "$t")" || { rm -rf "$priv"; skip "tool '$t' unavailable"; }
+        ln -s "$real" "$priv/$t"
+    done
+    large_task="$(mktemp)"
+    cat << 'EOF' > "$large_task"
+# Status
+- Status: done
+- Updated: 2026-08-20
+
+## Risk profile
+- Profile: standard
+- Rationale: standard task for testing large task non-ascii pipefail hazard.
+
+## Acceptance criteria
+- AC-1: 测试 non-ASCII criterion near the beginning.
+
+## Required evidence
+| Criterion | Evidence | Result |
+| --- | --- | --- |
+| AC-1 | 测试 non-ASCII evidence near the beginning | content |
+
+## Approval gates
+- [x] Approved by lead on 2026-08-20
+
+## Verification
+### Baseline
+- baseline: completed
+
+### Final
+- final: completed
+
+## Files changed
+- script: validate-task.sh
+
+## Remaining risks
+- None identified
+EOF
+    while [ $(wc -c < "$large_task") -lt 131072 ]; do
+        echo "padding line to exceed pipe buffer size..." >> "$large_task"
+    done
+
+    PATH="$priv" run bash "$VALIDATE" "$large_task"
+    local exit_code=$status
+    PATH="$saved_path"
+    rm -rf "$priv" "$large_task"
+    [ "$exit_code" -eq 1 ]
+    [[ "$output" == *"INVALID: perl is required"* ]]
+    [[ "$output" != *"VALID: profile="* ]]
+}
+
+@test "INVALID (1) with a clear perl error in --handoff mode for a large task (>128 KiB) with non-ASCII content when perl is unavailable" {
+    local saved_path priv t real large_task
+    saved_path="$PATH"
+    priv="$(mktemp -d)"
+    for t in bash tr sed grep wc head sort awk; do
+        real="$(command -v "$t")" || { rm -rf "$priv"; skip "tool '$t' unavailable"; }
+        ln -s "$real" "$priv/$t"
+    done
+    large_task="$(mktemp)"
+    cat << 'EOF' > "$large_task"
+# Status
+- Status: done
+- Updated: 2026-08-20
+
+## Risk profile
+- Profile: standard
+- Rationale: standard task for testing large task non-ascii pipefail hazard in handoff mode.
+
+## Acceptance criteria
+- AC-1: 测试 non-ASCII criterion near the beginning.
+
+## Required evidence
+| Criterion | Evidence | Result |
+| --- | --- | --- |
+| AC-1 | 测试 non-ASCII evidence near the beginning | content |
+
+## Approval gates
+- [x] Approved by lead on 2026-08-20
+
+## Verification
+### Baseline
+- baseline: completed
+
+### Final
+- final: completed
+
+## Files changed
+- script: validate-task.sh
+
+## Remaining risks
+- None identified
+EOF
+    while [ $(wc -c < "$large_task") -lt 131072 ]; do
+        echo "padding line to exceed pipe buffer size..." >> "$large_task"
+    done
+
+    PATH="$priv" run bash "$VALIDATE" --handoff "$large_task"
+    local exit_code=$status
+    PATH="$saved_path"
+    rm -rf "$priv" "$large_task"
+    [ "$exit_code" -eq 1 ]
+    [[ "$output" == *"INVALID: perl is required"* ]]
+    [[ "$output" != *"VALID: profile="* ]]
+}
+
+@test "INVALID (1) for a prototype task missing the no-production-deployment declaration" {
+    classify prototype-missing-production-declaration.md
+    [ "$status" -eq 1 ]
+}
+
+@test "VALID (0) for an in-progress standard task" {
+    classify standard-in-progress.md
+    [ "$status" -eq 0 ]
+}
+
+@test "BLOCKED (2) for --handoff on a task that is not done" {
+    run bash "$VALIDATE" --handoff "$FIXTURES/standard-in-progress.md" >/dev/null 2>&1
+    [ "$status" -eq 2 ]
+}
+
+@test "VALID (0) for --handoff on a done standard task" {
+    run bash "$VALIDATE" --handoff "$FIXTURES/standard-valid.md" >/dev/null 2>&1
+    [ "$status" -eq 0 ]
+}
+
+@test "BLOCKED (2) for a completed task with Partial required evidence" {
+    classify completed-with-partial-evidence.md
+    [ "$status" -eq 2 ]
+}
+
+@test "INVALID (1) for a completed task with a blank evidence result" {
+    classify completed-with-blank-result.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when required evidence does not map every criterion" {
+    classify unmapped-evidence.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when acceptance criteria repeat an identifier" {
+    classify duplicate-ac.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for an unrecognized status value" {
+    classify unknown-status.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when Status is declared more than once" {
+    classify duplicate-status.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when Profile is declared more than once" {
+    classify duplicate-profile.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when all required words live in a single heading" {
+    classify single-heading-all-words.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when the profile heading is split" {
+    classify split-headings.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when Baseline is not scoped under Verification" {
+    classify baseline-outside-verification.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when required headings are inside a fenced code block" {
+    classify headings-in-fenced-code.md
+    [ "$status" -eq 1 ]
+}
+
+@test "BLOCKED (2) for a completed task with an unchecked approval gate" {
+    classify unchecked-gate.md
+    [ "$status" -eq 2 ]
+}
+
+@test "INVALID (1) when approval is negated rather than granted" {
+    classify negated-approval.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when approval is recorded as not granted" {
+    classify approval-not-granted.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when high-assurance evidence mapping omits a requirement" {
+    classify high-assurance-unmapped-matrix.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for an empty high-assurance risk analysis" {
+    classify high-assurance-empty-risk-analysis.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when a high-assurance task declares None identified approvals" {
+    classify high-assurance-none-identified.md
+    [ "$status" -eq 1 ]
+}
+
+@test "VALID (0) when required-evidence rows are reordered" {
+    classify standard-reordered-evidence-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "VALID (0) when requirement-to-evidence matrix rows are reordered" {
+    classify high-assurance-reordered-matrix-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "VALID (0) for an all-uppercase Profile, Status, and Updated" {
+    classify uppercase-profile-status-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "VALID (0) for mixed-case Profile and Status declarations" {
+    classify mixed-case-profile-status-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "INVALID (1) when Status is declared outside the Status section" {
+    classify status-outside-status-section-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when Profile is declared outside the Risk profile section" {
+    classify profile-outside-risk-profile-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when the Updated declaration is missing" {
+    classify missing-updated-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for an invalid Updated date" {
+    classify invalid-updated-date.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a checked approval gate with placeholder values" {
+    classify checked-placeholder-approval-blocked.md
+    [ "$status" -eq 1 ]
+}
+
+@test "VALID (0) for a checked approval gate with a real approver and date" {
+    classify checked-real-approval-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "INVALID (1) when a high-assurance section contains only a heading" {
+    classify high-assurance-heading-only-risk-analysis-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when reordered evidence rows repeat a criterion" {
+    classify duplicate-evidence-reordered.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when the Status section is missing" {
+    classify missing-status-section-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when the Updated declaration is duplicated" {
+    classify duplicate-updated-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when Updated is declared outside the Status section" {
+    classify updated-outside-status-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a checked approval gate with an invalid date" {
+    classify invalid-approval-date-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when an approval gate identifier is declared more than once" {
+    classify duplicate-gate-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "VALID (0) for lowercase table, matrix, and approval identifiers" {
+    classify lowercase-identifiers-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "INVALID (1) for a completed task with an empty Baseline" {
+    classify done-empty-baseline-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a completed task with an empty Final" {
+    classify done-empty-final-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "BLOCKED (2) for a completed task whose Final is only a placeholder" {
+    classify done-placeholder-final-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "INVALID (1) for a completed prototype with an empty Smoke verification" {
+    classify prototype-empty-smoke-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a malformed approval entry in the gates list" {
+    classify malformed-approval-entry-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when None identified is used as a substring, not a sentinel" {
+    classify none-identified-substring-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for an Updated date with year 0000" {
+    classify invalid-year-zero.md
+    [ "$status" -eq 1 ]
+}
+
+@test "BLOCKED (2) when the Baseline keeps the template placeholder" {
+    classify done-template-baseline-placeholder-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "BLOCKED (2) when the Final keeps the template placeholder" {
+    classify done-template-final-placeholder-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "BLOCKED (2) when a completed prototype keeps the Smoke placeholder" {
+    classify prototype-template-smoke-placeholder-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "INVALID (1) when a high-assurance section is a bracket placeholder" {
+    classify high-assurance-bracket-placeholder-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a completed task with an empty Files changed" {
+    classify done-empty-files-changed-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "BLOCKED (2) when Files changed keeps the template placeholder" {
+    classify done-placeholder-files-changed-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "INVALID (1) for a completed task with an empty Remaining risks" {
+    classify done-empty-remaining-risks-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "VALID (0) when Remaining risks states the None identified sentinel" {
+    classify done-none-identified-remaining-risks-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "INVALID (1) for a completed prototype with an empty Task goal" {
+    classify prototype-empty-task-goal-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a completed prototype with empty Known limitations" {
+    classify prototype-empty-known-limitations-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "BLOCKED (2) when a + bullet approval gate remains unchecked" {
+    classify plus-bullet-unchecked-gate-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "INVALID (1) when a + bullet checkbox is not a valid approval gate" {
+    classify plus-bullet-malformed-gate-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when an approval records an earlier date before an invalid one" {
+    classify approval-early-date-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "BLOCKED (2) when an acceptance criterion keeps the template placeholder" {
+    classify done-template-acceptance-criterion-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "BLOCKED (2) when an evidence description is a placeholder" {
+    classify done-placeholder-evidence-description-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "BLOCKED (2) when a high-assurance requirement keeps the template placeholder" {
+    classify high-assurance-template-requirement-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "BLOCKED (2) when the profile rationale keeps the template instruction" {
+    classify done-template-profile-rationale-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "BLOCKED (2) when Files changed is a table of placeholders" {
+    classify done-placeholder-files-table-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "INVALID (1) when a high-assurance section is a table of placeholders" {
+    classify high-assurance-placeholder-risk-table-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "VALID (0) when a high-assurance section is a real table" {
+    classify high-assurance-real-risk-table-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "BLOCKED (2) when every section is a punctuated placeholder" {
+    classify done-tbd-period-everywhere-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "INVALID (1) when high-assurance approvals use the punctuated None identified sentinel" {
+    classify high-assurance-none-identified-period-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "BLOCKED (2) when the Final is a punctuated Pending placeholder" {
+    classify done-pending-period-final-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "VALID (0) when a real sentence merely mentions TBD as a word" {
+    classify done-real-sentence-containing-tbd-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "VALID (0) for a lowercase acceptance criterion declaration" {
+    classify lowercase-criterion-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "VALID (0) for a lowercase high-assurance requirement declaration" {
+    classify lowercase-requirement-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "INVALID (1) when one list entry declares multiple AC identifiers" {
+    classify multiple-ac-ids-one-line-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when one list entry declares multiple R identifiers" {
+    classify multiple-r-ids-one-line-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "BLOCKED (2) when the first criterion is a placeholder and the second is real" {
+    classify first-id-placeholder-second-id-real-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "INVALID (1) when an AC identifier appears only in prose" {
+    classify criterion-id-mentioned-in-prose-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "VALID (0) for a substantive n/a rationale" {
+    classify na-evidence-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "INVALID (1) for a bare n/a evidence cell" {
+    classify na-evidence-bare-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "BLOCKED (2) for a placeholder n/a rationale" {
+    classify na-evidence-placeholder-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "VALID (0) for a substantive n/a matrix rationale" {
+    classify na-matrix-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "INVALID (1) for a bare n/a matrix cell" {
+    classify na-matrix-bare-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "BLOCKED (2) for a placeholder n/a matrix rationale" {
+    classify na-matrix-placeholder-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "INVALID (1) when the approval section contains unrecognized plain prose" {
+    classify approval-plain-prose-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when 'None identified' approvals are followed by unresolved prose" {
+    classify none-plus-pending-prose-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when a checked approval gate is followed by unresolved prose" {
+    classify checked-gate-plus-pending-prose-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when an acceptance criterion list entry has no AC identifier" {
+    classify unnumbered-criterion-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when a high-assurance requirement list entry has no R identifier" {
+    classify unnumbered-requirement-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when a valid criterion is followed by an unnumbered bullet" {
+    classify valid-criterion-plus-unnumbered-bullet-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when a valid requirement is followed by an unnumbered bullet" {
+    classify valid-requirement-plus-unnumbered-bullet-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when a section holds two consecutive empty tables" {
+    classify consecutive-empty-tables-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "BLOCKED (2) when a completed section contains only punctuation" {
+    classify done-punctuation-only-content-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "BLOCKED (2) when an evidence cell is only punctuation" {
+    classify punctuation-only-evidence-cell-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "INVALID (1) when an n/a rationale is only punctuation" {
+    classify na-punctuation-only-rationale-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when a checked approval approver is only punctuation" {
+    classify checked-punctuation-only-approver-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "BLOCKED (2) when a Files changed table row is only punctuation" {
+    classify punctuation-only-table-row-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "INVALID (1) when required evidence contains an unknown ID" {
+    classify required-evidence-unknown-id-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when required evidence contains an extra column" {
+    classify required-evidence-extra-column-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when required evidence contains a malformed ID" {
+    classify required-evidence-malformed-id-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when required evidence hides a duplicate unresolved row" {
+    classify required-evidence-hidden-unresolved-duplicate-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when the requirement matrix contains an unknown ID" {
+    classify requirement-matrix-unknown-id-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when the requirement matrix contains an extra column" {
+    classify requirement-matrix-extra-column-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "BLOCKED (2) when a completed section contains only underscores" {
+    classify done-underscore-only-content-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "BLOCKED (2) when an evidence cell is only underscores" {
+    classify underscore-only-evidence-cell-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "INVALID (1) when an n/a rationale is symbol-only" {
+    classify na-symbol-only-rationale-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when a checked approval approver is symbol-only" {
+    classify checked-underscore-only-approver-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when a high-assurance risk table is symbol-only" {
+    classify symbol-only-risk-table-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when a malformed row is used as the evidence header" {
+    classify required-evidence-malformed-row-as-header-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when an unknown unresolved row is used as the evidence header" {
+    classify required-evidence-unknown-row-as-header-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when a malformed row is used as the matrix header" {
+    classify requirement-matrix-malformed-row-as-header-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when an evidence row omits its leading pipe" {
+    classify required-evidence-row-without-leading-pipe-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "BLOCKED (2) for a completed task whose profile rationale is a bold-wrapped TBD" {
+    classify done-bold-tbd-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "BLOCKED (2) for a completed task whose Final is a code-wrapped Pending" {
+    classify done-code-wrapped-pending-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "BLOCKED (2) for a completed task whose Baseline is an underscore-suffixed TBD" {
+    classify done-tbd-underscore-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "INVALID (1) when an n/a rationale is a Markdown-wrapped placeholder" {
+    classify na-markdown-placeholder-rationale-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "BLOCKED (2) when an acceptance criterion is a bracket placeholder with a suffix" {
+    classify criterion-bracket-placeholder-with-suffix-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "INVALID (1) when required evidence has a no-leading-pipe row with an empty result" {
+    classify required-evidence-empty-cell-no-leading-pipe-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when required evidence has a no-leading-pipe row with a missing column" {
+    classify required-evidence-missing-column-no-leading-pipe-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when required evidence hides a pending row with an empty cell" {
+    classify required-evidence-hidden-pending-empty-cell-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when the requirement matrix has a no-leading-pipe row with an empty cell" {
+    classify requirement-matrix-empty-cell-no-leading-pipe-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "BLOCKED (2) for a completed prototype with an unchecked approval gate" {
+    classify prototype-unchecked-gate-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "VALID (0) for a completed prototype with a checked approval gate" {
+    classify prototype-checked-gate-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "INVALID (1) for a completed prototype with a malformed approval gate" {
+    classify prototype-malformed-gate-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "VALID (0) for a completed prototype with None identified approval gates" {
+    classify prototype-none-identified-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "VALID (0) for non-ASCII meaningful content" {
+    classify unicode-content-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "VALID (0) for a complete standard task whose Final is a Chinese sentence" {
+    classify unicode-letter-content-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "VALID (0) for a complete standard task whose Final uses Arabic-Indic digits" {
+    classify unicode-digit-content-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "BLOCKED (2) for a completed task whose Final is only Unicode punctuation" {
+    classify unicode-punctuation-only-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "BLOCKED (2) for a required evidence row whose description is an emoji" {
+    classify emoji-only-evidence-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "BLOCKED (2) for a completed task whose Final is only zero-width spaces" {
+    classify zero-width-only-content-blocked.md
+    [ "$status" -eq 2 ]
+}
+
+@test "INVALID (1) for a checked approval gate whose approver is an emoji" {
+    classify emoji-only-approver-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a completed prototype missing the Approval gates section" {
+    classify prototype-missing-approval-section-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "VALID (0) for a completed prototype with the exact safety declarations" {
+    classify prototype-exact-declarations-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "INVALID (1) for a prototype whose readiness declaration is negated" {
+    classify prototype-negated-readiness-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a prototype whose no-deployment declaration is negated" {
+    classify prototype-negated-no-deployment-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a prototype that declares readiness more than once" {
+    classify prototype-duplicate-declaration-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a prototype whose readiness declaration appears only in prose" {
+    classify prototype-declaration-only-in-prose-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a bare acceptance criterion with no AC-N identifier" {
+    classify bare-criterion-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a numbered acceptance criterion with a literal numeric label" {
+    classify numbered-criterion-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a bare high-assurance requirement with no R-N identifier" {
+    classify bare-requirement-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a numbered high-assurance requirement with a literal numeric label" {
+    classify numbered-requirement-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when canonical criteria are mixed with a bare bullet" {
+    classify mixed-canonical-and-bare-criteria-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when canonical criteria are followed by prose that mentions an AC identifier" {
+    classify canonical-plus-prose-ac-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when canonical high-assurance requirements are followed by prose that mentions an R identifier" {
+    classify canonical-plus-prose-r-invalid.md
+    [ "$status" -eq 1 ]
+}
+
+@test "VALID (0) when a canonical entry has a continuation prose line with no identifier" {
+    classify continuation-without-id-valid.md
+    [ "$status" -eq 0 ]
+}

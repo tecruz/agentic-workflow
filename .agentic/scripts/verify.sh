@@ -374,7 +374,11 @@ lexically_within_root() {
                 else
                     return 1
                 fi ;;
-            *) segs[$top]="$seg"; top=$((top + 1)) ;;
+            *)
+                # shellcheck disable=SC2034
+                segs[$top]="$seg"
+                top=$((top + 1))
+                ;;
         esac
     done
     return 0

@@ -130,11 +130,11 @@ jobs:
           fi
 
   # -----------------------------------------------------------------------
-  # 2. Run the canonical CI suite on the exact tagged commit.
+  # 2. Run the full CI suite on the exact tagged commit.
   # -----------------------------------------------------------------------
   ci:
     needs: validate
-    uses: ./.github/workflows/ci.yml
+    uses: ./.github/workflows/ci-full.yml
     with:
       ref: ${{ needs.validate.outputs.sha }}
 

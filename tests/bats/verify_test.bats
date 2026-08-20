@@ -389,28 +389,3 @@ detected_lines() {  # detected_lines <fixture-dir>
         fi
     done
 }
-
-@test "Bash and PowerShell detection produce equivalent candidates" {
-    # The parity test must compare Bash's result with PowerShell's result, not
-    # PowerShell with itself: capture the Bash candidate BEFORE PowerShell
-    # overwrites the generated file, then compare every golden fixture.
-    have pwsh || skip "pwsh not available"
-    local gold f bash_checks ps_checks TMPD
-    for gold in "$FIX"/golden/*.tsv; do
-        f="$(basename "$gold" .tsv)"
-        TMPD="$(mktemp -d)"
-        cp -r "$FIX/$f/." "$TMPD/"
-        ( cd "$TMPD" && bash "$VERIFY" --detect-checks >/dev/null 2>&1 )
-        bash_checks="$(grep -v '^#' "$TMPD/.agentic/checks.generated.tsv" | sort)"
-        rm -f "$TMPD/.agentic/checks.generated.tsv"
-        ( cd "$TMPD" && pwsh -NoProfile -File "$REPO_ROOT/.agentic/scripts/verify.ps1" -DetectChecks >/dev/null 2>&1 )
-        ps_checks="$(grep -v '^#' "$TMPD/.agentic/checks.generated.tsv" | sort)"
-        if [ "$bash_checks" != "$ps_checks" ]; then
-            echo "parity mismatch for fixture '$f'"
-            diff <(printf '%s\n' "$bash_checks") <(printf '%s\n' "$ps_checks") || true
-            rm -rf "$TMPD"
-            return 1
-        fi
-        rm -rf "$TMPD"
-    done
-}

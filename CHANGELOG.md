@@ -7,6 +7,89 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Golden-expectation CI + canonical-section hardening (PR #7 review round).**
+  - Fast CI now validates every task fixture against a checked-in golden
+    expectation file (`tests/parity/task-expectations.tsv`) that records the
+    expected exit code and diagnostic message per fixture, so the PR gate proves
+    each validator classifies each fixture correctly instead of only matching
+    the two implementations to each other. `tests/parity/run-golden.sh` runs
+    either validator against the golden file; `run-parity.sh` /
+    `run-parity.ps1` drive both validators plus the detection parity.
+  - Acceptance criteria and high-assurance Requirements now reject any
+    `AC-N` / `R-N` identifier that appears in prose or a non-canonical list
+    line (not only list items that fail to declare an identifier), so a
+    prose-declared extra criterion or requirement can no longer escape the
+    evidence contract.
+  - Three new shared fixtures cover both rejections and the valid continuation
+    case (154 total), with matching Bats and Pester tests.
+  - The macOS compatibility job now runs the Bash task validator over the full
+    fixture set against the golden file, exercising the validator under Bash
+    3.2 on the compact PR gate.
+  - ShellCheck is no longer globally soft-failing: targeted suppressions
+    (the known SC1087 false positive plus two inline SC2034 directives for
+    intentional dead assignments) let it run as a blocking check.
+  - The Bash validator's Perl dependency for non-ASCII classification is now
+    documented in the README requirements.
+
+### Fixed
+- **Task validator contract hardening (PR #7 follow-up).** Closes three
+  evidence-contract bypasses in `validate-task.sh` / `validate-task.ps1`:
+  - Unrecognized nonblank approval-gate prose is rejected instead of ignored,
+    so `## Approval gates` accepts only `None identified` or structured
+    `- [ ] AG-N:` / `- [x] AG-N:` records.
+  - A list item without an `AC-N` / `R-N` identifier in Acceptance criteria or
+    high-assurance Requirements is rejected, so every criterion and requirement
+    is part of the evidence contract.
+  - Table parsing state is reset at each table boundary, so the header of a
+    second empty table is no longer mistaken for the first table's data row.
+  - Eight new shared fixtures cover all three behaviors in both Bash and
+    PowerShell (100 total), and the parity tests keep the validators identical.
+- **Task validator evidence-integrity hardening (PR #7 follow-up).** Closes two
+  false-success paths in `validate-task.sh` / `validate-task.ps1`:
+  - Punctuation-only text is now placeholder content: a value that normalizes to
+    empty after trailing punctuation is stripped (a bare `.`), so punctuation-only
+    criteria, evidence, verification, risk, and `n/a` rationale statements are no
+    longer counted as substantive evidence, and a punctuation-only approval
+    identity is rejected because it records no meaningful approver.
+  - The evidence table (`## Required evidence`) and requirement matrix
+    (`## Requirement-to-evidence`) now validate every table-shaped row instead of
+    silently filtering malformed rows out: unknown or malformed identifiers,
+    extra or missing columns, duplicate rows, and rows that do not belong to the
+    declared identifier set are rejected rather than ignored, so visibly
+    unresolved evidence can no longer be hidden behind a malformed row.
+  - Eleven new shared fixtures cover both behaviors in Bash and PowerShell
+    (111 total), and the parity tests keep the validators identical.
+
+## [1.3.0] - 2026-08-18
+
+### Added
+- **Risk profiles and evidence contracts (PR #7).** Tasks now declare a risk
+  profile — `prototype`, `standard` (default), or `high-assurance` — that
+  determines the evidence a task must carry, the verification depth, the
+  handoff contents, and the approval gates.
+  - `.agentic/profiles/` documents the three profiles, the escalation signals
+    (authentication, payments, secrets, data migrations, production
+    infrastructure, irreversible operations, public API compatibility,
+    privacy, safety-critical behavior), and the default-is-`standard` /
+    never-downgrade-silently rules.
+  - `.agentic/templates/task.md` is a risk-aware task template with profile,
+    rationale, acceptance criteria (`AC-N`), required evidence, approval
+    gates, and remaining risks.
+  - `.agentic/scripts/validate-task.sh` / `validate-task.ps1` structurally
+    validate task files: recognized profile, required sections per profile,
+    `AC-N` identifiers, evidence-table entries, no `Pending` evidence on a
+    completed task, recorded approvals before completion, and the prototype
+    production-readiness warning. Exit codes: `0` VALID, `1` INVALID,
+    `2` BLOCKED. The Bash and PowerShell validators are held to identical
+    classifications by a fixture parity test.
+  - The lifecycle is now `DISCOVER → CLASSIFY RISK → PLAN → IMPLEMENT →
+    VERIFY → HANDOFF` (`.agentic/WORKFLOW.md`, `AGENTS.md`).
+  - Profile files, the task template, and the validators are registered as
+    `managed` files in both installers and travel in the distribution bundle;
+    adopter task files are never overwritten.
+  - New ADR: `docs/decisions/ADR-0008-risk-profiles-and-evidence-contracts.md`.
+
 ## [1.2.2] - 2026-08-18
 
 Release-integrity hardfix; addresses the `feedback (12).md` and `feedback (13).md`

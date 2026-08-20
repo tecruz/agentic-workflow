@@ -64,6 +64,7 @@ done
 
 rm -rf "$BUNDLE"
 mkdir -p "$BUNDLE/.agentic/rules" \
+         "$BUNDLE/.agentic/profiles" \
          "$BUNDLE/.agentic/scripts" \
          "$BUNDLE/.agentic/templates" \
          "$BUNDLE/.agentic/tasks" \
@@ -82,7 +83,8 @@ cp "$ROOT/.agentic/VERSION" \
    "$ROOT/.agentic/STATUS.md" \
    "$BUNDLE/.agentic/"
 cp "$ROOT"/.agentic/rules/*.md "$BUNDLE/.agentic/rules/"
-cp "$ROOT/.agentic/scripts/verify.sh" "$ROOT/.agentic/scripts/verify.ps1" "$BUNDLE/.agentic/scripts/"
+cp "$ROOT"/.agentic/profiles/*.md "$BUNDLE/.agentic/profiles/"
+cp "$ROOT/.agentic/scripts/verify.sh" "$ROOT/.agentic/scripts/verify.ps1" "$ROOT/.agentic/scripts/validate-task.sh" "$ROOT/.agentic/scripts/validate-task.ps1" "$BUNDLE/.agentic/scripts/"
 cp "$ROOT"/.agentic/templates/*.md "$ROOT"/.agentic/templates/checks.tsv "$BUNDLE/.agentic/templates/"
 cp "$ROOT/.agentic/tasks/README.md" "$BUNDLE/.agentic/tasks/"
 cp "$ROOT/.agentic/decisions/README.md" "$BUNDLE/.agentic/decisions/"

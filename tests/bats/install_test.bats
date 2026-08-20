@@ -47,6 +47,33 @@ configure_test_git_identity() {
     grep -q "seed" .agentic/install-manifest.tsv
 }
 
+@test "fresh install creates risk profiles, validators, and the task template" {
+    bash "$INSTALL" . >/dev/null 2>&1
+    [ -f .agentic/profiles/README.md ]
+    [ -f .agentic/profiles/prototype.md ]
+    [ -f .agentic/profiles/standard.md ]
+    [ -f .agentic/profiles/high-assurance.md ]
+    [ -f .agentic/scripts/validate-task.sh ]
+    [ -f .agentic/scripts/validate-task.ps1 ]
+    [ -f .agentic/templates/task.md ]
+    # validate-task.sh must be executable in the installed tree
+    [ -x .agentic/scripts/validate-task.sh ]
+    # all new files are framework-managed and recorded in the manifest
+    grep -q $'\.agentic/profiles/README\.md\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/scripts/validate-task\.sh\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/templates/task\.md\tmanaged' .agentic/install-manifest.tsv
+}
+
+@test "adopter task files in .agentic/tasks are never overwritten" {
+    mkdir -p .agentic/tasks
+    printf '# TASK-900: adopter task\nkeep me\n' > .agentic/tasks/TASK-900-adopter.md
+    bash "$INSTALL" . >/dev/null 2>&1
+    [ "$(cat .agentic/tasks/TASK-900-adopter.md)" = "# TASK-900: adopter task
+keep me" ]
+    # the framework's template travels, but the adopter's own file is untouched
+    [ -f .agentic/templates/task.md ]
+}
+
 @test "install is idempotent: second run updates without conflicts" {
     bash "$INSTALL" . >/dev/null 2>&1
     bash "$INSTALL" . >/dev/null 2>&1
@@ -770,6 +797,13 @@ configure_test_git_identity() {
     [ "$status" -eq 3 ]
 }
 
+@test "installed task validator keeps its executable bit and runs directly" {
+    bash "$INSTALL" . >/dev/null 2>&1
+    [ -x .agentic/scripts/validate-task.sh ]
+    run ./.agentic/scripts/validate-task.sh --handoff "$REPO_ROOT/tests/fixtures/tasks/standard-valid.md"
+    [ "$status" -eq 0 ]
+}
+
 @test "--detect-checks refuses an .agentic symlink to an outside directory" {
     outside="$(make_outside_dir)"
     printf 'PRECIOUS OUTSIDE\n' > "$outside/keep.txt"
@@ -811,7 +845,7 @@ configure_test_git_identity() {
     printf 'lowercase custom\n' > .agentic/version
     bash "$INSTALL" . >/dev/null 2>&1
     [ -f .agentic/VERSION ]
-    [ "$(cat .agentic/VERSION)" = "1.2.2" ]
+    [ "$(cat .agentic/VERSION)" = "$(cat "$REPO_ROOT/.agentic/VERSION")" ]
     [ "$(cat .agentic/version)" = "lowercase custom" ]
     [ ! -e .agentic/version.new ]
 }
@@ -890,6 +924,18 @@ SHIM
     [ -f "$BUNDLE/.agentic/templates/checks.tsv" ]   # generic template travels
     [ -f "$BUNDLE/.agentic/scripts/verify.sh" ]
     [ -f "$BUNDLE/LICENSE" ]
+}
+
+@test "bundle carries profiles, validators, and the task template" {
+    bash "$REPO_ROOT/scripts/build-bundle.sh" --no-archives
+    BUNDLE="$REPO_ROOT/dist/agentic-workflow-$(cat "$REPO_ROOT/.agentic/VERSION")"
+    [ -f "$BUNDLE/.agentic/profiles/README.md" ]
+    [ -f "$BUNDLE/.agentic/profiles/prototype.md" ]
+    [ -f "$BUNDLE/.agentic/profiles/standard.md" ]
+    [ -f "$BUNDLE/.agentic/profiles/high-assurance.md" ]
+    [ -f "$BUNDLE/.agentic/scripts/validate-task.sh" ]
+    [ -f "$BUNDLE/.agentic/scripts/validate-task.ps1" ]
+    [ -f "$BUNDLE/.agentic/templates/task.md" ]
 }
 
 @test "end-to-end: install from the bundle into an empty project" {
@@ -1077,10 +1123,10 @@ SHIM
 
 # ---------------------------------------------------------------------------
 # Release-to-release upgrade test: install from the v1.2.1 bundle, modify
-# project state, then upgrade using the current (v1.2.2) bundle.
+# project state, then upgrade using the current bundle.
 # ---------------------------------------------------------------------------
 
-@test "upgrade from v1.2.1 bundle to v1.2.2 preserves project state" {
+@test "upgrade from v1.2.1 bundle to the current bundle preserves project state" {
     # Verify the v1.2.1 tag exists and has the expected VERSION
     if [ "${CI:-}" = "true" ]; then
         git -C "$REPO_ROOT" rev-parse v1.2.1 >/dev/null 2>&1 ||
@@ -1099,7 +1145,7 @@ SHIM
     bash "$V121_SRC/scripts/build-bundle.sh" --no-archives
     V121_DIR="$V121_SRC/dist/agentic-workflow-1.2.1"
 
-    # Build the current (v1.2.2) bundle
+    # Build the current bundle
     bash "$REPO_ROOT/scripts/build-bundle.sh" --no-archives
     CURRENT_BUNDLE="$REPO_ROOT/dist/agentic-workflow-$(cat "$REPO_ROOT/.agentic/VERSION")"
 
@@ -1131,7 +1177,7 @@ SHIM
     AGENTS_BEFORE="$(cat AGENTS.md)"
     WORKFLOW_BEFORE="$(cat .agentic/WORKFLOW.md)"
 
-    # Step 5: Upgrade using current bundle (v1.2.2)
+    # Step 5: Upgrade using current bundle
     run bash "$CURRENT_BUNDLE/install.sh" . --tools all
     [ "$status" -eq 0 ]
 
