@@ -34,10 +34,14 @@ FAILURES=0
 
 run_one() {  # run_one <fixture> — sets globals code/out for the validator
     local f="$1"
+    # stdin is redirected from /dev/null so the validator never inherits this
+    # loop's redirected stdin (the golden file). PowerShell on Linux segfaults
+    # (exit 139) when its stdin is a regular file; bash is unaffected but the
+    # redirect is harmless and keeps both paths consistent.
     if [ "$LANG" = "bash" ]; then
-        out="$(bash "$VALIDATOR" "$f" 2>&1)" && code=0 || code=$?
+        out="$(bash "$VALIDATOR" "$f" < /dev/null 2>&1)" && code=0 || code=$?
     else
-        out="$(pwsh -NoProfile -File "$VALIDATOR" "$f" 2>&1)" && code=0 || code=$?
+        out="$(pwsh -NoProfile -File "$VALIDATOR" "$f" < /dev/null 2>&1)" && code=0 || code=$?
     fi
 }
 
