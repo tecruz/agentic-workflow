@@ -43,7 +43,17 @@ jobs:
       - name: Install bats
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
-            sudo apt-get update && sudo apt-get install -y bats zip
+            # Download bats from the GitHub release instead of apt: GitHub's
+            # ubuntu-24.04 apt mirror is flaky and has stalled apt-get update.
+            curl -fsSL https://github.com/bats-core/bats-core/archive/refs/tags/v1.11.1.tar.gz | tar xz -C /tmp
+            echo "/tmp/bats-core-1.11.1/bin" >> "$GITHUB_PATH"
+            # zip is a single small package; bound the apt update with retries
+            # and timeouts so a slow mirror cannot stall the job.
+            for i in 1 2 3; do
+              sudo apt-get update -o Acquire::Retries=5 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 && break
+              sleep 10
+            done
+            sudo apt-get install -y zip
           else
             brew install bats-core
           fi
@@ -51,7 +61,11 @@ jobs:
       - name: Install shellcheck
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
-            sudo apt-get update && sudo apt-get install -y shellcheck
+            for i in 1 2 3; do
+              sudo apt-get update -o Acquire::Retries=5 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 && break
+              sleep 10
+            done
+            sudo apt-get install -y shellcheck
           else
             brew install shellcheck
           fi
