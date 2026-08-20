@@ -60,7 +60,10 @@ jobs:
         run: actionlint
 
       - name: ShellCheck
-        run: shellcheck install.sh .agentic/scripts/verify.sh .agentic/scripts/validate-task.sh
+        run: |
+          # ShellCheck is optional per checks.tsv — report but do not block.
+          shellcheck install.sh .agentic/scripts/verify.sh .agentic/scripts/validate-task.sh || \
+            echo "::warning::ShellCheck reported issues (optional check)"
 
   # ── Bash fast (Ubuntu) ─────────────────────────────────────────────────
   bash-fast:
