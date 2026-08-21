@@ -130,7 +130,14 @@ elif [ "${OS:-}" = "Windows_NT" ] || uname -s | grep -qE "MINGW|MSYS|CYGWIN"; th
             bundle_win="$(cygpath -w "$BUNDLE")"
             dist_win="$(cygpath -w "$DIST/agentic-workflow-$VERSION.zip")"
         fi
-        "$PWSH_CMD" -NoProfile -Command "Compress-Archive -Path '$bundle_win' -DestinationPath '$dist_win' -Force"
+        AGENTIC_BUNDLE_WIN="$bundle_win" \
+        AGENTIC_ZIP_WIN="$dist_win" \
+        "$PWSH_CMD" -NoProfile -Command \
+            'Compress-Archive -LiteralPath $env:AGENTIC_BUNDLE_WIN -DestinationPath $env:AGENTIC_ZIP_WIN -Force'
+        if [ ! -s "$DIST/agentic-workflow-$VERSION.zip" ]; then
+            echo "ERROR: PowerShell Compress-Archive failed to create zip archive." >&2
+            exit 1
+        fi
     else
         echo "WARNING: neither zip nor pwsh found; skipping zip archive." >&2
     fi

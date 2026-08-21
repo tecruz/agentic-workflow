@@ -1126,17 +1126,48 @@ SHIM
     grep -q "agentic-workflow-$VERSION.zip" "$REPO_ROOT/dist/SHA256SUMS"
 }
 
-@test "build-bundle.sh invokes pwsh.exe fallback when pwsh is absent and pwsh.exe is present" {
-    MOCK_BIN="$TMP/mock-bin"
-    mkdir -p "$MOCK_BIN"
-    cat << 'EOF' > "$MOCK_BIN/pwsh.exe"
-#!/usr/bin/env bash
-exit 0
-EOF
-    chmod +x "$MOCK_BIN/pwsh.exe"
+@test "build-bundle.sh invokes pwsh.exe fallback" {
+    local mock_bin="$TMP/mock-bin"
+    local marker="$TMP/pwsh-called"
+    local version
+    local expected_zip
 
-    PATH="$MOCK_BIN:/usr/bin:/bin" OS="Windows_NT" bash "$REPO_ROOT/scripts/build-bundle.sh"
-    [ -f "$REPO_ROOT/dist/agentic-workflow-$(cat "$REPO_ROOT/.agentic/VERSION").zip" ]
+    mkdir -p "$mock_bin"
+    version="$(cat "$REPO_ROOT/.agentic/VERSION")"
+    expected_zip="$REPO_ROOT/dist/agentic-workflow-$version.zip"
+
+    for cmd in bash cat cp dirname grep mkdir rm tar uname; do
+        if command -v "$cmd" >/dev/null 2>&1; then
+            ln -s "$(command -v "$cmd")" "$mock_bin/$cmd"
+        fi
+    done
+
+    if command -v sha256sum >/dev/null 2>&1; then
+        ln -s "$(command -v sha256sum)" "$mock_bin/sha256sum"
+    elif command -v shasum >/dev/null 2>&1; then
+        ln -s "$(command -v shasum)" "$mock_bin/shasum"
+    fi
+
+    cat > "$mock_bin/pwsh.exe" <<'SH'
+#!/usr/bin/env bash
+set -eu
+printf 'called\n' > "$PWSH_MARKER"
+printf 'fake zip content\n' > "$AGENTIC_ZIP_WIN"
+SH
+    chmod +x "$mock_bin/pwsh.exe"
+
+    run env \
+        PATH="$mock_bin" \
+        OS="Windows_NT" \
+        PWSH_MARKER="$marker" \
+        AGENTIC_ZIP_WIN="$expected_zip" \
+        bash "$REPO_ROOT/scripts/build-bundle.sh"
+
+    [ "$status" -eq 0 ]
+    [ -f "$marker" ]
+    [ -s "$expected_zip" ]
+    grep -q "agentic-workflow-$version.zip" \
+        "$REPO_ROOT/dist/SHA256SUMS"
 }
 
 @test "release tar.gz does not leak development-only files" {
@@ -1257,17 +1288,16 @@ EOF
     [ -f .agentic/tasks/TASK-900-adopter.md ]
     grep -q "adopter task evidence" .agentic/tasks/TASK-900-adopter.md
 
-    # Verify exact managed manifest entries for new v1.3.0 files
-    manifest="$(cat .agentic/install-manifest.tsv)"
+    # Verify exact managed manifest entries for new v1.3.0 files using awk field parsing
     for f in ".agentic/profiles/README.md" ".agentic/profiles/prototype.md" ".agentic/profiles/standard.md" ".agentic/profiles/high-assurance.md" ".agentic/scripts/validate-task.sh" ".agentic/scripts/validate-task.ps1" ".agentic/templates/task.md"; do
-        printf '%s\n' "$manifest" | grep -q "$f$'\t'managed"$ || printf '%s\n' "$manifest" | grep -q "$f	managed"
+        awk -F '\t' -v expected="$f" '$1 == expected && $2 == "managed" { found = 1 } END { exit found ? 0 : 1 }' .agentic/install-manifest.tsv
     done
 
-    # Verify modified managed files produced .new conflict candidates and contain managed content
+    # Verify modified managed files produced .new conflict candidates and compare byte-for-byte with current managed sources
     [ -f .agentic/WORKFLOW.md.new ]
     [ -f .aider.conf.yml.new ]
-    grep -q "CLASSIFY RISK" .agentic/WORKFLOW.md.new
-    grep -q "aider" .aider.conf.yml.new
+    cmp -s .agentic/WORKFLOW.md.new "$CURRENT_BUNDLE/.agentic/WORKFLOW.md"
+    cmp -s .aider.conf.yml.new "$CURRENT_BUNDLE/.aider.conf.yml"
 
     # Execute installed validators against test fixtures
     run bash .agentic/scripts/validate-task.sh "$REPO_ROOT/tests/fixtures/tasks/standard-valid.md"
