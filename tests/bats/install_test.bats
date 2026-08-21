@@ -1014,11 +1014,25 @@ SHIM
     EXTRACT_DIR="$TMP/extract-tar"
     mkdir -p "$EXTRACT_DIR"
     tar -xzf "$ARCHIVE" -C "$EXTRACT_DIR"
+    EXTRACTED_BUNDLE="$EXTRACT_DIR/agentic-workflow-$VERSION"
+
+    # Verify risk profiles, task validators, task template
+    [ -f "$EXTRACTED_BUNDLE/.agentic/profiles/README.md" ]
+    [ -f "$EXTRACTED_BUNDLE/.agentic/profiles/prototype.md" ]
+    [ -f "$EXTRACTED_BUNDLE/.agentic/profiles/standard.md" ]
+    [ -f "$EXTRACTED_BUNDLE/.agentic/profiles/high-assurance.md" ]
+    [ -f "$EXTRACTED_BUNDLE/.agentic/scripts/validate-task.sh" ]
+    [ -x "$EXTRACTED_BUNDLE/.agentic/scripts/validate-task.sh" ]
+    [ -f "$EXTRACTED_BUNDLE/.agentic/scripts/validate-task.ps1" ]
+    [ -f "$EXTRACTED_BUNDLE/.agentic/templates/task.md" ]
+    grep -q "Profile" "$EXTRACTED_BUNDLE/.agentic/templates/task.md"
+    grep -q "Required evidence" "$EXTRACTED_BUNDLE/.agentic/templates/task.md"
+    grep -q "Approval gates" "$EXTRACTED_BUNDLE/.agentic/templates/task.md"
 
     PROJECT="$TMP/project"
     mkdir -p "$PROJECT"
     cd "$PROJECT"
-    bash "$EXTRACT_DIR/agentic-workflow-$VERSION/install.sh" . >/dev/null 2>&1
+    bash "$EXTRACTED_BUNDLE/install.sh" . >/dev/null 2>&1
 
     [ -f AGENTS.md ]
     [ -f .aider.conf.yml ]
@@ -1026,15 +1040,23 @@ SHIM
     [ -f .agentic/checks.tsv ]
     grep -q "seed" .agentic/install-manifest.tsv
 
+    # Execute installed validators against test fixtures
+    run bash .agentic/scripts/validate-task.sh "$REPO_ROOT/tests/fixtures/tasks/standard-valid.md"
+    [ "$status" -eq 0 ]
+    run bash .agentic/scripts/validate-task.sh "$REPO_ROOT/tests/fixtures/tasks/completed-with-pending-evidence.md"
+    [ "$status" -eq 2 ]
+    run bash .agentic/scripts/validate-task.sh "$REPO_ROOT/tests/fixtures/tasks/unknown-profile.md"
+    [ "$status" -eq 1 ]
+
     # the verifier should report UNSUPPORTED (3) for an empty project
     run bash .agentic/scripts/verify.sh
     [ "$status" -eq 3 ]
 
     # exercise update, plan, prune, uninstall
-    bash "$EXTRACT_DIR/agentic-workflow-$VERSION/install.sh" . >/dev/null 2>&1
-    run bash "$EXTRACT_DIR/agentic-workflow-$VERSION/install.sh" . --prune --plan
+    bash "$EXTRACTED_BUNDLE/install.sh" . >/dev/null 2>&1
+    run bash "$EXTRACTED_BUNDLE/install.sh" . --prune --plan
     [ "$status" -eq 0 ]
-    run bash "$EXTRACT_DIR/agentic-workflow-$VERSION/install.sh" . --uninstall --plan
+    run bash "$EXTRACTED_BUNDLE/install.sh" . --uninstall --plan
     [ "$status" -eq 0 ]
 }
 
@@ -1053,6 +1075,12 @@ SHIM
     BUNDLE="$(find "$EXTRACT_DIR" -name "install.sh" -path "*/agentic-workflow-*/install.sh" -exec dirname {} \; 2>/dev/null | head -1)"
     [ -n "$BUNDLE" ] || skip "could not locate bundle after zip extraction"
 
+    # Verify risk profiles, task validators, task template
+    [ -f "$BUNDLE/.agentic/profiles/README.md" ]
+    [ -f "$BUNDLE/.agentic/scripts/validate-task.sh" ]
+    [ -x "$BUNDLE/.agentic/scripts/validate-task.sh" ]
+    [ -f "$BUNDLE/.agentic/templates/task.md" ]
+
     PROJECT="$TMP/project"
     mkdir -p "$PROJECT"
     cd "$PROJECT"
@@ -1062,6 +1090,14 @@ SHIM
     [ -f .aider.conf.yml ]
     [ -f .agentic/VERSION ]
     grep -q "seed" .agentic/install-manifest.tsv
+
+    # Execute installed validators against test fixtures
+    run bash .agentic/scripts/validate-task.sh "$REPO_ROOT/tests/fixtures/tasks/standard-valid.md"
+    [ "$status" -eq 0 ]
+    run bash .agentic/scripts/validate-task.sh "$REPO_ROOT/tests/fixtures/tasks/completed-with-pending-evidence.md"
+    [ "$status" -eq 2 ]
+    run bash .agentic/scripts/validate-task.sh "$REPO_ROOT/tests/fixtures/tasks/unknown-profile.md"
+    [ "$status" -eq 1 ]
 
     # the verifier should report UNSUPPORTED (3) for an empty project
     run bash .agentic/scripts/verify.sh
@@ -1073,6 +1109,83 @@ SHIM
     [ "$status" -eq 0 ]
     run bash "$BUNDLE/install.sh" . --uninstall --plan
     [ "$status" -eq 0 ]
+}
+
+@test "build-bundle.sh removes stale archives and checksums before rebuilding and validates SHA256SUMS" {
+    VERSION="$(cat "$REPO_ROOT/.agentic/VERSION")"
+    touch "$REPO_ROOT/dist/agentic-workflow-$VERSION.tar.gz"
+    touch "$REPO_ROOT/dist/agentic-workflow-$VERSION.zip"
+    touch "$REPO_ROOT/dist/SHA256SUMS"
+    echo "stale" > "$REPO_ROOT/dist/agentic-workflow-$VERSION.tar.gz"
+    echo "stale" > "$REPO_ROOT/dist/agentic-workflow-$VERSION.zip"
+    bash "$REPO_ROOT/scripts/build-bundle.sh"
+    [ "$(cat "$REPO_ROOT/dist/agentic-workflow-$VERSION.tar.gz")" != "stale" ]
+    [ "$(cat "$REPO_ROOT/dist/agentic-workflow-$VERSION.zip")" != "stale" ]
+    [ -s "$REPO_ROOT/dist/SHA256SUMS" ]
+    grep -q "agentic-workflow-$VERSION.tar.gz" "$REPO_ROOT/dist/SHA256SUMS"
+    grep -q "agentic-workflow-$VERSION.zip" "$REPO_ROOT/dist/SHA256SUMS"
+}
+
+@test "build-bundle.sh invokes pwsh.exe fallback" {
+    local mock_bin="$TMP/mock-bin"
+    local marker="$TMP/pwsh-called"
+    local args_file="$TMP/pwsh-args"
+    local version
+    local expected_zip
+
+    mkdir -p "$mock_bin"
+    version="$(cat "$REPO_ROOT/.agentic/VERSION")"
+    expected_zip="$REPO_ROOT/dist/agentic-workflow-$version.zip"
+
+    for cmd in bash cat cp dirname grep gzip mkdir rm tar uname; do
+        source_path="$(command -v "$cmd")" || {
+            fail "missing test prerequisite: $cmd"
+        }
+        ln -s "$source_path" "$mock_bin/$cmd"
+    done
+
+    if command -v sha256sum >/dev/null 2>&1; then
+        ln -s "$(command -v sha256sum)" "$mock_bin/sha256sum"
+    elif command -v shasum >/dev/null 2>&1; then
+        ln -s "$(command -v shasum)" "$mock_bin/shasum"
+    fi
+
+    cat > "$mock_bin/pwsh.exe" <<'SH'
+#!/usr/bin/env bash
+set -eu
+printf 'called\n' > "$PWSH_MARKER"
+printf '%s\n' "$@" > "$PWSH_ARGS"
+printf 'fake zip content\n' > "$AGENTIC_ZIP_WIN"
+SH
+    chmod +x "$mock_bin/pwsh.exe"
+
+    run env \
+        PATH="$mock_bin" \
+        OS="Windows_NT" \
+        PWSH_MARKER="$marker" \
+        PWSH_ARGS="$args_file" \
+        AGENTIC_ZIP_WIN="$expected_zip" \
+        bash "$REPO_ROOT/scripts/build-bundle.sh"
+
+    [ "$status" -eq 0 ]
+    [ -f "$marker" ]
+    [ -s "$expected_zip" ]
+    [ -f "$args_file" ]
+    grep -q -- "-NoProfile" "$args_file"
+    grep -q -- "Compress-Archive" "$args_file"
+    grep -q -- "-LiteralPath" "$args_file"
+    grep -q "agentic-workflow-$version.zip" \
+        "$REPO_ROOT/dist/SHA256SUMS"
+}
+
+@test "build-bundle.sh succeeds when repository path contains apostrophes, spaces, and brackets" {
+    special_dir="$TMP/O'Brien project [release]"
+    mkdir -p "$special_dir"
+    git -C "$REPO_ROOT" archive HEAD | tar -x -C "$special_dir"
+    run bash "$special_dir/scripts/build-bundle.sh"
+    [ "$status" -eq 0 ]
+    version="$(cat "$special_dir/.agentic/VERSION")"
+    [ -f "$special_dir/dist/agentic-workflow-$version.tar.gz" ]
 }
 
 @test "release tar.gz does not leak development-only files" {
@@ -1122,28 +1235,28 @@ SHIM
 }
 
 # ---------------------------------------------------------------------------
-# Release-to-release upgrade test: install from the v1.2.1 bundle, modify
+# Release-to-release upgrade test: install from the v1.2.2 bundle, modify
 # project state, then upgrade using the current bundle.
 # ---------------------------------------------------------------------------
 
-@test "upgrade from v1.2.1 bundle to the current bundle preserves project state" {
-    # Verify the v1.2.1 tag exists and has the expected VERSION
+@test "upgrade from v1.2.2 bundle to the current bundle preserves project state and adds v1.3.0 profiles and validators" {
+    # Verify the v1.2.2 tag exists and has the expected VERSION
     if [ "${CI:-}" = "true" ]; then
-        git -C "$REPO_ROOT" rev-parse v1.2.1 >/dev/null 2>&1 ||
-            fail "required migration tag v1.2.1 is unavailable in CI"
+        git -C "$REPO_ROOT" rev-parse v1.2.2 >/dev/null 2>&1 ||
+            fail "required migration tag v1.2.2 is unavailable in CI"
     else
-        git -C "$REPO_ROOT" rev-parse v1.2.1 >/dev/null 2>&1 ||
-            skip "v1.2.1 tag not found"
+        git -C "$REPO_ROOT" rev-parse v1.2.2 >/dev/null 2>&1 ||
+            skip "v1.2.2 tag not found"
     fi
-    V121_VERSION="$(git -C "$REPO_ROOT" show v1.2.1:.agentic/VERSION 2>/dev/null)"
-    [ "$V121_VERSION" = "1.2.1" ]
+    V122_VERSION="$(git -C "$REPO_ROOT" show v1.2.2:.agentic/VERSION 2>/dev/null)"
+    [ "$V122_VERSION" = "1.2.2" ]
 
-    # Extract the actual v1.2.1 source tree and build its bundle
-    V121_SRC="$TMP/v121-src"
-    mkdir -p "$V121_SRC"
-    git -C "$REPO_ROOT" archive v1.2.1 | tar -x -C "$V121_SRC"
-    bash "$V121_SRC/scripts/build-bundle.sh" --no-archives
-    V121_DIR="$V121_SRC/dist/agentic-workflow-1.2.1"
+    # Extract the actual v1.2.2 source tree and build its bundle
+    V122_SRC="$TMP/v122-src"
+    mkdir -p "$V122_SRC"
+    git -C "$REPO_ROOT" archive v1.2.2 | tar -x -C "$V122_SRC"
+    bash "$V122_SRC/scripts/build-bundle.sh" --no-archives
+    V122_DIR="$V122_SRC/dist/agentic-workflow-1.2.2"
 
     # Build the current bundle
     bash "$REPO_ROOT/scripts/build-bundle.sh" --no-archives
@@ -1153,50 +1266,76 @@ SHIM
     mkdir -p "$PROJECT"
     cd "$PROJECT"
 
-    # Step 1: Install from the real v1.2.1 bundle
-    run bash "$V121_DIR/install.sh" . --tools all
+    # Step 1: Install from the real v1.2.2 bundle
+    run bash "$V122_DIR/install.sh" . --tools all
     [ "$status" -eq 0 ]
     [ -f AGENTS.md ]
     [ -f CLAUDE.md ]
     [ -f GEMINI.md ]
     [ -f .aider.conf.yml ]
     [ -f .agentic/VERSION ]
-    [ "$(cat .agentic/VERSION)" = "1.2.1" ]
+    [ "$(cat .agentic/VERSION)" = "1.2.2" ]
 
-    # Step 2: Add custom content outside merge blocks
+    # Step 2: Add custom content outside merge blocks and adopter task file
     printf '\n## Team notes\nkeep this content\n' >> AGENTS.md
     printf '\n# custom aider config\n' >> .aider.conf.yml
+    mkdir -p .agentic/tasks
+    printf '# TASK-900: adopter task evidence' > .agentic/tasks/TASK-900-adopter.md
 
-    # Step 3: Modify a managed file
+    # Step 3: Modify managed files to produce conflict candidates
     printf '\n# adopter workflow override\n' >> .agentic/WORKFLOW.md
+    printf '\n# adopter aider override\n' >> .aider.conf.yml
 
-    # Step 4: Add a reviewed candidate (correct field order: requirement, check-id, dir, shell, command)
+    # Step 4: Add a reviewed candidate
     printf 'required\tcustom-check\t.\tnpm\ttest\n' > .agentic/checks.generated.tsv
-
-    # Record state before upgrade
-    AGENTS_BEFORE="$(cat AGENTS.md)"
-    WORKFLOW_BEFORE="$(cat .agentic/WORKFLOW.md)"
 
     # Step 5: Upgrade using current bundle
     run bash "$CURRENT_BUNDLE/install.sh" . --tools all
     [ "$status" -eq 0 ]
 
-    # Step 6: Verify preservation
+    # Step 6: Verify v1.3.0 additions and preservation
+    [ "$(cat .agentic/VERSION)" = "1.3.0" ]
+    [ -f .agentic/profiles/README.md ]
+    [ -f .agentic/profiles/prototype.md ]
+    [ -f .agentic/profiles/standard.md ]
+    [ -f .agentic/profiles/high-assurance.md ]
+    [ -f .agentic/scripts/validate-task.sh ]
+    [ -x .agentic/scripts/validate-task.sh ]
+    [ -f .agentic/scripts/validate-task.ps1 ]
+    [ -f .agentic/templates/task.md ]
+    [ -f .agentic/tasks/TASK-900-adopter.md ]
+    grep -q "adopter task evidence" .agentic/tasks/TASK-900-adopter.md
+
+    # Verify exact managed manifest entries for new v1.3.0 files using awk field parsing
+    for f in ".agentic/profiles/README.md" ".agentic/profiles/prototype.md" ".agentic/profiles/standard.md" ".agentic/profiles/high-assurance.md" ".agentic/scripts/validate-task.sh" ".agentic/scripts/validate-task.ps1" ".agentic/templates/task.md"; do
+        awk -F '\t' -v expected="$f" '$1 == expected && $2 == "managed" { found = 1 } END { exit found ? 0 : 1 }' .agentic/install-manifest.tsv
+    done
+
+    # Verify modified managed files produced .new conflict candidates and compare byte-for-byte with current managed sources
+    [ -f .agentic/WORKFLOW.md.new ]
+    [ -f .aider.conf.yml.new ]
+    cmp -s .agentic/WORKFLOW.md.new "$CURRENT_BUNDLE/.agentic/WORKFLOW.md"
+    cmp -s .aider.conf.yml.new "$CURRENT_BUNDLE/.aider.conf.yml"
+
+    # Execute installed validators against test fixtures
+    run bash .agentic/scripts/validate-task.sh "$REPO_ROOT/tests/fixtures/tasks/standard-valid.md"
+    [ "$status" -eq 0 ]
+    run bash .agentic/scripts/validate-task.sh "$REPO_ROOT/tests/fixtures/tasks/completed-with-pending-evidence.md"
+    [ "$status" -eq 2 ]
+    run bash .agentic/scripts/validate-task.sh "$REPO_ROOT/tests/fixtures/tasks/unknown-profile.md"
+    [ "$status" -eq 1 ]
+
     grep -q "keep this content" AGENTS.md
     grep -q "AGENTIC-PROTOCOL-START" AGENTS.md
     grep -q "# adopter workflow override" .agentic/WORKFLOW.md
     [ -f .agentic/checks.generated.tsv ]
     grep -q "custom-check" .agentic/checks.generated.tsv
-    # Verify the reviewed candidate is preserved exactly (byte-for-byte)
     [ "$(cat .agentic/checks.generated.tsv)" = "required"$'\t'"custom-check"$'\t'"."$'\t'"npm"$'\t'"test" ]
-
-    # Verify .aider.conf.yml custom content is preserved
     grep -q "# custom aider config" .aider.conf.yml
 
     # Step 7: Exercise plan, prune, uninstall
     run bash "$CURRENT_BUNDLE/install.sh" . --prune --plan --tools claude
     [ "$status" -eq 0 ]
-    # GEMINI.md and .aider.conf.yml should still exist in plan mode
     [ -f GEMINI.md ]
     [ -f .aider.conf.yml ]
 
@@ -1218,6 +1357,8 @@ SHIM
     [ -f .agentic/ARCHITECTURE.md ]
     [ -f .agentic/STATUS.md ]
     [ -f .agentic/checks.tsv ]
+    [ -f .agentic/tasks/TASK-900-adopter.md ]
+    grep -q "adopter task evidence" .agentic/tasks/TASK-900-adopter.md
 }
 
 # ---------------------------------------------------------------------------
