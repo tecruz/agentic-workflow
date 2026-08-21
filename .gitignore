@@ -27,3 +27,7 @@ __pycache__/
 venv/
 bin/
 obj/
+
+# --- Agentic run logs & trajectories ---
+.agentic/runs/
+

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-08-21
+
+### Added
+- **Versioned JSON result contracts and optional run events (PR #9).**
+  - Added JSON output modes (`--format json` in Bash, `-Format Json` in PowerShell) to both project verifiers and task validators.
+  - Added managed JSON schemas (`.agentic/schemas/verification-result-v1.schema.json` and `.agentic/schemas/task-validation-result-v1.schema.json`) registered in installers, bundles, and manifest categories.
+  - Added optional local JSONL observable event streams (`--events` / `-Events`) with strict privacy safeguards and git-ignored run directories (`.agentic/runs/`).
+  - Added stable diagnostic error codes for task validation failures.
+  - Added comprehensive Pester and schema compliance test suites.
+  - Added ADR-0009.
+
 ## [1.3.0] - 2026-08-21
 
 ### Added

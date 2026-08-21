@@ -42,7 +42,10 @@ param(
     [switch] $EmitChecks,
     [switch] $ExplainDetection,
     [switch] $DetectChecks,
-    [string] $ValidateChecks
+    [string] $ValidateChecks,
+    [ValidateSet('Text', 'Json')]
+    [string] $Format = 'Text',
+    [string] $Events = $null
 )
 
 $script:Failed = $false
@@ -50,6 +53,61 @@ $script:Ran = 0
 $script:RanRequired = $false
 $script:Blocked = $false
 $script:Detected = $false
+$script:CheckResults = @()
+
+if ($Events) {
+    if (-not (Assert-VerifierDestination $Events)) {
+        [Console]::Error.WriteLine("ERROR: refusing to write events to '$Events': destination is not safely inside the project root.")
+        exit 1
+    }
+    $eventDir = Split-Path -Parent $Events
+    if ($eventDir) { New-Item -ItemType Directory -Path $eventDir -Force | Out-Null }
+    [System.IO.File]::WriteAllText($Events, '{"event":"verification_started"}' + "`n", [System.Text.UTF8Encoding]::new($false))
+}
+
+function Write-Log {
+    param([string] $Message)
+    if ($Format -eq 'Json') {
+        [Console]::Error.WriteLine($Message)
+    }
+    else {
+        Write-Log $Message
+    }
+}
+
+function Output-VerificationJson {
+    param([string] $ResultStr, [int] $ExitCode)
+    $passedCount = @($script:CheckResults | Where-Object { $_.status -eq 'PASS' }).Count
+    $failedCount = @($script:CheckResults | Where-Object { $_.status -eq 'FAIL' }).Count
+    $blockedCount = @($script:CheckResults | Where-Object { $_.status -eq 'BLOCKED' }).Count
+    $optionalSkipped = @($script:CheckResults | Where-Object { $_.status -eq 'SKIPPED_OPTIONAL' }).Count
+    $requiredRun = @($script:CheckResults | Where-Object { $_.requirement -eq 'required' -and $_.status -in @('PASS', 'FAIL') }).Count
+    $checksRun = @($script:CheckResults | Where-Object { $_.status -in @('PASS', 'FAIL') }).Count
+
+    $resultObject = [ordered]@{
+        schema_version   = 1
+        protocol_version = "1.4.0"
+        kind             = "verification_result"
+        result           = $ResultStr
+        exit_code        = $ExitCode
+        source           = if ($checksDefined) { "checks_tsv" } else { "auto_detected" }
+        summary          = [ordered]@{
+            checks_defined   = $script:CheckResults.Count
+            checks_run       = $checksRun
+            required_run     = $requiredRun
+            passed           = $passedCount
+            failed           = $failedCount
+            blocked          = $blockedCount
+            optional_skipped = $optionalSkipped
+        }
+        checks           = $script:CheckResults
+    }
+    [Console]::Out.WriteLine(($resultObject | ConvertTo-Json -Depth 10 -Compress))
+    if ($Events) {
+        $jsonEvent = '{"event":"verification_completed","result":"' + $ResultStr + '","exit_code":' + $ExitCode + '}'
+        [System.IO.File]::AppendAllText($Events, $jsonEvent + "`n", [System.Text.UTF8Encoding]::new($false))
+    }
+}
 
 # Path semantics must match the underlying filesystem (case-insensitive on
 # Windows, case-sensitive on Unix), so confinement and duplicate-ID checks use
@@ -81,11 +139,6 @@ function Invoke-Check {
         [string[]] $ArgsList
     )
 
-    # A working directory must resolve to an existing directory, or the check
-    # is BLOCKED (never PASS). Test-Path alone is unreliable for broken symbolic
-    # links on some platforms, so confirm the physically resolved path exists.
-    # The cwd is relative to the project root (PowerShell's current location),
-    # not the .NET process working directory that GetFullPath would otherwise use.
     $cwdAbsolute = Join-Path (Get-Location).Path $Cwd
     try {
         $resolvedCwdPath = Resolve-PhysicalPath $cwdAbsolute
@@ -95,23 +148,28 @@ function Invoke-Check {
     }
     if (-not $resolvedCwdPath -or -not [System.IO.Directory]::Exists($resolvedCwdPath)) {
         if ($Requirement -eq 'required') { $script:Blocked = $true }
-        Write-Host "  BLOCKED: working directory '$Cwd' does not exist or cannot be used"
+        Write-Log "  BLOCKED: working directory '$Cwd' does not exist or cannot be used"
+        $st = if ($Requirement -eq 'required') { 'BLOCKED' } else { 'SKIPPED_OPTIONAL' }
+        $script:CheckResults += [ordered]@{
+            id                = $Id
+            requirement       = $Requirement
+            status            = $st
+            working_directory = $Cwd
+            exit_code         = $null
+            duration_ms       = 0
+            reason_code       = 'WORKING_DIR_MISSING'
+        }
         return
     }
 
     $resolvedExe = $null
     if ($Exe -match '[/\\]') {
-        # A path-qualified executable is resolved ONLY against the configured
-        # path. Never fall back to a same-named command on PATH when the
-        # configured path is missing: that could run an unrelated executable
-        # and falsely report PASS. A missing configured path is BLOCKED below.
         $candidate = Join-Path $Cwd $Exe
         if (Test-Path -LiteralPath $candidate) {
             $resolvedExe = (Resolve-Path -LiteralPath $candidate).Path
         }
     }
     else {
-        # Bare executable names may be resolved from PATH.
         $found = Get-Command $Exe -ErrorAction SilentlyContinue
         if ($found) { $resolvedExe = $found.Source }
     }
@@ -119,36 +177,74 @@ function Invoke-Check {
     if (-not $resolvedExe) {
         if ($Requirement -eq 'required') {
             $script:Blocked = $true
-            Write-Host "  BLOCKED: executable '$Exe' was not found"
+            Write-Log "  BLOCKED: executable '$Exe' was not found"
         }
         else {
-            Write-Host "  skip (optional): executable '$Exe' was not found"
+            Write-Log "  skip (optional): executable '$Exe' was not found"
+        }
+        $st = if ($Requirement -eq 'required') { 'BLOCKED' } else { 'SKIPPED_OPTIONAL' }
+        $script:CheckResults += [ordered]@{
+            id                = $Id
+            requirement       = $Requirement
+            status            = $st
+            working_directory = $Cwd
+            exit_code         = $null
+            duration_ms       = 0
+            reason_code       = 'EXECUTABLE_MISSING'
         }
         return
     }
 
-    Write-Host ""
-    Write-Host "==> [$Id] $Exe $($ArgsList -join ' ')"
+    Write-Log ""
+    Write-Log "==> [$Id] $Exe $($ArgsList -join ' ')"
 
     $script:Ran++
     if ($Requirement -eq 'required') { $script:RanRequired = $true }
 
+    if ($Events) {
+        $jsonEvent = '{"event":"check_started","check_id":"' + $Id + '"}'
+        [System.IO.File]::AppendAllText($Events, $jsonEvent + "`n", [System.Text.UTF8Encoding]::new($false))
+    }
+
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
     Push-Location $Cwd
     try {
-        & $resolvedExe @ArgsList
+        if ($Format -eq 'Json') {
+            & $resolvedExe @ArgsList 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
+        }
+        else {
+            & $resolvedExe @ArgsList
+        }
         $code = $LASTEXITCODE
     }
     finally {
         Pop-Location
     }
+    $sw.Stop()
+    $durationMs = [int]$sw.ElapsedMilliseconds
 
-    if ($code -ne 0) {
+    $checkFailed = ($code -ne 0)
+    $st = if ($checkFailed) { 'FAIL' } else { 'PASS' }
+    if ($checkFailed) {
         if ($Requirement -eq 'required') {
             $script:Failed = $true
         }
         else {
-            Write-Host "  WARNING: optional check '$Id' failed"
+            Write-Log "  WARNING: optional check '$Id' failed"
         }
+    }
+    $script:CheckResults += [ordered]@{
+        id                = $Id
+        requirement       = $Requirement
+        status            = $st
+        working_directory = $Cwd
+        exit_code         = $code
+        duration_ms       = $durationMs
+        reason_code       = $null
+    }
+    if ($Events) {
+        $jsonEvent = '{"event":"check_completed","check_id":"' + $Id + '","status":"' + $st + '","exit_code":' + $(if($null -eq $code){'null'}else{$code}) + ',"duration_ms":' + $durationMs + '}'
+        [System.IO.File]::AppendAllText($Events, $jsonEvent + "`n", [System.Text.UTF8Encoding]::new($false))
     }
 }
 
@@ -223,7 +319,7 @@ function Get-DetectedChecks {
     [string[]] $lines = @()
 
     if (Test-Path -LiteralPath package.json) {
-        Write-Host "Detected: Node.js project (package.json)"
+        Write-Log "Detected: Node.js project (package.json)"
         if (Test-Path -LiteralPath pnpm-lock.yaml) {
             $lines += "required`tnode-test`t.`tpnpm`ttest"
             if (Test-PackageScript 'package.json' 'lint') {
@@ -249,13 +345,13 @@ function Get-DetectedChecks {
     }
 
     if (Test-Path -LiteralPath Cargo.toml) {
-        Write-Host "Detected: Rust project (Cargo.toml)"
+        Write-Log "Detected: Rust project (Cargo.toml)"
         $lines += "required`trust-test`t.`tcargo`ttest"
         $lines += "required`trust-clippy`t.`tcargo`tclippy`t--`t-D`twarnings"
     }
 
     if ((Test-Path -LiteralPath pyproject.toml) -or (Test-Path -LiteralPath requirements.txt)) {
-        Write-Host "Detected: Python project (pyproject.toml / requirements.txt)"
+        Write-Log "Detected: Python project (pyproject.toml / requirements.txt)"
         if (Test-Path -LiteralPath poetry.lock) {
             $lines += "required`tpython-test`t.`tpoetry`trun`tpytest"
             if (Test-RuffConfig '.') {
@@ -277,13 +373,13 @@ function Get-DetectedChecks {
     }
 
     if (Test-Path -LiteralPath go.mod) {
-        Write-Host "Detected: Go project (go.mod)"
+        Write-Log "Detected: Go project (go.mod)"
         $lines += "required`tgo-test`t.`tgo`ttest`t./..."
         $lines += "required`tgo-vet`t.`tgo`tvet`t./..."
     }
 
     if (Test-Path -LiteralPath pom.xml) {
-        Write-Host "Detected: Maven project (pom.xml)"
+        Write-Log "Detected: Maven project (pom.xml)"
         $mavenCmd = Get-MavenCommand
         $lines += "required`tmaven-test`t.`t$mavenCmd`ttest"
         if (Test-MavenCheckstyle 'pom.xml') {
@@ -299,7 +395,7 @@ function Get-DetectedChecks {
         if ($gradleText -match 'com\.android|org\.jetbrains\.kotlin\.android') { $isAndroid = $true }
 
         if ($isAndroid) {
-            Write-Host "Detected: Android / Kotlin Gradle project (build.gradle)"
+            Write-Log "Detected: Android / Kotlin Gradle project (build.gradle)"
             $gradleCmd = Get-GradleCommand
             $lines += "required`tandroid-unit`t.`t$gradleCmd`ttest"
             $lines += "required`tandroid-lint`t.`t$gradleCmd`tlint"
@@ -307,7 +403,7 @@ function Get-DetectedChecks {
             $lines += "optional`tandroid-device`t.`t$gradleCmd`tconnectedCheck"
         }
         else {
-            Write-Host "Detected: Gradle project (build.gradle)"
+            Write-Log "Detected: Gradle project (build.gradle)"
             $gradleCmd = Get-GradleCommand
             $lines += "required`tgradle-test`t.`t$gradleCmd`ttest"
             $lines += "required`tgradle-lint`t.`t$gradleCmd`tcheck"
@@ -316,7 +412,7 @@ function Get-DetectedChecks {
 
     if ((Get-ChildItem -Path . -Filter *.sln -File -ErrorAction SilentlyContinue) -or
         (Get-ChildItem -Path . -Filter *.csproj -File -ErrorAction SilentlyContinue)) {
-        Write-Host "Detected: .NET project (*.sln / *.csproj)"
+        Write-Log "Detected: .NET project (*.sln / *.csproj)"
         $lines += "required`tdotnet-test`t.`tdotnet`ttest"
         $lines += "required`tdotnet-lint`t.`tdotnet`tformat`t--verify-no-changes"
     }
@@ -332,7 +428,7 @@ function Get-DetectedChecks {
                 $prefix = "$base-$subName"
 
                 if (Test-Path -LiteralPath (Join-Path $subRel 'package.json')) {
-                    Write-Host "Detected: Nested Node.js project ($subRel)"
+                    Write-Log "Detected: Nested Node.js project ($subRel)"
                     if (Test-Path -LiteralPath (Join-Path $subRel 'pnpm-lock.yaml')) {
                         $lines += "required`t${prefix}-node-test`t${subRel}`tpnpm`ttest"
                         if (Test-PackageScript (Join-Path $subRel 'package.json') 'lint') {
@@ -357,17 +453,17 @@ function Get-DetectedChecks {
                     }
                 }
                 if (Test-Path -LiteralPath (Join-Path $subRel 'go.mod')) {
-                    Write-Host "Detected: Nested Go project ($subRel)"
+                    Write-Log "Detected: Nested Go project ($subRel)"
                     $lines += "required`t${prefix}-go-test`t${subRel}`tgo`ttest`t./..."
                     $lines += "required`t${prefix}-go-vet`t${subRel}`tgo`tvet`t./..."
                 }
                 if (Test-Path -LiteralPath (Join-Path $subRel 'Cargo.toml')) {
-                    Write-Host "Detected: Nested Rust project ($subRel)"
+                    Write-Log "Detected: Nested Rust project ($subRel)"
                     $lines += "required`t${prefix}-rust-test`t${subRel}`tcargo`ttest"
                     $lines += "required`t${prefix}-rust-clippy`t${subRel}`tcargo`tclippy`t--`t-D`twarnings"
                 }
                 if ((Test-Path -LiteralPath (Join-Path $subRel 'pyproject.toml')) -or (Test-Path -LiteralPath (Join-Path $subRel 'requirements.txt'))) {
-                    Write-Host "Detected: Nested Python project ($subRel)"
+                    Write-Log "Detected: Nested Python project ($subRel)"
                     # Nested Python projects inherit the root-level Poetry/uv
                     # detection rather than always falling back to bare pytest.
                     if (Test-Path -LiteralPath (Join-Path $subRel 'poetry.lock')) {
@@ -484,7 +580,7 @@ function Test-ChecksTsvValidation {
         }
         $fields = $rawLine -split "`t"
         if ($fields.Count -lt 4) {
-            Write-Host "ERROR: .agentic/checks.tsv line $lineNum has fewer than 4 fields."
+            Write-Log "ERROR: .agentic/checks.tsv line $lineNum has fewer than 4 fields."
             exit 1
         }
         $requirement = $fields[0]
@@ -493,15 +589,15 @@ function Test-ChecksTsvValidation {
         $exe = $fields[3]
 
         if ($requirement -ne 'required' -and $requirement -ne 'optional') {
-            Write-Host "ERROR: .agentic/checks.tsv line $lineNum has invalid requirement '$requirement' (expected 'required' or 'optional')."
+            Write-Log "ERROR: .agentic/checks.tsv line $lineNum has invalid requirement '$requirement' (expected 'required' or 'optional')."
             exit 1
         }
         if ([string]::IsNullOrWhiteSpace($id) -or [string]::IsNullOrWhiteSpace($cwd) -or [string]::IsNullOrWhiteSpace($exe)) {
-            Write-Host "ERROR: .agentic/checks.tsv line $lineNum has empty check ID, working directory, or executable."
+            Write-Log "ERROR: .agentic/checks.tsv line $lineNum has empty check ID, working directory, or executable."
             exit 1
         }
         if ($seenIds.ContainsKey($id)) {
-            Write-Host "ERROR: .agentic/checks.tsv line $lineNum has duplicate check ID '$id'."
+            Write-Log "ERROR: .agentic/checks.tsv line $lineNum has duplicate check ID '$id'."
             exit 1
         }
         $seenIds[$id] = $true
@@ -512,7 +608,7 @@ function Test-ChecksTsvValidation {
             $resolvedRoot = Resolve-PhysicalPath $rootPath
         }
         catch {
-            Write-Host "ERROR: .agentic/checks.tsv line $lineNum working directory '$cwd' cannot be resolved ($($_.Exception.Message))."
+            Write-Log "ERROR: .agentic/checks.tsv line $lineNum working directory '$cwd' cannot be resolved ($($_.Exception.Message))."
             exit 1
         }
         # Confinement requires an exact match or root followed by the directory
@@ -526,7 +622,7 @@ function Test-ChecksTsvValidation {
             $resolvedCwd.Equals($resolvedRootTrimmed, $script:VerifierPathComparison) -or
             $resolvedCwd.StartsWith($rootPrefix, $script:VerifierPathComparison)
         if (-not $insideRoot) {
-            Write-Host "ERROR: .agentic/checks.tsv line $lineNum working directory '$cwd' escapes project root."
+            Write-Log "ERROR: .agentic/checks.tsv line $lineNum working directory '$cwd' escapes project root."
             exit 1
         }
     }
@@ -545,16 +641,16 @@ if ($EmitChecks) {
 
 if ($ValidateChecks) {
     if (-not (Test-Path -LiteralPath $ValidateChecks)) {
-        Write-Host "ERROR: file '$ValidateChecks' does not exist."
+        Write-Log "ERROR: file '$ValidateChecks' does not exist."
         exit 1
     }
     Test-ChecksTsvValidation -FilePath $ValidateChecks
-    Write-Host "Checks file '$ValidateChecks' is valid."
+    Write-Log "Checks file '$ValidateChecks' is valid."
     exit 0
 }
 
 if ($ExplainDetection) {
-    Write-Host "=== Project Detection Explanation ==="
+    Write-Log "=== Project Detection Explanation ==="
     $null = Get-DetectedChecks
     exit 0
 }
@@ -562,14 +658,14 @@ if ($ExplainDetection) {
 if ($DetectChecks) {
     $genFile = ".agentic/checks.generated.tsv"
     if (-not (Assert-VerifierDestination $genFile)) {
-        Write-Host "ERROR: refusing to write '$genFile': destination is not safely inside the project root."
+        Write-Log "ERROR: refusing to write '$genFile': destination is not safely inside the project root."
         exit 1
     }
     $null = New-Item -ItemType Directory -Path ".agentic" -Force
     $checks = @(Get-DetectedChecks)
     if ($checks.Count -eq 0) {
         Remove-Item -LiteralPath $genFile -Force -ErrorAction SilentlyContinue
-        Write-Host "No stack detected. Removed stale candidate '$genFile'."
+        Write-Log "No stack detected. Removed stale candidate '$genFile'."
         exit 0
     }
     # The scratch file is created next to the candidate (same filesystem), so
@@ -587,10 +683,10 @@ if ($DetectChecks) {
     try {
         Test-ChecksTsvValidation -FilePath $tmp
         Move-Item -LiteralPath $tmp -Destination $genFile -Force
-        Write-Host "Candidate contract written to $genFile"
+        Write-Log "Candidate contract written to $genFile"
     }
     catch {
-        Write-Host "ERROR: Generated checks failed validation: $_"
+        Write-Log "ERROR: Generated checks failed validation: $_"
         Remove-Item -LiteralPath $tmp -ErrorAction SilentlyContinue
         exit 1
     }
@@ -599,7 +695,7 @@ if ($DetectChecks) {
 
 if ($checksDefined) {
     Test-ChecksTsvValidation -FilePath $checksPath
-    Write-Host "Using project checks: $checksPath"
+    Write-Log "Using project checks: $checksPath"
     $script:Detected = $true
     Get-Content -LiteralPath $checksPath | ForEach-Object {
         if ($_ -match '^\s*(#|$)') { return }
@@ -608,9 +704,9 @@ if ($checksDefined) {
 }
 else {
     if (Test-Path -LiteralPath $checksPath) {
-        Write-Host "Note: $checksPath defines no checks; falling back to auto-detection."
+        Write-Log "Note: $checksPath defines no checks; falling back to auto-detection."
     }
-    Write-Host "Auto-detecting project stack (no checks.tsv)..."
+    Write-Log "Auto-detecting project stack (no checks.tsv)..."
     $detectedChecks = @(Get-DetectedChecks)
     if ($detectedChecks.Count -gt 0) {
         $tmp = [System.IO.Path]::GetTempFileName()
@@ -619,7 +715,7 @@ else {
             Test-ChecksTsvValidation -FilePath $tmp
         }
         catch {
-            Write-Host "ERROR: Auto-detected checks failed validation: $_"
+            Write-Log "ERROR: Auto-detected checks failed validation: $_"
             Remove-Item -LiteralPath $tmp -ErrorAction SilentlyContinue
             exit 1
         }
@@ -629,25 +725,30 @@ else {
     }
 }
 
-Write-Host ""
+Write-Log ""
 # Priority: a real failure beats a blocked check; a blocked required check
 # beats "PASS" because not every required check ran, so "all passed" cannot
 # be claimed.
 if ($script:Failed) {
-    Write-Host "VERIFICATION FAILED: $($script:Ran) check(s) ran, at least one required check failed."
+    Write-Log "VERIFICATION FAILED: $($script:Ran) check(s) ran, at least one required check failed."
+    if ($Format -eq 'Json') { Output-VerificationJson "FAIL" 1 }
     exit 1
 }
 if ($script:Blocked) {
-    Write-Host "VERIFICATION BLOCKED: $($script:Ran) check(s) ran; required tooling was unavailable."
+    Write-Log "VERIFICATION BLOCKED: $($script:Ran) check(s) ran; required tooling was unavailable."
+    if ($Format -eq 'Json') { Output-VerificationJson "BLOCKED" 2 }
     exit 2
 }
 if ($script:RanRequired) {
-    Write-Host "VERIFICATION PASSED: $($script:Ran) check(s) ran."
+    Write-Log "VERIFICATION PASSED: $($script:Ran) check(s) ran."
+    if ($Format -eq 'Json') { Output-VerificationJson "PASS" 0 }
     exit 0
 }
 if ($script:Detected) {
-    Write-Host "VERIFICATION BLOCKED: $($script:Ran) check(s) ran; required tooling was unavailable."
+    Write-Log "VERIFICATION BLOCKED: $($script:Ran) check(s) ran; required tooling was unavailable."
+    if ($Format -eq 'Json') { Output-VerificationJson "BLOCKED" 2 }
     exit 2
 }
-Write-Host "VERIFICATION UNSUPPORTED: no supported project or check configuration found."
+Write-Log "VERIFICATION UNSUPPORTED: no supported project or check configuration found."
+if ($Format -eq 'Json') { Output-VerificationJson "UNSUPPORTED" 3 }
 exit 3

@@ -33,6 +33,154 @@
 
 set -uo pipefail
 
+FORMAT="text"
+EVENTS_FILE=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --format)
+            FORMAT="$2"
+            shift 2
+            ;;
+        --format=*)
+            FORMAT="${1#*=}"
+            shift
+            ;;
+        --events)
+            EVENTS_FILE="$2"
+            shift 2
+            ;;
+        --events=*)
+            EVENTS_FILE="${1#*=}"
+            shift
+            ;;
+        --emit-checks)
+            emit_checks
+            ;;
+        --explain-detection)
+            explain_detection
+            ;;
+        --detect-checks)
+            detect_checks_file
+            ;;
+        --validate-checks)
+            validate_checks_arg "${2:-}"
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+if [ -n "$EVENTS_FILE" ]; then
+    if ! safe_detect_destination "$EVENTS_FILE"; then
+        echo "ERROR: refusing to write events to '$EVENTS_FILE': destination is not safely inside the project root." >&2
+        exit 1
+    fi
+    mkdir -p "$(dirname "$EVENTS_FILE")"
+    printf '{"event":"verification_started"}\n' > "$EVENTS_FILE"
+fi
+
+RESULTS_TMP="$(mktemp)"
+cleanup_verify() {
+    rm -f "$RESULTS_TMP" 2>/dev/null || true
+}
+trap cleanup_verify EXIT
+
+log() {
+    if [ "$FORMAT" = "json" ]; then
+        printf '%s\n' "$*" >&2
+    else
+        printf '%s\n' "$*"
+    fi
+}
+
+output_json() {
+    local res_str="$1" exit_code="$2"
+    local source_type="checks_tsv"
+    if ! checks_defined; then
+        source_type="auto_detected"
+    fi
+    python3 -c '
+import json, sys
+
+source = sys.argv[1]
+res_str = sys.argv[2]
+exit_code = int(sys.argv[3])
+results_file = sys.argv[4]
+
+checks = []
+passed = 0
+failed = 0
+blocked = 0
+optional_skipped = 0
+checks_run = 0
+required_run = 0
+checks_defined = 0
+
+try:
+    with open(results_file, "r") as f:
+        for line in f:
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) >= 7:
+                req, cid, cwd, status, ec, dur, rcode = parts[:7]
+                checks_defined += 1
+                ec_val = int(ec) if ec != "null" else None
+                dur_val = int(dur)
+                rc_val = rcode if rcode != "null" else None
+                if status == "PASS":
+                    passed += 1
+                    checks_run += 1
+                    if req == "required": required_run += 1
+                elif status == "FAIL":
+                    failed += 1
+                    checks_run += 1
+                    if req == "required": required_run += 1
+                elif status == "BLOCKED":
+                    blocked += 1
+                elif status == "SKIPPED_OPTIONAL":
+                    optional_skipped += 1
+                
+                checks.append({
+                    "id": cid,
+                    "requirement": req,
+                    "status": status,
+                    "working_directory": cwd,
+                    "exit_code": ec_val,
+                    "duration_ms": dur_val,
+                    "reason_code": rc_val
+                })
+except Exception:
+    pass
+
+summary = {
+    "checks_defined": checks_defined if checks_defined > 0 else len(checks),
+    "checks_run": checks_run,
+    "required_run": required_run,
+    "passed": passed,
+    "failed": failed,
+    "blocked": blocked,
+    "optional_skipped": optional_skipped
+}
+
+doc = {
+    "schema_version": 1,
+    "protocol_version": "1.4.0",
+    "kind": "verification_result",
+    "result": res_str,
+    "exit_code": exit_code,
+    "source": source,
+    "summary": summary,
+    "checks": checks
+}
+
+print(json.dumps(doc))
+' "$source_type" "$res_str" "$exit_code" "$RESULTS_TMP"
+
+    if [ -n "$EVENTS_FILE" ]; then
+        printf '{"event":"verification_completed","result":"%s","exit_code":%s}\n' "$res_str" "$exit_code" >> "$EVENTS_FILE"
+    fi
+}
+
 FAILED=0
 RAN=0
 RAN_REQUIRED=0
@@ -48,16 +196,19 @@ run_check() {
     shift 4
     local -a args=("$@")
 
-    echo ""
+    log ""
     # `:-` guards the display-only expansion because bash 3.2 (macOS) treats
     # expanding an empty array under `set -u` as an unbound variable.
-    echo "==> [$id] $exe ${args[*]:-}"
+    log "==> [$id] $exe ${args[*]:-}"
 
     if [ ! -d "$cwd" ]; then
         if [ "$requirement" = "required" ]; then
             BLOCKED=1
         fi
-        echo "  BLOCKED: working directory '$cwd' does not exist"
+        log "  BLOCKED: working directory '$cwd' does not exist"
+        local status="SKIPPED_OPTIONAL"
+        [ "$requirement" = "required" ] && status="BLOCKED"
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$requirement" "$id" "$cwd" "$status" "null" "0" "WORKING_DIR_MISSING" >> "$RESULTS_TMP"
         return
     fi
 
@@ -65,19 +216,25 @@ run_check() {
         if [ ! -x "$cwd/$exe" ]; then
             if [ "$requirement" = "required" ]; then
                 BLOCKED=1
-                echo "  BLOCKED: executable '$exe' was not found"
+                log "  BLOCKED: executable '$exe' was not found"
             else
-                echo "  skip (optional): executable '$exe' was not found"
+                log "  skip (optional): executable '$exe' was not found"
             fi
+            local status="SKIPPED_OPTIONAL"
+            [ "$requirement" = "required" ] && status="BLOCKED"
+            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$requirement" "$id" "$cwd" "$status" "null" "0" "EXECUTABLE_MISSING" >> "$RESULTS_TMP"
             return
         fi
     elif ! command -v "$exe" >/dev/null 2>&1; then
         if [ "$requirement" = "required" ]; then
             BLOCKED=1
-            echo "  BLOCKED: executable '$exe' was not found"
+            log "  BLOCKED: executable '$exe' was not found"
         else
-            echo "  skip (optional): executable '$exe' was not found"
+            log "  skip (optional): executable '$exe' was not found"
         fi
+        local status="SKIPPED_OPTIONAL"
+        [ "$requirement" = "required" ] && status="BLOCKED"
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$requirement" "$id" "$cwd" "$status" "null" "0" "EXECUTABLE_MISSING" >> "$RESULTS_TMP"
         return
     fi
 
@@ -86,20 +243,54 @@ run_check() {
         RAN_REQUIRED=1
     fi
 
+    if [ -n "$EVENTS_FILE" ]; then
+        printf '{"event":"check_started","check_id":"%s"}\n' "$id" >> "$EVENTS_FILE"
+    fi
+
+    local start_ms
+    start_ms="$(python3 -c 'import time; print(int(time.time()*1000))' 2>/dev/null || python -c 'import time; print(int(time.time()*1000))' 2>/dev/null || echo 0)"
+
     # bash 3.2 (macOS) treats expanding an empty array under `set -u` as an
     # unbound variable, so branch on whether the check takes arguments.
     local check_ok=0
-    if [ "${#args[@]}" -gt 0 ]; then
-        (cd "$cwd" && "$exe" "${args[@]}") && check_ok=1
+    if [ "$FORMAT" = "json" ]; then
+        if [ "${#args[@]}" -gt 0 ]; then
+            (cd "$cwd" && "$exe" "${args[@]}") >&2 && check_ok=1
+        else
+            (cd "$cwd" && "$exe") >&2 && check_ok=1
+        fi
     else
-        (cd "$cwd" && "$exe") && check_ok=1
+        if [ "${#args[@]}" -gt 0 ]; then
+            (cd "$cwd" && "$exe" "${args[@]}") && check_ok=1
+        else
+            (cd "$cwd" && "$exe") && check_ok=1
+        fi
     fi
+    local code=$?
+    # if command succeeded via &&, code is 0; if failed, code is nonzero
+    if [ "$check_ok" -eq 1 ]; then
+        code=0
+    else
+        [ "$code" -eq 0 ] && code=1
+    fi
+
+    local end_ms
+    end_ms="$(python3 -c 'import time; print(int(time.time()*1000))' 2>/dev/null || python -c 'import time; print(int(time.time()*1000))' 2>/dev/null || echo 0)"
+    local duration_ms=$(( end_ms - start_ms ))
+    [ "$duration_ms" -ge 0 ] || duration_ms=0
+
+    local status="PASS"
     if [ "$check_ok" -eq 0 ]; then
+        status="FAIL"
         if [ "$requirement" = "required" ]; then
             FAILED=1
         else
-            echo "  WARNING: optional check '$id' failed"
+            log "  WARNING: optional check '$id' failed"
         fi
+    fi
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$requirement" "$id" "$cwd" "$status" "$code" "$duration_ms" "null" >> "$RESULTS_TMP"
+    if [ -n "$EVENTS_FILE" ]; then
+        printf '{"event":"check_completed","check_id":"%s","status":"%s","exit_code":%s,"duration_ms":%s}\n' "$id" "$status" "${code:-null}" "$duration_ms" >> "$EVENTS_FILE"
     fi
 }
 
@@ -597,25 +788,30 @@ else
     fi
 fi
 
-echo ""
+log ""
 # Priority: a real failure beats a blocked check; a blocked required check
 # beats "PASS" because not every required check ran, so "all passed" cannot
 # be claimed.
 if [ "$FAILED" -ne 0 ]; then
-    echo "VERIFICATION FAILED: $RAN check(s) ran, at least one required check failed."
+    log "VERIFICATION FAILED: $RAN check(s) ran, at least one required check failed."
+    if [ "$FORMAT" = "json" ]; then output_json "FAIL" 1; fi
     exit 1
 fi
 if [ "$BLOCKED" -ne 0 ]; then
-    echo "VERIFICATION BLOCKED: $RAN check(s) ran; required tooling was unavailable."
+    log "VERIFICATION BLOCKED: $RAN check(s) ran; required tooling was unavailable."
+    if [ "$FORMAT" = "json" ]; then output_json "BLOCKED" 2; fi
     exit 2
 fi
 if [ "$RAN_REQUIRED" -ne 0 ]; then
-    echo "VERIFICATION PASSED: $RAN check(s) ran."
+    log "VERIFICATION PASSED: $RAN check(s) ran."
+    if [ "$FORMAT" = "json" ]; then output_json "PASS" 0; fi
     exit 0
 fi
 if [ "$DETECTED" -ne 0 ]; then
-    echo "VERIFICATION BLOCKED: $RAN check(s) ran; required tooling was unavailable."
+    log "VERIFICATION BLOCKED: $RAN check(s) ran; required tooling was unavailable."
+    if [ "$FORMAT" = "json" ]; then output_json "BLOCKED" 2; fi
     exit 2
 fi
-echo "VERIFICATION UNSUPPORTED: no supported project or check configuration found."
+log "VERIFICATION UNSUPPORTED: no supported project or check configuration found."
+if [ "$FORMAT" = "json" ]; then output_json "UNSUPPORTED" 3; fi
 exit 3

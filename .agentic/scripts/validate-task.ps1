@@ -50,25 +50,83 @@
 param(
     [switch]$Handoff,
     [Parameter(Mandatory = $true, Position = 0)]
-    [string]$TaskFile
+    [string]$TaskFile,
+    [ValidateSet('Text', 'Json')]
+    [string] $Format = 'Text'
 )
 
 $ErrorActionPreference = 'Stop'
 
+function Output-TaskJson {
+    param([string]$Result, [int]$ExitCode, [string]$Message, [string]$Code = 'CRITERION_INVALID', [string]$Section = $null, [string]$Identifier = $null)
+    $diagList = @()
+    if ($Result -ne 'VALID') {
+        $diagList += [ordered]@{
+            code       = $Code
+            section    = $Section
+            identifier = $Identifier
+            message    = $Message
+        }
+    }
+    $resultObject = [ordered]@{
+        schema_version   = 1
+        protocol_version = "1.4.0"
+        kind             = "task_validation_result"
+        mode             = if ($Handoff) { "handoff" } else { "standard" }
+        result           = $Result
+        exit_code        = $ExitCode
+        task_file        = $TaskFile
+        profile          = if ($script:ProfileName) { $script:ProfileName } else { "standard" }
+        task_status      = if ($script:StatusName) { $script:StatusName } else { "planned" }
+        diagnostics      = $diagList
+    }
+    [Console]::Out.WriteLine(($resultObject | ConvertTo-Json -Depth 10 -Compress))
+}
+
 function Write-Invalid {
     param([string]$Message)
-    [Console]::Error.WriteLine("INVALID: $Message")
-    exit 1
+    $code = 'CRITERION_INVALID'
+    if ($Message -like '*task file not found*') { $code = 'TASK_FILE_NOT_FOUND' }
+    elseif ($Message -like '*Profile:*' -or $Message -like '*risk profile*') { $code = 'PROFILE_UNKNOWN' }
+    elseif ($Message -like '*Status:*' -or $Message -like '*status*') { $code = 'STATUS_INVALID' }
+    elseif ($Message -like '*section*' -or $Message -like '*heading*') { $code = 'SECTION_MISSING' }
+    elseif ($Message -like '*required evidence*' -or $Message -like '*matrix*' -or $Message -like '*table*') { $code = 'EVIDENCE_MAPPING_INVALID' }
+    elseif ($Message -like '*approval*' -or $Message -like '*gate*') { $code = 'APPROVAL_INVALID' }
+    elseif ($Message -like '*prototype*' -or $Message -like '*production readiness*') { $code = 'PROTOTYPE_DECLARATION_INVALID' }
+
+    if ($Format -eq 'Json') {
+        Output-TaskJson 'INVALID' 1 $Message $code
+        exit 1
+    }
+    else {
+        [Console]::Error.WriteLine("INVALID: $Message")
+        exit 1
+    }
 }
 
 function Write-Blocked {
     param([string]$Message)
-    [Console]::Error.WriteLine("BLOCKED: $Message")
-    exit 2
+    $code = 'EVIDENCE_UNRESOLVED'
+    if ($Message -like '*approval gate*' -or $Message -like '*approval*') { $code = 'APPROVAL_UNRESOLVED' }
+    elseif ($Message -like '*handoff requires*' -or $Message -like '*Status: done*') { $code = 'STATUS_NOT_DONE' }
+
+    if ($Format -eq 'Json') {
+        Output-TaskJson 'BLOCKED' 2 $Message $code
+        exit 2
+    }
+    else {
+        [Console]::Error.WriteLine("BLOCKED: $Message")
+        exit 2
+    }
 }
 
 if (-not (Test-Path -LiteralPath $TaskFile -PathType Leaf)) {
-    [Console]::Error.WriteLine("Error: task file not found: $TaskFile")
+    if ($Format -eq 'Json') {
+        Output-TaskJson 'INVALID' 1 "Error: task file not found: $TaskFile" 'TASK_FILE_NOT_FOUND'
+    }
+    else {
+        [Console]::Error.WriteLine("Error: task file not found: $TaskFile")
+    }
     exit 1
 }
 
@@ -826,5 +884,10 @@ if ($SECTIONS -contains 'approval gates') {
     }
 }
 
-Write-Host "VALID: profile=$ProfileName"
+if ($Format -eq 'Json') {
+    Output-TaskJson 'VALID' 0 'Task is valid.' 'VALID'
+}
+else {
+    Write-Host "VALID: profile=$ProfileName"
+}
 exit 0

@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TaskValidationResult",
+  "type": "object",
+  "required": ["schema_version", "protocol_version", "kind", "mode", "result", "exit_code", "task_file", "profile", "task_status", "diagnostics"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "protocol_version": { "type": "string" },
+    "kind": { "type": "string", "const": "task_validation_result" },
+    "mode": { "type": "string", "enum": ["standard", "handoff"] },
+    "result": { "type": "string", "enum": ["VALID", "INVALID", "BLOCKED"] },
+    "exit_code": { "type": "integer", "enum": [0, 1, 2] },
+    "task_file": { "type": "string" },
+    "profile": { "type": "string", "enum": ["prototype", "standard", "high-assurance"] },
+    "task_status": { "type": "string", "enum": ["planned", "in-progress", "blocked", "done"] },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "section", "identifier", "message"],
+        "properties": {
+          "code": { "type": "string" },
+          "section": { "type": ["string", "null"] },
+          "identifier": { "type": ["string", "null"] },
+          "message": { "type": "string" }
+        }
+      }
+    }
+  }
+}

@@ -42,16 +42,18 @@
 
 set -uo pipefail
 
+FORMAT="text"
 HANDOFF=0
 TASK_FILE=""
 
 usage() {
     cat <<'EOF'
-Usage: validate-task.sh [--handoff] <task-file>
+Usage: validate-task.sh [--format text|json] [--handoff] <task-file>
 
 Validates the structural evidence contract of an agentic task file.
 
 Options:
+  --format    Output format: text (default) or json.
   --handoff   Require Status: done and enforce the completion gate.
   -h, --help  Show this help.
 
@@ -64,7 +66,9 @@ EOF
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --handoff) HANDOFF=1 ;;
+        --format) FORMAT="$2"; shift 2 ;;
+        --format=*) FORMAT="${1#*=}"; shift ;;
+        --handoff) HANDOFF=1; shift ;;
         -h|--help) usage; exit 0 ;;
         -*) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
         *)
@@ -73,22 +77,104 @@ while [ $# -gt 0 ]; do
                 exit 1
             fi
             TASK_FILE="$1"
+            shift
             ;;
     esac
-    shift
 done
 
 if [ -z "$TASK_FILE" ]; then
     usage >&2
     exit 1
 fi
+
+output_task_json() {
+    local res_str="$1" exit_code="$2" msg="$3" code="${4:-CRITERION_INVALID}" section="${5:-null}" ident="${6:-null}"
+    python3 -c '
+import json, sys
+
+res_str = sys.argv[1]
+exit_code = int(sys.argv[2])
+task_file = sys.argv[3]
+profile = sys.argv[4]
+task_status = sys.argv[5]
+diag_code = sys.argv[6]
+diag_section = sys.argv[7]
+diag_ident = sys.argv[8]
+diag_msg = sys.argv[9]
+mode = sys.argv[10]
+
+diagnostics = []
+if res_str != "VALID":
+    diagnostics.append({
+        "code": diag_code,
+        "section": diag_section if diag_section != "null" else None,
+        "identifier": diag_ident if diag_ident != "null" else None,
+        "message": diag_msg
+    })
+
+doc = {
+    "schema_version": 1,
+    "protocol_version": "1.4.0",
+    "kind": "task_validation_result",
+    "mode": mode,
+    "result": res_str,
+    "exit_code": exit_code,
+    "task_file": task_file,
+    "profile": profile if profile else "standard",
+    "task_status": task_status if task_status else "planned",
+    "diagnostics": diagnostics
+}
+print(json.dumps(doc))
+' "$res_str" "$exit_code" "$TASK_FILE" "${PROFILE:-}" "${STATUS:-}" "$code" "$section" "$ident" "$msg" "$( [ "$HANDOFF" -eq 1 ] && echo handoff || echo standard )"
+}
+
 if [ ! -f "$TASK_FILE" ]; then
-    echo "Error: task file not found: $TASK_FILE" >&2
+    if [ "$FORMAT" = "json" ]; then
+        output_task_json "INVALID" 1 "Error: task file not found: $TASK_FILE" "TASK_FILE_NOT_FOUND"
+    else
+        echo "Error: task file not found: $TASK_FILE" >&2
+    fi
     exit 1
 fi
 
-fail_invalid() { echo "INVALID: $*" >&2; exit 1; }
-fail_blocked() { echo "BLOCKED: $*" >&2; exit 2; }
+fail_invalid() {
+    local msg="$*"
+    local code="CRITERION_INVALID"
+    case "$msg" in
+        *"task file not found"*) code="TASK_FILE_NOT_FOUND" ;;
+        *"Profile:"*|*"risk profile"*) code="PROFILE_UNKNOWN" ;;
+        *"Status:"*|*"status"*) code="STATUS_INVALID" ;;
+        *"section"*|*"heading"*) code="SECTION_MISSING" ;;
+        *"acceptance criteria"*|*"requirement"*|*"criteria"*) code="CRITERION_INVALID" ;;
+        *"required evidence"*|*"matrix"*|*"table"*) code="EVIDENCE_MAPPING_INVALID" ;;
+        *"approval"*|*"gate"*) code="APPROVAL_INVALID" ;;
+        *"prototype"*|*"production readiness"*|*"irreversible"*) code="PROTOTYPE_DECLARATION_INVALID" ;;
+    esac
+    if [ "$FORMAT" = "json" ]; then
+        output_task_json "INVALID" 1 "$msg" "$code"
+        exit 1
+    else
+        echo "INVALID: $msg" >&2
+        exit 1
+    fi
+}
+
+fail_blocked() {
+    local msg="$*"
+    local code="EVIDENCE_UNRESOLVED"
+    case "$msg" in
+        *"approval gate"*|*"approval"*) code="APPROVAL_UNRESOLVED" ;;
+        *"handoff requires"*|*"Status: done"*) code="STATUS_NOT_DONE" ;;
+        *) code="EVIDENCE_UNRESOLVED" ;;
+    esac
+    if [ "$FORMAT" = "json" ]; then
+        output_task_json "BLOCKED" 2 "$msg" "$code"
+        exit 2
+    else
+        echo "BLOCKED: $msg" >&2
+        exit 2
+    fi
+}
 
 lower() { tr '[:upper:]' '[:lower:]'; }
 
@@ -972,5 +1058,9 @@ if has_section "approval gates"; then
     fi
 fi
 
-echo "VALID: profile=$PROFILE"
+if [ "$FORMAT" = "json" ]; then
+    output_task_json "VALID" 0 "Task is valid." "VALID"
+else
+    echo "VALID: profile=$PROFILE"
+fi
 exit 0
