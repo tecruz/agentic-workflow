@@ -1126,24 +1126,24 @@ SHIM
 # project state, then upgrade using the current bundle.
 # ---------------------------------------------------------------------------
 
-@test "upgrade from v1.2.1 bundle to the current bundle preserves project state" {
-    # Verify the v1.2.1 tag exists and has the expected VERSION
+@test "upgrade from v1.2.2 bundle to the current bundle preserves project state and adds v1.3.0 profiles and validators" {
+    # Verify the v1.2.2 tag exists and has the expected VERSION
     if [ "${CI:-}" = "true" ]; then
-        git -C "$REPO_ROOT" rev-parse v1.2.1 >/dev/null 2>&1 ||
-            fail "required migration tag v1.2.1 is unavailable in CI"
+        git -C "$REPO_ROOT" rev-parse v1.2.2 >/dev/null 2>&1 ||
+            fail "required migration tag v1.2.2 is unavailable in CI"
     else
-        git -C "$REPO_ROOT" rev-parse v1.2.1 >/dev/null 2>&1 ||
-            skip "v1.2.1 tag not found"
+        git -C "$REPO_ROOT" rev-parse v1.2.2 >/dev/null 2>&1 ||
+            skip "v1.2.2 tag not found"
     fi
-    V121_VERSION="$(git -C "$REPO_ROOT" show v1.2.1:.agentic/VERSION 2>/dev/null)"
-    [ "$V121_VERSION" = "1.2.1" ]
+    V122_VERSION="$(git -C "$REPO_ROOT" show v1.2.2:.agentic/VERSION 2>/dev/null)"
+    [ "$V122_VERSION" = "1.2.2" ]
 
-    # Extract the actual v1.2.1 source tree and build its bundle
-    V121_SRC="$TMP/v121-src"
-    mkdir -p "$V121_SRC"
-    git -C "$REPO_ROOT" archive v1.2.1 | tar -x -C "$V121_SRC"
-    bash "$V121_SRC/scripts/build-bundle.sh" --no-archives
-    V121_DIR="$V121_SRC/dist/agentic-workflow-1.2.1"
+    # Extract the actual v1.2.2 source tree and build its bundle
+    V122_SRC="$TMP/v122-src"
+    mkdir -p "$V122_SRC"
+    git -C "$REPO_ROOT" archive v1.2.2 | tar -x -C "$V122_SRC"
+    bash "$V122_SRC/scripts/build-bundle.sh" --no-archives
+    V122_DIR="$V122_SRC/dist/agentic-workflow-1.2.2"
 
     # Build the current bundle
     bash "$REPO_ROOT/scripts/build-bundle.sh" --no-archives
@@ -1153,50 +1153,55 @@ SHIM
     mkdir -p "$PROJECT"
     cd "$PROJECT"
 
-    # Step 1: Install from the real v1.2.1 bundle
-    run bash "$V121_DIR/install.sh" . --tools all
+    # Step 1: Install from the real v1.2.2 bundle
+    run bash "$V122_DIR/install.sh" . --tools all
     [ "$status" -eq 0 ]
     [ -f AGENTS.md ]
     [ -f CLAUDE.md ]
     [ -f GEMINI.md ]
     [ -f .aider.conf.yml ]
     [ -f .agentic/VERSION ]
-    [ "$(cat .agentic/VERSION)" = "1.2.1" ]
+    [ "$(cat .agentic/VERSION)" = "1.2.2" ]
 
-    # Step 2: Add custom content outside merge blocks
+    # Step 2: Add custom content outside merge blocks and adopter task file
     printf '\n## Team notes\nkeep this content\n' >> AGENTS.md
     printf '\n# custom aider config\n' >> .aider.conf.yml
+    mkdir -p .agentic/tasks
+    printf '# TASK-900: adopter task evidence' > .agentic/tasks/TASK-900-adopter.md
 
     # Step 3: Modify a managed file
     printf '\n# adopter workflow override\n' >> .agentic/WORKFLOW.md
 
-    # Step 4: Add a reviewed candidate (correct field order: requirement, check-id, dir, shell, command)
+    # Step 4: Add a reviewed candidate
     printf 'required\tcustom-check\t.\tnpm\ttest\n' > .agentic/checks.generated.tsv
-
-    # Record state before upgrade
-    AGENTS_BEFORE="$(cat AGENTS.md)"
-    WORKFLOW_BEFORE="$(cat .agentic/WORKFLOW.md)"
 
     # Step 5: Upgrade using current bundle
     run bash "$CURRENT_BUNDLE/install.sh" . --tools all
     [ "$status" -eq 0 ]
 
-    # Step 6: Verify preservation
+    # Step 6: Verify v1.3.0 additions and preservation
+    [ -f .agentic/profiles/README.md ]
+    [ -f .agentic/profiles/prototype.md ]
+    [ -f .agentic/profiles/standard.md ]
+    [ -f .agentic/profiles/high-assurance.md ]
+    [ -f .agentic/scripts/validate-task.sh ]
+    [ -x .agentic/scripts/validate-task.sh ]
+    [ -f .agentic/scripts/validate-task.ps1 ]
+    [ -f .agentic/templates/task.md ]
+    [ -f .agentic/tasks/TASK-900-adopter.md ]
+    grep -q "adopter task evidence" .agentic/tasks/TASK-900-adopter.md
+
     grep -q "keep this content" AGENTS.md
     grep -q "AGENTIC-PROTOCOL-START" AGENTS.md
     grep -q "# adopter workflow override" .agentic/WORKFLOW.md
     [ -f .agentic/checks.generated.tsv ]
     grep -q "custom-check" .agentic/checks.generated.tsv
-    # Verify the reviewed candidate is preserved exactly (byte-for-byte)
     [ "$(cat .agentic/checks.generated.tsv)" = "required"$'\t'"custom-check"$'\t'"."$'\t'"npm"$'\t'"test" ]
-
-    # Verify .aider.conf.yml custom content is preserved
     grep -q "# custom aider config" .aider.conf.yml
 
     # Step 7: Exercise plan, prune, uninstall
     run bash "$CURRENT_BUNDLE/install.sh" . --prune --plan --tools claude
     [ "$status" -eq 0 ]
-    # GEMINI.md and .aider.conf.yml should still exist in plan mode
     [ -f GEMINI.md ]
     [ -f .aider.conf.yml ]
 
@@ -1218,6 +1223,8 @@ SHIM
     [ -f .agentic/ARCHITECTURE.md ]
     [ -f .agentic/STATUS.md ]
     [ -f .agentic/checks.tsv ]
+    [ -f .agentic/tasks/TASK-900-adopter.md ]
+    grep -q "adopter task evidence" .agentic/tasks/TASK-900-adopter.md
 }
 
 # ---------------------------------------------------------------------------

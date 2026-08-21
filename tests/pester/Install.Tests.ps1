@@ -1417,27 +1417,27 @@ Describe 'install.ps1' {
     # modify project state, then upgrade using the current bundle.
     # -----------------------------------------------------------------------
 
-    It 'upgrade from v1.2.1 bundle to the current bundle preserves project state' {
+    It 'upgrade from v1.2.2 bundle to the current bundle preserves project state and adds v1.3.0 profiles and validators' {
         $bash = Get-Command bash -ErrorAction SilentlyContinue
         if (-not $bash) { Set-ItResult -Skipped -Because 'bash (git-bash/WSL) is required to build the bundle' }
 
-        # Verify the v1.2.1 tag exists and has the expected VERSION
-        $v121Version = & git -C $repoRoot show 'v1.2.1:.agentic/VERSION' 2>$null
-        if ($LASTEXITCODE -ne 0 -or $v121Version.Trim() -ne '1.2.1') {
+        # Verify the v1.2.2 tag exists and has the expected VERSION
+        $v122Version = & git -C $repoRoot show 'v1.2.2:.agentic/VERSION' 2>$null
+        if ($LASTEXITCODE -ne 0 -or $v122Version.Trim() -ne '1.2.2') {
             if ($env:CI -eq 'true') {
-                throw 'required migration tag v1.2.1 is unavailable in CI'
+                throw 'required migration tag v1.2.2 is unavailable in CI'
             }
-            Set-ItResult -Skipped -Because 'v1.2.1 tag not found or VERSION mismatch'
+            Set-ItResult -Skipped -Because 'v1.2.2 tag not found or VERSION mismatch'
         }
 
-        # Extract the actual v1.2.1 source tree and build its bundle
-        $v121Src = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-v121-src-' + [guid]::NewGuid().ToString('N'))
-        New-Item -ItemType Directory -Path $v121Src -Force | Out-Null
-        & git -C $repoRoot archive v1.2.1 | tar -x -C $v121Src
-        if ($LASTEXITCODE -ne 0) { throw 'git archive v1.2.1 failed' }
-        & $bash.Source (Join-Path $v121Src 'scripts/build-bundle.sh') --no-archives *> $null
-        if ($LASTEXITCODE -ne 0) { throw 'v1.2.1 build-bundle.sh failed' }
-        $v121Dir = Join-Path $v121Src 'dist' 'agentic-workflow-1.2.1'
+        # Extract the actual v1.2.2 source tree and build its bundle
+        $v122Src = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-v122-src-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $v122Src -Force | Out-Null
+        & git -C $repoRoot archive v1.2.2 | tar -x -C $v122Src
+        if ($LASTEXITCODE -ne 0) { throw 'git archive v1.2.2 failed' }
+        & $bash.Source (Join-Path $v122Src 'scripts/build-bundle.sh') --no-archives *> $null
+        if ($LASTEXITCODE -ne 0) { throw 'v1.2.2 build-bundle.sh failed' }
+        $v122Dir = Join-Path $v122Src 'dist' 'agentic-workflow-1.2.2'
 
         # Build the current bundle
         $version = (Get-Content -Raw (Join-Path $repoRoot '.agentic\VERSION')).Trim()
@@ -1447,39 +1447,49 @@ Describe 'install.ps1' {
 
         $tmp = New-TestDir
         try {
-            # Step 1: Install from the real v1.2.1 bundle
-            & (Join-Path $v121Dir 'install.ps1') -Target $tmp -Tools all *> $null
+            # Step 1: Install from the real v1.2.2 bundle
+            & (Join-Path $v122Dir 'install.ps1') -Target $tmp -Tools all *> $null
             $LASTEXITCODE | Should -Be 0
             Test-Path (Join-Path $tmp 'AGENTS.md') | Should -Be $true
             Test-Path (Join-Path $tmp 'CLAUDE.md') | Should -Be $true
             Test-Path (Join-Path $tmp 'GEMINI.md') | Should -Be $true
             Test-Path (Join-Path $tmp '.aider.conf.yml') | Should -Be $true
-            (Get-Content -Raw (Join-Path $tmp '.agentic\VERSION')).Trim() | Should -Be '1.2.1'
+            (Get-Content -Raw (Join-Path $tmp '.agentic\VERSION')).Trim() | Should -Be '1.2.2'
 
-            # Step 2: Add custom content outside merge blocks
+            # Step 2: Add custom content outside merge blocks and adopter task file
             Add-Content -LiteralPath (Join-Path $tmp 'AGENTS.md') -Value "`n## Team notes`nkeep this content"
             Add-Content -LiteralPath (Join-Path $tmp '.aider.conf.yml') -Value '# custom aider config'
+            New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic\tasks') -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\tasks\TASK-900-adopter.md') -Value '# TASK-900: adopter task evidence'
 
             # Step 3: Modify a managed file
             Add-Content -LiteralPath (Join-Path $tmp '.agentic\WORKFLOW.md') -Value '# adopter workflow override'
 
-            # Step 4: Add a reviewed candidate (correct field order: requirement, check-id, dir, shell, command)
+            # Step 4: Add a reviewed candidate
             Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.generated.tsv') -Value "required`tcustom-check`t.`tnpm`ttest"
 
             # Step 5: Upgrade using current bundle
             & (Join-Path $currentBundle 'install.ps1') -Target $tmp -Tools all *> $null
             $LASTEXITCODE | Should -Be 0
 
-            # Step 6: Verify preservation
+            # Step 6: Verify v1.3.0 additions and preservation
+            Test-Path (Join-Path $tmp '.agentic\profiles\README.md') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\profiles\prototype.md') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\profiles\standard.md') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\profiles\high-assurance.md') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\scripts\validate-task.sh') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\scripts\validate-task.ps1') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\templates\task.md') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\tasks\TASK-900-adopter.md') | Should -Be $true
+            (Get-Content -Raw (Join-Path $tmp '.agentic\tasks\TASK-900-adopter.md')) -match 'adopter task evidence' | Should -Be $true
+
             (Get-Content -Raw (Join-Path $tmp 'AGENTS.md')) -match 'keep this content' | Should -Be $true
             (Get-Content -Raw (Join-Path $tmp 'AGENTS.md')) -match 'AGENTIC-PROTOCOL-START' | Should -Be $true
             (Get-Content -Raw (Join-Path $tmp '.agentic\WORKFLOW.md')) -match '# adopter workflow override' | Should -Be $true
             Test-Path (Join-Path $tmp '.agentic\checks.generated.tsv') | Should -Be $true
             (Get-Content -Raw (Join-Path $tmp '.agentic\checks.generated.tsv')) -match 'custom-check' | Should -Be $true
-            # Verify the reviewed candidate is preserved exactly (byte-for-byte)
             (Get-Content -Raw (Join-Path $tmp '.agentic\checks.generated.tsv')).Trim() | Should -Be "required`tcustom-check`t.`tnpm`ttest"
 
-            # Verify .aider.conf.yml custom content is preserved
             (Get-Content -Raw (Join-Path $tmp '.aider.conf.yml')) -match '# custom aider config' | Should -Be $true
 
             # Step 7: Exercise plan, prune, uninstall
@@ -1500,9 +1510,11 @@ Describe 'install.ps1' {
             Test-Path (Join-Path $tmp '.agentic\ARCHITECTURE.md') | Should -Be $true
             Test-Path (Join-Path $tmp '.agentic\STATUS.md') | Should -Be $true
             Test-Path (Join-Path $tmp '.agentic\checks.tsv') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\tasks\TASK-900-adopter.md') | Should -Be $true
+            (Get-Content -Raw (Join-Path $tmp '.agentic\tasks\TASK-900-adopter.md')) -match 'adopter task evidence' | Should -Be $true
         }
         finally {
-            Remove-Item -Recurse -Force $v121Src -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force $v122Src -ErrorAction SilentlyContinue
             Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
         }
     }
