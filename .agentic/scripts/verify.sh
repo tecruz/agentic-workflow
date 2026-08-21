@@ -53,18 +53,6 @@ while [ $# -gt 0 ]; do
             EVENTS_FILE="${1#*=}"
             shift
             ;;
-        --emit-checks)
-            emit_checks
-            ;;
-        --explain-detection)
-            explain_detection
-            ;;
-        --detect-checks)
-            detect_checks_file
-            ;;
-        --validate-checks)
-            validate_checks_arg "${2:-}"
-            ;;
         *)
             break
             ;;
