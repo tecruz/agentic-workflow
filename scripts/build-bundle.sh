@@ -78,6 +78,7 @@ mkdir -p "$BUNDLE/.agentic/rules" \
          "$BUNDLE/.agentic/context/security-review" \
          "$BUNDLE/.agentic/context/dependency-changes" \
          "$BUNDLE/.agentic/context/infrastructure-change" \
+         "$BUNDLE/.agentic/orchestration" \
          "$BUNDLE/evals"
 
 # Root-level protocol entry points and installers.
@@ -104,6 +105,8 @@ cp "$ROOT/.agentic/context/database-migrations/MODULE.md" "$BUNDLE/.agentic/cont
 cp "$ROOT/.agentic/context/security-review/MODULE.md" "$BUNDLE/.agentic/context/security-review/"
 cp "$ROOT/.agentic/context/dependency-changes/MODULE.md" "$BUNDLE/.agentic/context/dependency-changes/"
 cp "$ROOT/.agentic/context/infrastructure-change/MODULE.md" "$BUNDLE/.agentic/context/infrastructure-change/"
+cp "$ROOT/.agentic/orchestration/README.md" "$BUNDLE/.agentic/orchestration/"
+cp "$ROOT/.agentic/orchestration/coordinator.sh" "$BUNDLE/.agentic/orchestration/"
 cp "$ROOT/evals/README.md" "$BUNDLE/evals/"
 
 # Safety: the bundle must never leak the framework's own checks or dev-only dirs.

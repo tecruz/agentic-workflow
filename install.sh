@@ -186,6 +186,8 @@ MANAGED_FILES=(
     ".agentic/context/dependency-changes/MODULE.md"
     ".agentic/context/infrastructure-change/MODULE.md"
     "evals/README.md"
+    ".agentic/orchestration/README.md"
+    ".agentic/orchestration/coordinator.sh"
 )
 
 # Seed-once, project-owned: never overwritten after creation.
