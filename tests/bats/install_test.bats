@@ -1043,7 +1043,7 @@ SHIM
     # Execute installed validators against test fixtures
     run bash .agentic/scripts/validate-task.sh "$REPO_ROOT/tests/fixtures/tasks/standard-valid.md"
     [ "$status" -eq 0 ]
-    run bash .agentic/scripts/validate-task.sh "$REPO_ROOT/tests/fixtures/tasks/checked-placeholder-approval-blocked.md"
+    run bash .agentic/scripts/validate-task.sh "$REPO_ROOT/tests/fixtures/tasks/completed-with-pending-evidence.md"
     [ "$status" -eq 2 ]
     run bash .agentic/scripts/validate-task.sh "$REPO_ROOT/tests/fixtures/tasks/unknown-profile.md"
     [ "$status" -eq 1 ]
@@ -1094,7 +1094,7 @@ SHIM
     # Execute installed validators against test fixtures
     run bash .agentic/scripts/validate-task.sh "$REPO_ROOT/tests/fixtures/tasks/standard-valid.md"
     [ "$status" -eq 0 ]
-    run bash .agentic/scripts/validate-task.sh "$REPO_ROOT/tests/fixtures/tasks/checked-placeholder-approval-blocked.md"
+    run bash .agentic/scripts/validate-task.sh "$REPO_ROOT/tests/fixtures/tasks/completed-with-pending-evidence.md"
     [ "$status" -eq 2 ]
     run bash .agentic/scripts/validate-task.sh "$REPO_ROOT/tests/fixtures/tasks/unknown-profile.md"
     [ "$status" -eq 1 ]
@@ -1111,14 +1111,32 @@ SHIM
     [ "$status" -eq 0 ]
 }
 
-@test "build-bundle.sh removes stale archives and checksums before rebuilding" {
+@test "build-bundle.sh removes stale archives and checksums before rebuilding and validates SHA256SUMS" {
     VERSION="$(cat "$REPO_ROOT/.agentic/VERSION")"
     touch "$REPO_ROOT/dist/agentic-workflow-$VERSION.tar.gz"
     touch "$REPO_ROOT/dist/agentic-workflow-$VERSION.zip"
     touch "$REPO_ROOT/dist/SHA256SUMS"
     echo "stale" > "$REPO_ROOT/dist/agentic-workflow-$VERSION.tar.gz"
+    echo "stale" > "$REPO_ROOT/dist/agentic-workflow-$VERSION.zip"
     bash "$REPO_ROOT/scripts/build-bundle.sh"
     [ "$(cat "$REPO_ROOT/dist/agentic-workflow-$VERSION.tar.gz")" != "stale" ]
+    [ "$(cat "$REPO_ROOT/dist/agentic-workflow-$VERSION.zip")" != "stale" ]
+    [ -s "$REPO_ROOT/dist/SHA256SUMS" ]
+    grep -q "agentic-workflow-$VERSION.tar.gz" "$REPO_ROOT/dist/SHA256SUMS"
+    grep -q "agentic-workflow-$VERSION.zip" "$REPO_ROOT/dist/SHA256SUMS"
+}
+
+@test "build-bundle.sh invokes pwsh.exe fallback when pwsh is absent and pwsh.exe is present" {
+    MOCK_BIN="$TMP/mock-bin"
+    mkdir -p "$MOCK_BIN"
+    cat << 'EOF' > "$MOCK_BIN/pwsh.exe"
+#!/usr/bin/env bash
+exit 0
+EOF
+    chmod +x "$MOCK_BIN/pwsh.exe"
+
+    PATH="$MOCK_BIN:/usr/bin:/bin" OS="Windows_NT" bash "$REPO_ROOT/scripts/build-bundle.sh"
+    [ -f "$REPO_ROOT/dist/agentic-workflow-$(cat "$REPO_ROOT/.agentic/VERSION").zip" ]
 }
 
 @test "release tar.gz does not leak development-only files" {
@@ -1168,7 +1186,7 @@ SHIM
 }
 
 # ---------------------------------------------------------------------------
-# Release-to-release upgrade test: install from the v1.2.1 bundle, modify
+# Release-to-release upgrade test: install from the v1.2.2 bundle, modify
 # project state, then upgrade using the current bundle.
 # ---------------------------------------------------------------------------
 
@@ -1215,8 +1233,9 @@ SHIM
     mkdir -p .agentic/tasks
     printf '# TASK-900: adopter task evidence' > .agentic/tasks/TASK-900-adopter.md
 
-    # Step 3: Modify a managed file
+    # Step 3: Modify managed files to produce conflict candidates
     printf '\n# adopter workflow override\n' >> .agentic/WORKFLOW.md
+    printf '\n# adopter aider override\n' >> .aider.conf.yml
 
     # Step 4: Add a reviewed candidate
     printf 'required\tcustom-check\t.\tnpm\ttest\n' > .agentic/checks.generated.tsv
@@ -1238,19 +1257,22 @@ SHIM
     [ -f .agentic/tasks/TASK-900-adopter.md ]
     grep -q "adopter task evidence" .agentic/tasks/TASK-900-adopter.md
 
-    # Verify manifest records new managed files
+    # Verify exact managed manifest entries for new v1.3.0 files
     manifest="$(cat .agentic/install-manifest.tsv)"
-    printf '%s\n' "$manifest" | grep -q "\.agentic/profiles/README.md"
-    printf '%s\n' "$manifest" | grep -q "\.agentic/scripts/validate-task.sh"
-    printf '%s\n' "$manifest" | grep -q "\.agentic/templates/task.md"
+    for f in ".agentic/profiles/README.md" ".agentic/profiles/prototype.md" ".agentic/profiles/standard.md" ".agentic/profiles/high-assurance.md" ".agentic/scripts/validate-task.sh" ".agentic/scripts/validate-task.ps1" ".agentic/templates/task.md"; do
+        printf '%s\n' "$manifest" | grep -q "$f$'\t'managed"$ || printf '%s\n' "$manifest" | grep -q "$f	managed"
+    done
 
-    # Verify modified managed file produced .new conflict candidate
+    # Verify modified managed files produced .new conflict candidates and contain managed content
     [ -f .agentic/WORKFLOW.md.new ]
+    [ -f .aider.conf.yml.new ]
+    grep -q "CLASSIFY RISK" .agentic/WORKFLOW.md.new
+    grep -q "aider" .aider.conf.yml.new
 
     # Execute installed validators against test fixtures
     run bash .agentic/scripts/validate-task.sh "$REPO_ROOT/tests/fixtures/tasks/standard-valid.md"
     [ "$status" -eq 0 ]
-    run bash .agentic/scripts/validate-task.sh "$REPO_ROOT/tests/fixtures/tasks/checked-placeholder-approval-blocked.md"
+    run bash .agentic/scripts/validate-task.sh "$REPO_ROOT/tests/fixtures/tasks/completed-with-pending-evidence.md"
     [ "$status" -eq 2 ]
     run bash .agentic/scripts/validate-task.sh "$REPO_ROOT/tests/fixtures/tasks/unknown-profile.md"
     [ "$status" -eq 1 ]

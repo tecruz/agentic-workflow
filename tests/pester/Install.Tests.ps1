@@ -1413,7 +1413,7 @@ Describe 'install.ps1' {
     }
 
     # -----------------------------------------------------------------------
-    # Release-to-release upgrade test: install from a v1.2.1-like bundle,
+    # Release-to-release upgrade test: install from a v1.2.2 bundle,
     # modify project state, then upgrade using the current bundle.
     # -----------------------------------------------------------------------
 
@@ -1462,8 +1462,9 @@ Describe 'install.ps1' {
             New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic\tasks') -Force | Out-Null
             Set-Content -LiteralPath (Join-Path $tmp '.agentic\tasks\TASK-900-adopter.md') -Value '# TASK-900: adopter task evidence'
 
-            # Step 3: Modify a managed file
+            # Step 3: Modify managed files to produce conflict candidates
             Add-Content -LiteralPath (Join-Path $tmp '.agentic\WORKFLOW.md') -Value '# adopter workflow override'
+            Add-Content -LiteralPath (Join-Path $tmp '.aider.conf.yml') -Value '# adopter aider override'
 
             # Step 4: Add a reviewed candidate
             Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.generated.tsv') -Value "required`tcustom-check`t.`tnpm`ttest"
@@ -1485,19 +1486,36 @@ Describe 'install.ps1' {
             (Get-Content -Raw (Join-Path $tmp '.agentic\tasks\TASK-900-adopter.md')) -match 'adopter task evidence' | Should -Be $true
 
             $manifestText = Get-Content -Raw (Join-Path $tmp '.agentic\install-manifest.tsv')
-            $manifestText -match '\.agentic/profiles/README\.md' | Should -Be $true
-            $manifestText -match '\.agentic/scripts/validate-task\.sh' | Should -Be $true
-            $manifestText -match '\.agentic/templates/task\.md' | Should -Be $true
+            foreach ($p in @('.agentic/profiles/README.md', '.agentic/profiles/prototype.md', '.agentic/profiles/standard.md', '.agentic/profiles/high-assurance.md', '.agentic/scripts/validate-task.sh', '.agentic/scripts/validate-task.ps1', '.agentic/templates/task.md')) {
+                $manifestText -match "$p`tmanaged`t" | Should -Be $true
+            }
 
             Test-Path (Join-Path $tmp '.agentic\WORKFLOW.md.new') | Should -Be $true
+            Test-Path (Join-Path $tmp '.aider.conf.yml.new') | Should -Be $true
+            (Get-Content -Raw (Join-Path $tmp '.agentic\WORKFLOW.md.new')) -match 'CLASSIFY RISK' | Should -Be $true
+            (Get-Content -Raw (Join-Path $tmp '.aider.conf.yml.new')) -match 'aider' | Should -Be $true
 
             $valSh = Join-Path $tmp '.agentic\scripts\validate-task.sh'
+            $valPs = Join-Path $tmp '.agentic\scripts\validate-task.ps1'
+            $validFixture = Join-Path $repoRoot 'tests\fixtures\tasks\standard-valid.md'
+            $blockedFixture = Join-Path $repoRoot 'tests\fixtures\tasks\completed-with-pending-evidence.md'
+            $invalidFixture = Join-Path $repoRoot 'tests\fixtures\tasks\unknown-profile.md'
+
             if (Get-Command bash -ErrorAction SilentlyContinue) {
-                & bash $valSh (Join-Path $repoRoot 'tests\fixtures\tasks\standard-valid.md') *> $null
+                & bash $valSh $validFixture *> $null
                 $LASTEXITCODE | Should -Be 0
-                & bash $valSh (Join-Path $repoRoot 'tests\fixtures\tasks\checked-placeholder-approval-blocked.md') *> $null
+                & bash $valSh $blockedFixture *> $null
                 $LASTEXITCODE | Should -Be 2
-                & bash $valSh (Join-Path $repoRoot 'tests\fixtures\tasks\unknown-profile.md') *> $null
+                & bash $valSh $invalidFixture *> $null
+                $LASTEXITCODE | Should -Be 1
+            }
+
+            if (Get-Command pwsh -ErrorAction SilentlyContinue) {
+                & pwsh -NoProfile -File $valPs $validFixture *> $null
+                $LASTEXITCODE | Should -Be 0
+                & pwsh -NoProfile -File $valPs $blockedFixture *> $null
+                $LASTEXITCODE | Should -Be 2
+                & pwsh -NoProfile -File $valPs $invalidFixture *> $null
                 $LASTEXITCODE | Should -Be 1
             }
 
