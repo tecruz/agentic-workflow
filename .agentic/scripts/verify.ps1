@@ -55,23 +55,13 @@ $script:Blocked = $false
 $script:Detected = $false
 $script:CheckResults = @()
 
-if ($Events) {
-    if (-not (Assert-VerifierDestination $Events)) {
-        [Console]::Error.WriteLine("ERROR: refusing to write events to '$Events': destination is not safely inside the project root.")
-        exit 1
-    }
-    $eventDir = Split-Path -Parent $Events
-    if ($eventDir) { New-Item -ItemType Directory -Path $eventDir -Force | Out-Null }
-    [System.IO.File]::WriteAllText($Events, '{"event":"verification_started"}' + "`n", [System.Text.UTF8Encoding]::new($false))
-}
-
 function Write-Log {
     param([string] $Message)
     if ($Format -eq 'Json') {
         [Console]::Error.WriteLine($Message)
     }
     else {
-        Write-Log $Message
+        Write-Host $Message
     }
 }
 
@@ -626,6 +616,18 @@ function Test-ChecksTsvValidation {
             exit 1
         }
     }
+}
+
+# Initialize the optional JSONL events stream only after all functions are
+# defined (Assert-VerifierDestination lives below) and before any check runs.
+if ($Events) {
+    if (-not (Assert-VerifierDestination $Events)) {
+        [Console]::Error.WriteLine("ERROR: refusing to write events to '$Events': destination is not safely inside the project root.")
+        exit 1
+    }
+    $eventDir = Split-Path -Parent $Events
+    if ($eventDir) { New-Item -ItemType Directory -Path $eventDir -Force | Out-Null }
+    [System.IO.File]::WriteAllText($Events, '{"event":"verification_started"}' + "`n", [System.Text.UTF8Encoding]::new($false))
 }
 
 $checksPath = ".agentic/checks.tsv"
