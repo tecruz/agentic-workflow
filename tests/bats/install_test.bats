@@ -1129,6 +1129,7 @@ SHIM
 @test "build-bundle.sh invokes pwsh.exe fallback" {
     local mock_bin="$TMP/mock-bin"
     local marker="$TMP/pwsh-called"
+    local args_file="$TMP/pwsh-args"
     local version
     local expected_zip
 
@@ -1136,10 +1137,11 @@ SHIM
     version="$(cat "$REPO_ROOT/.agentic/VERSION")"
     expected_zip="$REPO_ROOT/dist/agentic-workflow-$version.zip"
 
-    for cmd in bash cat cp dirname grep mkdir rm tar uname; do
-        if command -v "$cmd" >/dev/null 2>&1; then
-            ln -s "$(command -v "$cmd")" "$mock_bin/$cmd"
-        fi
+    for cmd in bash cat cp dirname grep gzip mkdir rm tar uname; do
+        source_path="$(command -v "$cmd")" || {
+            fail "missing test prerequisite: $cmd"
+        }
+        ln -s "$source_path" "$mock_bin/$cmd"
     done
 
     if command -v sha256sum >/dev/null 2>&1; then
@@ -1152,6 +1154,7 @@ SHIM
 #!/usr/bin/env bash
 set -eu
 printf 'called\n' > "$PWSH_MARKER"
+printf '%s\n' "$@" > "$PWSH_ARGS"
 printf 'fake zip content\n' > "$AGENTIC_ZIP_WIN"
 SH
     chmod +x "$mock_bin/pwsh.exe"
@@ -1160,14 +1163,29 @@ SH
         PATH="$mock_bin" \
         OS="Windows_NT" \
         PWSH_MARKER="$marker" \
+        PWSH_ARGS="$args_file" \
         AGENTIC_ZIP_WIN="$expected_zip" \
         bash "$REPO_ROOT/scripts/build-bundle.sh"
 
     [ "$status" -eq 0 ]
     [ -f "$marker" ]
     [ -s "$expected_zip" ]
+    [ -f "$args_file" ]
+    grep -q -- "-NoProfile" "$args_file"
+    grep -q -- "Compress-Archive" "$args_file"
+    grep -q -- "-LiteralPath" "$args_file"
     grep -q "agentic-workflow-$version.zip" \
         "$REPO_ROOT/dist/SHA256SUMS"
+}
+
+@test "build-bundle.sh succeeds when repository path contains apostrophes, spaces, and brackets" {
+    special_dir="$TMP/O'Brien project [release]"
+    mkdir -p "$special_dir"
+    git -C "$REPO_ROOT" archive HEAD | tar -x -C "$special_dir"
+    run bash "$special_dir/scripts/build-bundle.sh"
+    [ "$status" -eq 0 ]
+    version="$(cat "$special_dir/.agentic/VERSION")"
+    [ -f "$special_dir/dist/agentic-workflow-$version.tar.gz" ]
 }
 
 @test "release tar.gz does not leak development-only files" {
