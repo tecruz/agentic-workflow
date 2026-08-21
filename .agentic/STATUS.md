@@ -10,32 +10,9 @@
 - [x] TASK-001 — Installer lifecycle hardening for v1.2.1 (see `.agentic/tasks/TASK-001-v121-lifecycle-hardening.md`)
 - [x] v1.2.2 release-integrity hardfix (PR #6): version/changelog/tag agreement,
   reusable CI, extracted-archive and release-to-release upgrade tests, release
-  workflow. Released as `v1.2.2`.
-- [x] PR #7 — Risk profiles and evidence contracts: `prototype`/`standard`/
-  `high-assurance` profiles, a risk-aware task template, structural task
-  validators (Bash + PowerShell), lifecycle risk-classification step, and
-  managed-file registration in the installers and bundle.
-  Review feedback (four request-changes rounds) fully addressed: a shared
-  meaningful-character predicate rejects symbol-only evidence/`n/a`/approvers,
-  evidence and matrix tables validate exact header schemas and reject
-  malformed/unknown header rows and leading-pipe omissions, Markdown-wrapped
-  placeholders are recognized, approval gates are validated for every profile,
-  the meaningful-character predicate is locale-deterministic for Unicode
-  letters/numbers (emoji, punctuation, and zero-width are not meaningful),
-  prototype tasks must declare an Approval gates section with exact safety
-  declaration lines, acceptance criteria/requirements admit only canonical
-  `AC-N:`/`R-N:` list entries (bare, numbered, and prose-declared bullets are
-  rejected; wrapped/continuation lines of a canonical item are accepted), any
-  `AC-N`/`R-N` identifier appearing in prose or a non-canonical line is
-  rejected, fast CI validates every fixture against a checked-in golden
-  expectation file (exit code + message) so the PR gate proves correct
-  classification rather than mere cross-language agreement, the macOS job runs
-  the Bash validator over the full fixture set under Bash 3.2, ShellCheck is a
-  blocking check with targeted suppressions, and the Bash validator's Perl
-  requirement for non-ASCII content is documented in the README.
-  Parity verified: 154 fixtures yield identical exit codes and messages on both
-  validators; Bats and Pester validator suites pass 154/154.
-  See `.agentic/tasks/TASK-002-risk-profiles-and-evidence-contracts.md`.
+  workflow. Released as `v1.2.2`. Superseded by v1.3.0.
+- [x] PR #7 & PR #8 — Risk profiles and evidence contracts and v1.3.0 finalization (PR #8): `prototype`/`standard`/
+  `high-assurance` profiles, task validators, risk-aware task template, release upgrade tests, and release finalization. Released as `v1.3.0`.
 
 ## Recent Decisions
 
@@ -45,6 +22,7 @@
 
 ## Notes
 
+- **v1.3.0 released 2026-08-21** as annotated tag `v1.3.0`. Introduces risk profiles (`prototype`, `standard`, `high-assurance`), task evidence contracts, structural validators (Bash & PowerShell), and comprehensive release-to-release upgrade testing from v1.2.2. The v1.2.2 release is marked as superseded.
 - **v1.2.2 released 2026-08-18** as annotated tag `v1.2.2` on commit `c835edf`.
   The Release workflow passed on Windows, Ubuntu, and macOS: metadata
   validation (VERSION/CHANGELOG/tag agreement), reusable CI, bundle build,
