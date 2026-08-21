@@ -73,7 +73,12 @@ mkdir -p "$BUNDLE/.agentic/rules" \
          "$BUNDLE/.agentic/templates" \
          "$BUNDLE/.agentic/tasks" \
          "$BUNDLE/.agentic/decisions" \
-         "$BUNDLE/.agentic/schemas"
+         "$BUNDLE/.agentic/schemas" \
+         "$BUNDLE/.agentic/context/database-migrations" \
+         "$BUNDLE/.agentic/context/security-review" \
+         "$BUNDLE/.agentic/context/dependency-changes" \
+         "$BUNDLE/.agentic/context/infrastructure-change" \
+         "$BUNDLE/evals"
 
 # Root-level protocol entry points and installers.
 cp "$ROOT/AGENTS.md" "$ROOT/CLAUDE.md" "$ROOT/GEMINI.md" "$ROOT/.aider.conf.yml" "$BUNDLE/"
@@ -94,6 +99,12 @@ cp "$ROOT"/.agentic/templates/*.md "$ROOT"/.agentic/templates/checks.tsv "$BUNDL
 cp "$ROOT/.agentic/tasks/README.md" "$BUNDLE/.agentic/tasks/"
 cp "$ROOT/.agentic/decisions/README.md" "$BUNDLE/.agentic/decisions/"
 cp "$ROOT"/.agentic/schemas/*.json "$BUNDLE/.agentic/schemas/"
+cp "$ROOT/.agentic/context/INDEX.md" "$BUNDLE/.agentic/context/"
+cp "$ROOT/.agentic/context/database-migrations/MODULE.md" "$BUNDLE/.agentic/context/database-migrations/"
+cp "$ROOT/.agentic/context/security-review/MODULE.md" "$BUNDLE/.agentic/context/security-review/"
+cp "$ROOT/.agentic/context/dependency-changes/MODULE.md" "$BUNDLE/.agentic/context/dependency-changes/"
+cp "$ROOT/.agentic/context/infrastructure-change/MODULE.md" "$BUNDLE/.agentic/context/infrastructure-change/"
+cp "$ROOT/evals/README.md" "$BUNDLE/evals/"
 
 # Safety: the bundle must never leak the framework's own checks or dev-only dirs.
 for leak in ".agentic/checks.tsv" "tests" ".github" "docs" "CHANGELOG.md" "README.md" "CONTRIBUTING.md" "SECURITY.md"; do

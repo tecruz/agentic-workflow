@@ -200,7 +200,13 @@ $ManagedFiles = @(
     ".agentic/tasks/README.md",
     ".agentic/decisions/README.md",
     ".agentic/schemas/verification-result-v1.schema.json",
-    ".agentic/schemas/task-validation-result-v1.schema.json"
+    ".agentic/schemas/task-validation-result-v1.schema.json",
+    ".agentic/context/INDEX.md",
+    ".agentic/context/database-migrations/MODULE.md",
+    ".agentic/context/security-review/MODULE.md",
+    ".agentic/context/dependency-changes/MODULE.md",
+    ".agentic/context/infrastructure-change/MODULE.md",
+    "evals/README.md"
 )
 
 # Seed-once, project-owned: never overwritten after creation.
