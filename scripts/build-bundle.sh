@@ -63,6 +63,10 @@ while [ $# -gt 0 ]; do
 done
 
 rm -rf "$BUNDLE"
+rm -f \
+    "$DIST/agentic-workflow-$VERSION.tar.gz" \
+    "$DIST/agentic-workflow-$VERSION.zip" \
+    "$DIST/SHA256SUMS"
 mkdir -p "$BUNDLE/.agentic/rules" \
          "$BUNDLE/.agentic/profiles" \
          "$BUNDLE/.agentic/scripts" \
@@ -109,7 +113,16 @@ tar -C "$DIST" -czf "$DIST/agentic-workflow-$VERSION.tar.gz" "agentic-workflow-$
 if command -v zip >/dev/null 2>&1; then
     (cd "$DIST" && zip -qr "agentic-workflow-$VERSION.zip" "agentic-workflow-$VERSION")
 elif [ "${OS:-}" = "Windows_NT" ] || uname -s | grep -qE "MINGW|MSYS|CYGWIN"; then
-    if command -v pwsh >/dev/null 2>&1 || command -v pwsh.exe >/dev/null 2>&1; then
+    PWSH_CMD=""
+    if command -v pwsh >/dev/null 2>&1; then
+        PWSH_CMD="pwsh"
+    elif command -v pwsh.exe >/dev/null 2>&1; then
+        PWSH_CMD="pwsh.exe"
+    elif command -v powershell.exe >/dev/null 2>&1; then
+        PWSH_CMD="powershell.exe"
+    fi
+
+    if [ -n "$PWSH_CMD" ]; then
         # Compress-Archive needs Windows paths even when launched from git-bash.
         bundle_win="$BUNDLE"
         dist_win="$DIST/agentic-workflow-$VERSION.zip"
@@ -117,7 +130,7 @@ elif [ "${OS:-}" = "Windows_NT" ] || uname -s | grep -qE "MINGW|MSYS|CYGWIN"; th
             bundle_win="$(cygpath -w "$BUNDLE")"
             dist_win="$(cygpath -w "$DIST/agentic-workflow-$VERSION.zip")"
         fi
-        pwsh -NoProfile -Command "Compress-Archive -Path '$bundle_win' -DestinationPath '$dist_win' -Force"
+        "$PWSH_CMD" -NoProfile -Command "Compress-Archive -Path '$bundle_win' -DestinationPath '$dist_win' -Force"
     else
         echo "WARNING: neither zip nor pwsh found; skipping zip archive." >&2
     fi

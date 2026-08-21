@@ -1014,11 +1014,25 @@ SHIM
     EXTRACT_DIR="$TMP/extract-tar"
     mkdir -p "$EXTRACT_DIR"
     tar -xzf "$ARCHIVE" -C "$EXTRACT_DIR"
+    EXTRACTED_BUNDLE="$EXTRACT_DIR/agentic-workflow-$VERSION"
+
+    # Verify risk profiles, task validators, task template
+    [ -f "$EXTRACTED_BUNDLE/.agentic/profiles/README.md" ]
+    [ -f "$EXTRACTED_BUNDLE/.agentic/profiles/prototype.md" ]
+    [ -f "$EXTRACTED_BUNDLE/.agentic/profiles/standard.md" ]
+    [ -f "$EXTRACTED_BUNDLE/.agentic/profiles/high-assurance.md" ]
+    [ -f "$EXTRACTED_BUNDLE/.agentic/scripts/validate-task.sh" ]
+    [ -x "$EXTRACTED_BUNDLE/.agentic/scripts/validate-task.sh" ]
+    [ -f "$EXTRACTED_BUNDLE/.agentic/scripts/validate-task.ps1" ]
+    [ -f "$EXTRACTED_BUNDLE/.agentic/templates/task.md" ]
+    grep -q "Profile" "$EXTRACTED_BUNDLE/.agentic/templates/task.md"
+    grep -q "Required evidence" "$EXTRACTED_BUNDLE/.agentic/templates/task.md"
+    grep -q "Approval gates" "$EXTRACTED_BUNDLE/.agentic/templates/task.md"
 
     PROJECT="$TMP/project"
     mkdir -p "$PROJECT"
     cd "$PROJECT"
-    bash "$EXTRACT_DIR/agentic-workflow-$VERSION/install.sh" . >/dev/null 2>&1
+    bash "$EXTRACTED_BUNDLE/install.sh" . >/dev/null 2>&1
 
     [ -f AGENTS.md ]
     [ -f .aider.conf.yml ]
@@ -1026,15 +1040,23 @@ SHIM
     [ -f .agentic/checks.tsv ]
     grep -q "seed" .agentic/install-manifest.tsv
 
+    # Execute installed validators against test fixtures
+    run bash .agentic/scripts/validate-task.sh "$REPO_ROOT/tests/fixtures/tasks/standard-valid.md"
+    [ "$status" -eq 0 ]
+    run bash .agentic/scripts/validate-task.sh "$REPO_ROOT/tests/fixtures/tasks/checked-placeholder-approval-blocked.md"
+    [ "$status" -eq 2 ]
+    run bash .agentic/scripts/validate-task.sh "$REPO_ROOT/tests/fixtures/tasks/unknown-profile.md"
+    [ "$status" -eq 1 ]
+
     # the verifier should report UNSUPPORTED (3) for an empty project
     run bash .agentic/scripts/verify.sh
     [ "$status" -eq 3 ]
 
     # exercise update, plan, prune, uninstall
-    bash "$EXTRACT_DIR/agentic-workflow-$VERSION/install.sh" . >/dev/null 2>&1
-    run bash "$EXTRACT_DIR/agentic-workflow-$VERSION/install.sh" . --prune --plan
+    bash "$EXTRACTED_BUNDLE/install.sh" . >/dev/null 2>&1
+    run bash "$EXTRACTED_BUNDLE/install.sh" . --prune --plan
     [ "$status" -eq 0 ]
-    run bash "$EXTRACT_DIR/agentic-workflow-$VERSION/install.sh" . --uninstall --plan
+    run bash "$EXTRACTED_BUNDLE/install.sh" . --uninstall --plan
     [ "$status" -eq 0 ]
 }
 
@@ -1053,6 +1075,12 @@ SHIM
     BUNDLE="$(find "$EXTRACT_DIR" -name "install.sh" -path "*/agentic-workflow-*/install.sh" -exec dirname {} \; 2>/dev/null | head -1)"
     [ -n "$BUNDLE" ] || skip "could not locate bundle after zip extraction"
 
+    # Verify risk profiles, task validators, task template
+    [ -f "$BUNDLE/.agentic/profiles/README.md" ]
+    [ -f "$BUNDLE/.agentic/scripts/validate-task.sh" ]
+    [ -x "$BUNDLE/.agentic/scripts/validate-task.sh" ]
+    [ -f "$BUNDLE/.agentic/templates/task.md" ]
+
     PROJECT="$TMP/project"
     mkdir -p "$PROJECT"
     cd "$PROJECT"
@@ -1062,6 +1090,14 @@ SHIM
     [ -f .aider.conf.yml ]
     [ -f .agentic/VERSION ]
     grep -q "seed" .agentic/install-manifest.tsv
+
+    # Execute installed validators against test fixtures
+    run bash .agentic/scripts/validate-task.sh "$REPO_ROOT/tests/fixtures/tasks/standard-valid.md"
+    [ "$status" -eq 0 ]
+    run bash .agentic/scripts/validate-task.sh "$REPO_ROOT/tests/fixtures/tasks/checked-placeholder-approval-blocked.md"
+    [ "$status" -eq 2 ]
+    run bash .agentic/scripts/validate-task.sh "$REPO_ROOT/tests/fixtures/tasks/unknown-profile.md"
+    [ "$status" -eq 1 ]
 
     # the verifier should report UNSUPPORTED (3) for an empty project
     run bash .agentic/scripts/verify.sh
@@ -1073,6 +1109,16 @@ SHIM
     [ "$status" -eq 0 ]
     run bash "$BUNDLE/install.sh" . --uninstall --plan
     [ "$status" -eq 0 ]
+}
+
+@test "build-bundle.sh removes stale archives and checksums before rebuilding" {
+    VERSION="$(cat "$REPO_ROOT/.agentic/VERSION")"
+    touch "$REPO_ROOT/dist/agentic-workflow-$VERSION.tar.gz"
+    touch "$REPO_ROOT/dist/agentic-workflow-$VERSION.zip"
+    touch "$REPO_ROOT/dist/SHA256SUMS"
+    echo "stale" > "$REPO_ROOT/dist/agentic-workflow-$VERSION.tar.gz"
+    bash "$REPO_ROOT/scripts/build-bundle.sh"
+    [ "$(cat "$REPO_ROOT/dist/agentic-workflow-$VERSION.tar.gz")" != "stale" ]
 }
 
 @test "release tar.gz does not leak development-only files" {
@@ -1180,6 +1226,7 @@ SHIM
     [ "$status" -eq 0 ]
 
     # Step 6: Verify v1.3.0 additions and preservation
+    [ "$(cat .agentic/VERSION)" = "1.3.0" ]
     [ -f .agentic/profiles/README.md ]
     [ -f .agentic/profiles/prototype.md ]
     [ -f .agentic/profiles/standard.md ]
@@ -1190,6 +1237,23 @@ SHIM
     [ -f .agentic/templates/task.md ]
     [ -f .agentic/tasks/TASK-900-adopter.md ]
     grep -q "adopter task evidence" .agentic/tasks/TASK-900-adopter.md
+
+    # Verify manifest records new managed files
+    manifest="$(cat .agentic/install-manifest.tsv)"
+    printf '%s\n' "$manifest" | grep -q "\.agentic/profiles/README.md"
+    printf '%s\n' "$manifest" | grep -q "\.agentic/scripts/validate-task.sh"
+    printf '%s\n' "$manifest" | grep -q "\.agentic/templates/task.md"
+
+    # Verify modified managed file produced .new conflict candidate
+    [ -f .agentic/WORKFLOW.md.new ]
+
+    # Execute installed validators against test fixtures
+    run bash .agentic/scripts/validate-task.sh "$REPO_ROOT/tests/fixtures/tasks/standard-valid.md"
+    [ "$status" -eq 0 ]
+    run bash .agentic/scripts/validate-task.sh "$REPO_ROOT/tests/fixtures/tasks/checked-placeholder-approval-blocked.md"
+    [ "$status" -eq 2 ]
+    run bash .agentic/scripts/validate-task.sh "$REPO_ROOT/tests/fixtures/tasks/unknown-profile.md"
+    [ "$status" -eq 1 ]
 
     grep -q "keep this content" AGENTS.md
     grep -q "AGENTIC-PROTOCOL-START" AGENTS.md

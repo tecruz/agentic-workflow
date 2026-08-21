@@ -1473,6 +1473,7 @@ Describe 'install.ps1' {
             $LASTEXITCODE | Should -Be 0
 
             # Step 6: Verify v1.3.0 additions and preservation
+            (Get-Content -Raw (Join-Path $tmp '.agentic\VERSION')).Trim() | Should -Be '1.3.0'
             Test-Path (Join-Path $tmp '.agentic\profiles\README.md') | Should -Be $true
             Test-Path (Join-Path $tmp '.agentic\profiles\prototype.md') | Should -Be $true
             Test-Path (Join-Path $tmp '.agentic\profiles\standard.md') | Should -Be $true
@@ -1482,6 +1483,23 @@ Describe 'install.ps1' {
             Test-Path (Join-Path $tmp '.agentic\templates\task.md') | Should -Be $true
             Test-Path (Join-Path $tmp '.agentic\tasks\TASK-900-adopter.md') | Should -Be $true
             (Get-Content -Raw (Join-Path $tmp '.agentic\tasks\TASK-900-adopter.md')) -match 'adopter task evidence' | Should -Be $true
+
+            $manifestText = Get-Content -Raw (Join-Path $tmp '.agentic\install-manifest.tsv')
+            $manifestText -match '\.agentic/profiles/README\.md' | Should -Be $true
+            $manifestText -match '\.agentic/scripts/validate-task\.sh' | Should -Be $true
+            $manifestText -match '\.agentic/templates/task\.md' | Should -Be $true
+
+            Test-Path (Join-Path $tmp '.agentic\WORKFLOW.md.new') | Should -Be $true
+
+            $valSh = Join-Path $tmp '.agentic\scripts\validate-task.sh'
+            if (Get-Command bash -ErrorAction SilentlyContinue) {
+                & bash $valSh (Join-Path $repoRoot 'tests\fixtures\tasks\standard-valid.md') *> $null
+                $LASTEXITCODE | Should -Be 0
+                & bash $valSh (Join-Path $repoRoot 'tests\fixtures\tasks\checked-placeholder-approval-blocked.md') *> $null
+                $LASTEXITCODE | Should -Be 2
+                & bash $valSh (Join-Path $repoRoot 'tests\fixtures\tasks\unknown-profile.md') *> $null
+                $LASTEXITCODE | Should -Be 1
+            }
 
             (Get-Content -Raw (Join-Path $tmp 'AGENTS.md')) -match 'keep this content' | Should -Be $true
             (Get-Content -Raw (Join-Path $tmp 'AGENTS.md')) -match 'AGENTIC-PROTOCOL-START' | Should -Be $true
