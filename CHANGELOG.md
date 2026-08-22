@@ -10,13 +10,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.4.0] - 2026-08-21
 
 ### Added
-- **Versioned JSON result contracts and optional run events (PR #9).**
+- Versioned JSON result contracts and optional run events (PR #9).
   - Added JSON output modes (`--format json` in Bash, `-Format Json` in PowerShell) to both project verifiers and task validators.
   - Added managed JSON schemas (`.agentic/schemas/verification-result-v1.schema.json` and `.agentic/schemas/task-validation-result-v1.schema.json`) registered in installers, bundles, and manifest categories.
   - Added optional local JSONL observable event streams (`--events` / `-Events`) with strict privacy safeguards and git-ignored run directories (`.agentic/runs/`).
   - Added stable diagnostic error codes for task validation failures.
-  - Added comprehensive Pester and schema compliance test suites.
   - Added ADR-0009.
+  - Pure-bash JSON serialization in verify.sh (no Python dependency).
+  - Project-relative path redaction in verification working_directory.
+  - Explicit diagnostic codes at failure sites (no keyword inference).
+  - Nullable profile/task_status in task validation JSON.
+  - Restricted event destination to `.agentic/runs/` with overwrite protection.
+  - Real JSON encoding for events (ConvertTo-Json in PowerShell, `json_escape` in Bash).
+  - Terminal verification_completed event emitted in both text and JSON modes.
+  - Versioned event schema (`verification-events-v1.schema.json`).
+
+### Changed
+- Refined redaction policy: project-relative paths only; no raw malformed source lines in JSON diagnostics.
+- Strengthened JSON schemas with `additionalProperties: false`, integer bounds on summary counts/durations, and protocol_version constraining to "1.4.0".
+- Diagnostic code functions now accept explicit codes with fallback inference for transition safety.
+
+### Fixed
+- Bash `--events` initialization ordering (function hoisting).
+- Bash JSON stdout contamination (all messages routed through `log()`).
+- Bash serialization failure propagation (`|| exit 1` on python3 failure).
+- PowerShell event string-concatenation vulnerabilities (now use `ConvertTo-Json`).
+- PowerShell working_directory and task_file redaction to project-relative paths.
+- Invalid task metadata no longer generates misleading JSON defaults.
+- Diagnostic code fallback inference preserved backward compatibility during transition.
 
 ## [1.3.0] - 2026-08-21
 

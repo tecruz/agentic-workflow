@@ -45,7 +45,8 @@ param(
     [string] $ValidateChecks,
     [ValidateSet('Text', 'Json')]
     [string] $Format = 'Text',
-    [string] $Events = $null
+    [string] $Events = $null,
+    [switch] $EventsForce
 )
 
 $script:Failed = $false
@@ -94,8 +95,12 @@ function Output-VerificationJson {
     }
     [Console]::Out.WriteLine(($resultObject | ConvertTo-Json -Depth 10 -Compress))
     if ($Events) {
-        $jsonEvent = '{"event":"verification_completed","result":"' + $ResultStr + '","exit_code":' + $ExitCode + '}'
-        [System.IO.File]::AppendAllText($Events, $jsonEvent + "`n", [System.Text.UTF8Encoding]::new($false))
+        $jsonEvent = [ordered]@{
+            event       = "verification_completed"
+            result      = $ResultStr
+            exit_code   = $ExitCode
+        }
+        [System.IO.File]::AppendAllText($Events, ($jsonEvent | ConvertTo-Json -Compress) + "`n", [System.Text.UTF8Encoding]::new($false))
     }
 }
 
@@ -192,8 +197,14 @@ function Invoke-Check {
     if ($Requirement -eq 'required') { $script:RanRequired = $true }
 
     if ($Events) {
-        $jsonEvent = '{"event":"check_started","check_id":"' + $Id + '"}'
-        [System.IO.File]::AppendAllText($Events, $jsonEvent + "`n", [System.Text.UTF8Encoding]::new($false))
+        # Use ConvertTo-Json for safe serialization (handles escaping of special characters
+# in check IDs, such as quotes or backslashes that would produce malformed JSON
+# when concatenated via string operations).
+$jsonEvent = [ordered]@{
+    event = "check_started"
+    check_id = $Id
+}
+        [System.IO.File]::AppendAllText($Events, ($jsonEvent | ConvertTo-Json -Compress) + "`n", [System.Text.UTF8Encoding]::new($false))
     }
 
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
@@ -233,8 +244,16 @@ function Invoke-Check {
         reason_code       = $null
     }
     if ($Events) {
-        $jsonEvent = '{"event":"check_completed","check_id":"' + $Id + '","status":"' + $st + '","exit_code":' + $(if($null -eq $code){'null'}else{$code}) + ',"duration_ms":' + $durationMs + '}'
-        [System.IO.File]::AppendAllText($Events, $jsonEvent + "`n", [System.Text.UTF8Encoding]::new($false))
+        # Use ConvertTo-Json for safe serialization (handles escaping of special characters
+# in check IDs, status strings, and numeric values).
+$jsonEvent = [ordered]@{
+    event        = "check_completed"
+    check_id     = $Id
+    status       = $st
+    exit_code    = if ($null -eq $code) { $null } else { $code }
+    duration_ms  = $durationMs
+}
+        [System.IO.File]::AppendAllText($Events, ($jsonEvent | ConvertTo-Json -Compress) + "`n", [System.Text.UTF8Encoding]::new($false))
     }
 }
 
@@ -620,14 +639,27 @@ function Test-ChecksTsvValidation {
 
 # Initialize the optional JSONL events stream only after all functions are
 # defined (Assert-VerifierDestination lives below) and before any check runs.
+# --events is independent of --format: events are emitted in both modes.
+# Destination is restricted to .agentic/runs/ and overwrite is refused unless
+# the -EventsForce switch is supplied.
 if ($Events) {
-    if (-not (Assert-VerifierDestination $Events)) {
-        [Console]::Error.WriteLine("ERROR: refusing to write events to '$Events': destination is not safely inside the project root.")
+    # Restrict event destination to .agentic/runs/ subdirectory of the project root.
+    $projectRoot = (Get-LiteralPath .).Path
+    $normalizedEvents = $Events -replace '^\./', ''
+    if (-not $normalizedEvents.StartsWith('.agentic/runs/')) {
+        [Console]::Error.WriteLine("ERROR: events destination must be inside .agentic/runs/. '$Events' is not allowed.")
+        exit 1
+    }
+    # Refuse to overwrite an existing file unless -EventsForce is supplied.
+    if (-not $EventsForce -and (Test-Path -LiteralPath $Events)) {
+        [Console]::Error.WriteLine("ERROR: refusing to overwrite existing event file '$Events'. Use -EventsForce to overwrite.")
         exit 1
     }
     $eventDir = Split-Path -Parent $Events
     if ($eventDir) { New-Item -ItemType Directory -Path $eventDir -Force | Out-Null }
-    [System.IO.File]::WriteAllText($Events, '{"event":"verification_started"}' + "`n", [System.Text.UTF8Encoding]::new($false))
+    # Use ConvertTo-Json for safe serialization (handles escaping, no unescaped strings).
+    $jsonEvent = '{"event":"verification_started"}'
+    [System.IO.File]::WriteAllText($Events, ($jsonEvent | ConvertTo-Json -Compress) + "`n", [System.Text.UTF8Encoding]::new($false))
 }
 
 $checksPath = ".agentic/checks.tsv"
@@ -719,12 +751,31 @@ else {
         catch {
             Write-Log "ERROR: Auto-detected checks failed validation: $_"
             Remove-Item -LiteralPath $tmp -ErrorAction SilentlyContinue
+            # Emit terminal event even on error
+            if ($Events) {
+                $jsonEvent = [ordered]@{
+                    event = "verification_completed"
+                    result = "UNSUPPORTED"
+                    exit_code = 3
+                }
+                [System.IO.File]::AppendAllText($Events, ($jsonEvent | ConvertTo-Json -Compress) + "`n", [System.Text.UTF8Encoding]::new($false))
+            }
             exit 1
         }
         Remove-Item -LiteralPath $tmp -ErrorAction SilentlyContinue
         $script:Detected = $true
         foreach ($line in $detectedChecks) { Invoke-TsvLine -Line $line }
     }
+}
+
+# Emit terminal verification_completed event (independent of --format).
+if ($Events) {
+    $jsonEvent = [ordered]@{
+        event       = "verification_completed"
+        result      = "UNSUPPORTED"
+        exit_code   = 3
+    }
+    [System.IO.File]::AppendAllText($Events, ($jsonEvent | ConvertTo-Json -Compress) + "`n", [System.Text.UTF8Encoding]::new($false))
 }
 
 Write-Log ""
@@ -734,23 +785,68 @@ Write-Log ""
 if ($script:Failed) {
     Write-Log "VERIFICATION FAILED: $($script:Ran) check(s) ran, at least one required check failed."
     if ($Format -eq 'Json') { Output-VerificationJson "FAIL" 1 }
+    # Always emit terminal event for --events mode
+    if ($Events) {
+        $jsonEvent = [ordered]@{
+            event       = "verification_completed"
+            result      = "FAIL"
+            exit_code   = 1
+        }
+        [System.IO.File]::AppendAllText($Events, ($jsonEvent | ConvertTo-Json -Compress) + "`n", [System.Text.UTF8Encoding]::new($false))
+    }
     exit 1
 }
 if ($script:Blocked) {
     Write-Log "VERIFICATION BLOCKED: $($script:Ran) check(s) ran; required tooling was unavailable."
     if ($Format -eq 'Json') { Output-VerificationJson "BLOCKED" 2 }
+    # Always emit terminal event for --events mode
+    if ($Events) {
+        $jsonEvent = [ordered]@{
+            event       = "verification_completed"
+            result      = "BLOCKED"
+            exit_code   = 2
+        }
+        [System.IO.File]::AppendAllText($Events, ($jsonEvent | ConvertTo-Json -Compress) + "`n", [System.Text.UTF8Encoding]::new($false))
+    }
     exit 2
 }
 if ($script:RanRequired) {
     Write-Log "VERIFICATION PASSED: $($script:Ran) check(s) ran."
     if ($Format -eq 'Json') { Output-VerificationJson "PASS" 0 }
+    # Always emit terminal event for --events mode
+    if ($Events) {
+        $jsonEvent = [ordered]@{
+            event       = "verification_completed"
+            result      = "PASS"
+            exit_code   = 0
+        }
+        [System.IO.File]::AppendAllText($Events, ($jsonEvent | ConvertTo-Json -Compress) + "`n", [System.Text.UTF8Encoding]::new($false))
+    }
     exit 0
 }
 if ($script:Detected) {
     Write-Log "VERIFICATION BLOCKED: $($script:Ran) check(s) ran; required tooling was unavailable."
     if ($Format -eq 'Json') { Output-VerificationJson "BLOCKED" 2 }
+    # Always emit terminal event for --events mode
+    if ($Events) {
+        $jsonEvent = [ordered]@{
+            event       = "verification_completed"
+            result      = "BLOCKED"
+            exit_code   = 2
+        }
+        [System.IO.File]::AppendAllText($Events, ($jsonEvent | ConvertTo-Json -Compress) + "`n", [System.Text.UTF8Encoding]::new($false))
+    }
     exit 2
 }
 Write-Log "VERIFICATION UNSUPPORTED: no supported project or check configuration found."
 if ($Format -eq 'Json') { Output-VerificationJson "UNSUPPORTED" 3 }
+# Always emit terminal event for --events mode
+if ($Events) {
+    $jsonEvent = [ordered]@{
+        event       = "verification_completed"
+        result      = "UNSUPPORTED"
+        exit_code   = 3
+    }
+    [System.IO.File]::AppendAllText($Events, ($jsonEvent | ConvertTo-Json -Compress) + "`n", [System.Text.UTF8Encoding]::new($false))
+}
 exit 3

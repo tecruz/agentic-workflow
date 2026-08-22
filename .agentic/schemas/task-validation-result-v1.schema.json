@@ -2,10 +2,11 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "TaskValidationResult",
   "type": "object",
+  "additionalProperties": false,
   "required": ["schema_version", "protocol_version", "kind", "mode", "result", "exit_code", "task_file", "profile", "task_status", "diagnostics"],
   "properties": {
     "schema_version": { "type": "integer", "const": 1 },
-    "protocol_version": { "type": "string" },
+    "protocol_version": { "type": "string", "const": "1.4.0" },
     "kind": { "type": "string", "const": "task_validation_result" },
     "mode": { "type": "string", "enum": ["standard", "handoff"] },
     "result": { "type": "string", "enum": ["VALID", "INVALID", "BLOCKED"] },
@@ -17,6 +18,7 @@
       "type": "array",
       "items": {
         "type": "object",
+        "additionalProperties": false,
         "required": ["code", "section", "identifier", "message"],
         "properties": {
           "code": { "type": "string" },

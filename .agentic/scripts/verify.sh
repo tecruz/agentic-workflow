@@ -59,20 +59,15 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-if [ -n "$EVENTS_FILE" ]; then
-    if ! safe_detect_destination "$EVENTS_FILE"; then
-        echo "ERROR: refusing to write events to '$EVENTS_FILE': destination is not safely inside the project root." >&2
-        exit 1
-    fi
-    mkdir -p "$(dirname "$EVENTS_FILE")"
-    printf '{"event":"verification_started"}\n' > "$EVENTS_FILE"
-fi
-
 RESULTS_TMP="$(mktemp)"
 cleanup_verify() {
     rm -f "$RESULTS_TMP" 2>/dev/null || true
 }
 trap cleanup_verify EXIT
+
+# Project root for path redaction: working_directory values are made
+# project-relative so absolute user-home paths never leak into JSON output.
+PROJECT_ROOT="$(pwd -P)"
 
 log() {
     if [ "$FORMAT" = "json" ]; then
@@ -82,91 +77,138 @@ log() {
     fi
 }
 
+# Escapes a string for safe inclusion inside a JSON string literal.
+# Handles: backslash, double-quote, tab, newline, carriage-return,
+# and remaining C0 control characters (0x00-0x1F except the above) as \u00XX.
+# UTF-8 continuation bytes (>= 0x80) pass through as valid JSON.
+json_escape() {
+    local s="$1"
+    # Quick escape for common JSON special characters.
+    # Order matters: backslashes first, then double-quotes.
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    # Escape tab, newline, carriage-return
+    s="${s//$'\t'/\\t}"
+    s="${s//$'\n'/\\n}"
+    s="${s//$'\r'/\\r}"
+    # Remaining C0 control characters (0x00-0x1F) are escaped as \u00XX.
+    # UTF-8 continuation bytes (>= 0x80) pass through as valid JSON.
+    local result="" i len ch ascii
+    len="${#s}"
+    for (( i = 0; i < len; i++ )); do
+        ch="${s:i:1}"
+        ascii=$(printf '%d' "'$ch" 2>/dev/null || echo 0)
+        # Guard against non-numeric ascii (e.g. multi-byte UTF-8 start)
+        if ! [[ "$ascii" =~ ^[0-9]+$ ]] || [ "$ascii" -gt 255 ]; then
+            # Pass through unknown characters as-is
+            result+="$ch"
+        elif [ "$ascii" -lt 32 ] && [ "$ascii" -ne 9 ] && [ "$ascii" -ne 10 ] && [ "$ascii" -ne 13 ]; then
+            # Control character: escape as \u00XX
+            result+="$(printf '\\u%02x' "$ascii")"
+        else
+            result+="$ch"
+        fi
+    done
+    # Fallback: if result is empty for some reason, return the original string
+    # minimally escaped (just backslash and quote).
+    printf '%s' "${result:-$s}"
+}
+
+# Emits a single JSON event line into the event stream file.
+# Accepts a raw JSON string (without surrounding quotes) and appends it
+# safely, with escaping handled by json_escape where needed.
+event_escape() {
+    local payload="$1"
+    # Use printf to avoid issues with strings containing newlines etc.
+    printf '%s' "$payload" >> "$EVENTS_FILE"
+}
+
 output_json() {
     local res_str="$1" exit_code="$2"
     local source_type="checks_tsv"
     if ! checks_defined; then
         source_type="auto_detected"
     fi
-    python3 -c '
-import json, sys
 
-source = sys.argv[1]
-res_str = sys.argv[2]
-exit_code = int(sys.argv[3])
-results_file = sys.argv[4]
+    # Pure-bash JSON construction for verification result.
+    # Reads RESULTS_TMP (tab-separated check results) and emits exactly one
+    # JSON document to stdout. All progress and child-output goes to stderr
+    # via the log() function; stdout carries only this single JSON document.
+    local checks_json="" summary=""
+    local passed=0 failed=0 blocked=0 opt_skipped=0 checks_run=0 required_run=0 checks_defined=0
 
-checks = []
-passed = 0
-failed = 0
-blocked = 0
-optional_skipped = 0
-checks_run = 0
-required_run = 0
-checks_defined = 0
+    # Read and parse RESULTS_TMP
+    while IFS= read -r line || [ -n "$line" ]; do
+        # Skip empty lines
+        [ -z "$line" ] && continue
+        local -a parts=()
+        IFS=$'\t' read -ra parts <<< "$line"
+        [ "${#parts[@]}" -lt 7 ] && continue
 
-try:
-    with open(results_file, "r") as f:
-        for line in f:
-            parts = line.rstrip("\n").split("\t")
-            if len(parts) >= 7:
-                req, cid, cwd, status, ec, dur, rcode = parts[:7]
-                checks_defined += 1
-                ec_val = int(ec) if ec != "null" else None
-                dur_val = int(dur)
-                rc_val = rcode if rcode != "null" else None
-                if status == "PASS":
-                    passed += 1
-                    checks_run += 1
-                    if req == "required": required_run += 1
-                elif status == "FAIL":
-                    failed += 1
-                    checks_run += 1
-                    if req == "required": required_run += 1
-                elif status == "BLOCKED":
-                    blocked += 1
-                elif status == "SKIPPED_OPTIONAL":
-                    optional_skipped += 1
-                
-                checks.append({
-                    "id": cid,
-                    "requirement": req,
-                    "status": status,
-                    "working_directory": cwd,
-                    "exit_code": ec_val,
-                    "duration_ms": dur_val,
-                    "reason_code": rc_val
-                })
-except Exception:
-    pass
+        local req="${parts[0]}"
+        local cid="${parts[1]}"
+        local cwd="${parts[2]}"
+        local status="${parts[3]}"
+        local ec="${parts[4]}"
+        local dur="${parts[5]}"
+        local rcode="${parts[6]}"
 
-summary = {
-    "checks_defined": checks_defined if checks_defined > 0 else len(checks),
-    "checks_run": checks_run,
-    "required_run": required_run,
-    "passed": passed,
-    "failed": failed,
-    "blocked": blocked,
-    "optional_skipped": optional_skipped
-}
+        checks_defined=$((checks_defined + 1))
 
-doc = {
-    "schema_version": 1,
-    "protocol_version": "1.4.0",
-    "kind": "verification_result",
-    "result": res_str,
-    "exit_code": exit_code,
-    "source": source,
-    "summary": summary,
-    "checks": checks
-}
+        # Count status
+        case "$status" in
+            PASS)  passed=$((passed + 1)); checks_run=$((checks_run + 1)); [ "$req" = "required" ] && required_run=$((required_run + 1)) ;;
+            FAIL)  failed=$((failed + 1)); checks_run=$((checks_run + 1)); [ "$req" = "required" ] && required_run=$((required_run + 1)) ;;
+            BLOCKED) blocked=$((blocked + 1)) ;;
+            SKIPPED_OPTIONAL) opt_skipped=$((opt_skipped + 1)) ;;
+        esac
 
-print(json.dumps(doc))
-' "$source_type" "$res_str" "$exit_code" "$RESULTS_TMP"
+        # Convert cwd to project-relative path for redaction (suppress absolute
+# user-home paths). If cwd is under the project root, strip the prefix;
+# otherwise keep the basename so no secret path appears.
+local cwd_rel="$cwd"
+if [ "$cwd" = "$PROJECT_ROOT" ]; then
+    cwd_rel="."
+elif [[ "$cwd" == "$PROJECT_ROOT/"* ]]; then
+    cwd_rel="./${cwd#$PROJECT_ROOT/}"
+else
+    # Not under project root (should not happen given confinement, but be safe):
+    cwd_rel="$(basename "$cwd")"
+fi
+local esc_cwd="$(json_escape "$cwd_rel")"
+        # reason_code: null if empty or literal "null"; otherwise escaped
+        local esc_rcode=""
+        if [ "$rcode" ] && [ "$rcode" != "null" ]; then
+            esc_rcode="$(json_escape "$rcode")"
+        fi
+        # exit_code (ec): null if empty or literal "null"; otherwise integer
+        local esc_ec=""
+        if [ "$ec" ] && [ "$ec" != "null" ]; then
+            esc_ec="$ec"
+        fi
 
-    if [ -n "$EVENTS_FILE" ]; then
-        printf '{"event":"verification_completed","result":"%s","exit_code":%s}\n' "$res_str" "$exit_code" >> "$EVENTS_FILE"
+        # Build check JSON object
+        local check_part="{\"id\":\"$esc_id\",\"requirement\":\"$req\",\"status\":\"$status\",\"working_directory\":\"$esc_cwd\"}"
+        check_part="$check_part,\"exit_code\":${esc_ec:-null}"
+        check_part="$check_part,\"duration_ms\":${dur:-0}"
+        check_part="$check_part,\"reason_code\":${esc_rcode:-null}"
+        checks_json="${checks_json:+$checks_json,}$check_part"
+    done < "$RESULTS_TMP"
+
+    # Build summary object
+    summary="{\"checks_defined\":$checks_defined,\"checks_run\":$checks_run,\"required_run\":$required_run,\"passed\":$passed,\"failed\":$failed,\"blocked\":$blocked,\"optional_skipped\":$opt_skipped}"
+
+    # Determine source value
+    local source_value
+    if [ "$source_type" = "auto_detected" ]; then
+        source_value="\"source\":\"auto_detected\""
+    else
+        source_value="\"source\":\"checks_tsv\""
     fi
+
+    # Output the complete JSON document (single document to stdout)
+    printf '{"schema_version":1,"protocol_version":"1.4.0","kind":"verification_result","result":"%s","exit_code":%d,%s,"summary":%s,"checks":[%s]}\n' \
+        "$res_str" "$exit_code" "$source_value" "$summary" "$checks_json"
 }
 
 FAILED=0
@@ -232,7 +274,7 @@ run_check() {
     fi
 
     if [ -n "$EVENTS_FILE" ]; then
-        printf '{"event":"check_started","check_id":"%s"}\n' "$id" >> "$EVENTS_FILE"
+        printf '{"event":"check_started","check_id":"%s"}\n' "$(json_escape "$id")" >> "$EVENTS_FILE"
     fi
 
     local start_ms
@@ -278,7 +320,7 @@ run_check() {
     fi
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$requirement" "$id" "$cwd" "$status" "$code" "$duration_ms" "null" >> "$RESULTS_TMP"
     if [ -n "$EVENTS_FILE" ]; then
-        printf '{"event":"check_completed","check_id":"%s","status":"%s","exit_code":%s,"duration_ms":%s}\n' "$id" "$status" "${code:-null}" "$duration_ms" >> "$EVENTS_FILE"
+        printf '{"event":"check_completed","check_id":"%s","status":"%s","exit_code":%s,"duration_ms":%s}\n' "$(json_escape "$id")" "$status" "${code:-null}" "$duration_ms" >> "$EVENTS_FILE"
     fi
 }
 
@@ -755,16 +797,28 @@ if [ "${1:-}" = "--validate-checks" ]; then
     validate_checks_arg "${2:-}"
 fi
 
+# Event stream initialization — placed after all function declarations so
+# safe_detect_destination is available. --events is independent of --format:
+if [ -n "$EVENTS_FILE" ]; then
+    if ! safe_detect_destination "$EVENTS_FILE"; then
+        echo "ERROR: refusing to write events to '$EVENTS_FILE': destination is not safely inside the project root." >&2
+        exit 1
+    fi
+    mkdir -p "$(dirname "$EVENTS_FILE")"
+    # Initial event: verification_started
+    printf '{"event":"verification_started"}\n' > "$EVENTS_FILE"
+fi
+
 if checks_defined; then
     validate_checks_tsv "$(checks_file)"
-    echo "Using project checks: .agentic/checks.tsv"
+    log "Using project checks: .agentic/checks.tsv"
     DETECTED=1
     run_checks_from_file "$(checks_file)"
 else
     if [ -f "$(checks_file)" ]; then
-        echo "Note: .agentic/checks.tsv defines no checks; falling back to auto-detection."
+        log "Note: .agentic/checks.tsv defines no checks; falling back to auto-detection."
     fi
-    echo "Auto-detecting project stack (no checks.tsv)..."
+    log "Auto-detecting project stack (no checks.tsv)..."
     local_lines="$(detect)" || exit 1
      if [ -n "$local_lines" ]; then
          det_tmp="$(mktemp)"
@@ -783,23 +837,43 @@ log ""
 if [ "$FAILED" -ne 0 ]; then
     log "VERIFICATION FAILED: $RAN check(s) ran, at least one required check failed."
     if [ "$FORMAT" = "json" ]; then output_json "FAIL" 1; fi
+    # Emit terminal event for --events mode
+    if [ -n "$EVENTS_FILE" ]; then
+        printf '{"event":"verification_completed","result":"FAIL","exit_code":1}\n' >> "$EVENTS_FILE"
+    fi
     exit 1
 fi
 if [ "$BLOCKED" -ne 0 ]; then
     log "VERIFICATION BLOCKED: $RAN check(s) ran; required tooling was unavailable."
     if [ "$FORMAT" = "json" ]; then output_json "BLOCKED" 2; fi
+    # Emit terminal event for --events mode
+    if [ -n "$EVENTS_FILE" ]; then
+        printf '{"event":"verification_completed","result":"BLOCKED","exit_code":2}\n' >> "$EVENTS_FILE"
+    fi
     exit 2
 fi
 if [ "$RAN_REQUIRED" -ne 0 ]; then
     log "VERIFICATION PASSED: $RAN check(s) ran."
     if [ "$FORMAT" = "json" ]; then output_json "PASS" 0; fi
+    # Emit terminal event for --events mode
+    if [ -n "$EVENTS_FILE" ]; then
+        printf '{"event":"verification_completed","result":"PASS","exit_code":0}\n' >> "$EVENTS_FILE"
+    fi
     exit 0
 fi
 if [ "$DETECTED" -ne 0 ]; then
     log "VERIFICATION BLOCKED: $RAN check(s) ran; required tooling was unavailable."
     if [ "$FORMAT" = "json" ]; then output_json "BLOCKED" 2; fi
+    # Emit terminal event for --events mode
+    if [ -n "$EVENTS_FILE" ]; then
+        printf '{"event":"verification_completed","result":"BLOCKED","exit_code":2}\n' >> "$EVENTS_FILE"
+    fi
     exit 2
 fi
 log "VERIFICATION UNSUPPORTED: no supported project or check configuration found."
 if [ "$FORMAT" = "json" ]; then output_json "UNSUPPORTED" 3; fi
+# Emit terminal event for --events mode
+if [ -n "$EVENTS_FILE" ]; then
+    printf '{"event":"verification_completed","result":"UNSUPPORTED","exit_code":3}\n' >> "$EVENTS_FILE"
+fi
 exit 3

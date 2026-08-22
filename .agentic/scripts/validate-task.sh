@@ -42,6 +42,9 @@
 
 set -uo pipefail
 
+# Python 3 is required for JSON serialization; fail explicitly if unavailable.
+command -v python3 >/dev/null 2>&1 || { echo "ERROR: Python 3 is required for JSON output" >&2; exit 1; }
+
 FORMAT="text"
 HANDOFF=0
 TASK_FILE=""
@@ -112,6 +115,20 @@ if res_str != "VALID":
         "message": diag_msg
     })
 
+# Profile and task_status: use null when not present or unrecognized, to avoid
+# inventing "standard"/"planned" defaults that are misleading for automation.
+if profile and profile in ("prototype", "standard", "high-assurance"):
+    profile_out = profile
+else:
+    profile_out = None
+    raw_profile = profile if profile else None
+
+if task_status and task_status in ("planned", "in-progress", "blocked", "done"):
+    task_status_out = task_status
+else:
+    task_status_out = None
+    raw_task_status = task_status if task_status else None
+
 doc = {
     "schema_version": 1,
     "protocol_version": "1.4.0",
@@ -120,10 +137,17 @@ doc = {
     "result": res_str,
     "exit_code": exit_code,
     "task_file": task_file,
-    "profile": profile if profile else "standard",
-    "task_status": task_status if task_status else "planned",
-    "diagnostics": diagnostics
 }
+if profile_out is not None:
+    doc["profile"] = profile_out
+if raw_profile is not None:
+    doc["raw_profile"] = raw_profile
+if task_status_out is not None:
+    doc["task_status"] = task_status_out
+if raw_task_status is not None:
+    doc["raw_task_status"] = raw_task_status
+doc["diagnostics"] = diagnostics
+
 print(json.dumps(doc))
 ' "$res_str" "$exit_code" "$TASK_FILE" "${PROFILE:-}" "${STATUS:-}" "$code" "$section" "$ident" "$msg" "$( [ "$HANDOFF" -eq 1 ] && echo handoff || echo standard )"
 }
@@ -138,20 +162,23 @@ if [ ! -f "$TASK_FILE" ]; then
 fi
 
 fail_invalid() {
-    local msg="$*"
-    local code="CRITERION_INVALID"
-    case "$msg" in
-        *"task file not found"*) code="TASK_FILE_NOT_FOUND" ;;
-        *"Profile:"*|*"risk profile"*) code="PROFILE_UNKNOWN" ;;
-        *"Status:"*|*"status"*) code="STATUS_INVALID" ;;
-        *"section"*|*"heading"*) code="SECTION_MISSING" ;;
-        *"acceptance criteria"*|*"requirement"*|*"criteria"*) code="CRITERION_INVALID" ;;
-        *"required evidence"*|*"matrix"*|*"table"*) code="EVIDENCE_MAPPING_INVALID" ;;
-        *"approval"*|*"gate"*) code="APPROVAL_INVALID" ;;
-        *"prototype"*|*"production readiness"*|*"irreversible"*) code="PROTOTYPE_DECLARATION_INVALID" ;;
-    esac
+    local code="${1:-CRITERION_INVALID}" section="${2:-null}" ident="${3:-null}" msg="${4:-}"
+    # Fall back to message-based code inference when no explicit code given,
+    # so existing call sites continue to work during transition.
+    if [ "$code" = "CRITERION_INVALID" ]; then
+        case "$msg" in
+            *"task file not found"*) code="TASK_FILE_NOT_FOUND" ;;
+            *"Profile:"*|*"risk profile"*) code="PROFILE_UNKNOWN" ;;
+            *"Status:"*|*"status"*) code="STATUS_INVALID" ;;
+            *"section"*|*"heading"*) code="SECTION_MISSING" ;;
+            *"acceptance criteria"*|*"requirement"*|*"criteria"*) code="CRITERION_INVALID" ;;
+            *"required evidence"*|*"matrix"*|*"table"*) code="EVIDENCE_MAPPING_INVALID" ;;
+            *"approval"*|*"gate"*) code="APPROVAL_INVALID" ;;
+            *"prototype"*|*"production readiness"*|*"irreversible"*) code="PROTOTYPE_DECLARATION_INVALID" ;;
+        esac
+    fi
     if [ "$FORMAT" = "json" ]; then
-        output_task_json "INVALID" 1 "$msg" "$code"
+        output_task_json "INVALID" 1 "$msg" "$code" "$section" "$ident"
         exit 1
     else
         echo "INVALID: $msg" >&2
@@ -160,15 +187,17 @@ fail_invalid() {
 }
 
 fail_blocked() {
-    local msg="$*"
-    local code="EVIDENCE_UNRESOLVED"
-    case "$msg" in
-        *"approval gate"*|*"approval"*) code="APPROVAL_UNRESOLVED" ;;
-        *"handoff requires"*|*"Status: done"*) code="STATUS_NOT_DONE" ;;
-        *) code="EVIDENCE_UNRESOLVED" ;;
-    esac
+    local code="${1:-EVIDENCE_UNRESOLVED}" section="${2:-null}" ident="${3:-null}" msg="${4:-}"
+    # Fall back to message-based code inference when no explicit code given.
+    if [ "$code" = "EVIDENCE_UNRESOLVED" ]; then
+        case "$msg" in
+            *"approval gate"*|*"approval"*) code="APPROVAL_UNRESOLVED" ;;
+            *"handoff requires"*|*"Status: done"*) code="STATUS_NOT_DONE" ;;
+            *) code="EVIDENCE_UNRESOLVED" ;;
+        esac
+    fi
     if [ "$FORMAT" = "json" ]; then
-        output_task_json "BLOCKED" 2 "$msg" "$code"
+        output_task_json "BLOCKED" 2 "$msg" "$code" "$section" "$ident"
         exit 2
     else
         echo "BLOCKED: $msg" >&2
@@ -494,7 +523,7 @@ has_meaningful_char() {
     # parent-process pre-flight below guarantees this branch is never reached
     # with perl missing, so the error cannot be swallowed by a subshell.
     command -v perl >/dev/null 2>&1 \
-        || fail_invalid "perl is required to classify non-ASCII content; install perl or keep evidence ASCII-only."
+        fail_invalid "CRITERION_INVALID" "" "" "perl is required to classify non-ASCII content; install perl or keep evidence ASCII-only."
     perl -CS -0777 -ne 'exit(/[\p{L}\p{N}]/ ? 0 : 1)' <<< "$1" 2>/dev/null
 }
 
