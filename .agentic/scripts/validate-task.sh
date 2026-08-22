@@ -115,19 +115,18 @@ if res_str != "VALID":
         "message": diag_msg
     })
 
-# Profile and task_status: use null when not present or unrecognized, to avoid
+# Profile and task_status: null when not present or unrecognized, to avoid
 # inventing "standard"/"planned" defaults that are misleading for automation.
+# The schema marks both fields nullable; no raw_* mirror fields are emitted.
 if profile and profile in ("prototype", "standard", "high-assurance"):
     profile_out = profile
 else:
     profile_out = None
-    raw_profile = profile if profile else None
 
 if task_status and task_status in ("planned", "in-progress", "blocked", "done"):
     task_status_out = task_status
 else:
     task_status_out = None
-    raw_task_status = task_status if task_status else None
 
 doc = {
     "schema_version": 1,
@@ -137,15 +136,9 @@ doc = {
     "result": res_str,
     "exit_code": exit_code,
     "task_file": task_file,
+    "profile": profile_out,
+    "task_status": task_status_out,
 }
-if profile_out is not None:
-    doc["profile"] = profile_out
-if raw_profile is not None:
-    doc["raw_profile"] = raw_profile
-if task_status_out is not None:
-    doc["task_status"] = task_status_out
-if raw_task_status is not None:
-    doc["raw_task_status"] = raw_task_status
 doc["diagnostics"] = diagnostics
 
 print(json.dumps(doc))
@@ -162,7 +155,13 @@ if [ ! -f "$TASK_FILE" ]; then
 fi
 
 fail_invalid() {
-    local code="${1:-CRITERION_INVALID}" section="${2:-null}" ident="${3:-null}" msg="${4:-}"
+    local code section ident msg
+    if [ "$#" -eq 1 ]; then
+        # Legacy single-argument style: fail_invalid "<message>".
+        code="CRITERION_INVALID"; section="null"; ident="null"; msg="$1"
+    else
+        code="${1:-CRITERION_INVALID}"; section="${2:-null}"; ident="${3:-null}"; msg="${4:-}"
+    fi
     # Fall back to message-based code inference when no explicit code given,
     # so existing call sites continue to work during transition.
     if [ "$code" = "CRITERION_INVALID" ]; then
@@ -187,7 +186,13 @@ fail_invalid() {
 }
 
 fail_blocked() {
-    local code="${1:-EVIDENCE_UNRESOLVED}" section="${2:-null}" ident="${3:-null}" msg="${4:-}"
+    local code section ident msg
+    if [ "$#" -eq 1 ]; then
+        # Legacy single-argument style: fail_blocked "<message>".
+        code="EVIDENCE_UNRESOLVED"; section="null"; ident="null"; msg="$1"
+    else
+        code="${1:-EVIDENCE_UNRESOLVED}"; section="${2:-null}"; ident="${3:-null}"; msg="${4:-}"
+    fi
     # Fall back to message-based code inference when no explicit code given.
     if [ "$code" = "EVIDENCE_UNRESOLVED" ]; then
         case "$msg" in

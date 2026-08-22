@@ -12,8 +12,8 @@
     "result": { "type": "string", "enum": ["VALID", "INVALID", "BLOCKED"] },
     "exit_code": { "type": "integer", "enum": [0, 1, 2] },
     "task_file": { "type": "string" },
-    "profile": { "type": "string", "enum": ["prototype", "standard", "high-assurance"] },
-    "task_status": { "type": "string", "enum": ["planned", "in-progress", "blocked", "done"] },
+    "profile": { "type": ["string", "null"], "enum": ["prototype", "standard", "high-assurance", null] },
+    "task_status": { "type": ["string", "null"], "enum": ["planned", "in-progress", "blocked", "done", null] },
     "diagnostics": {
       "type": "array",
       "items": {

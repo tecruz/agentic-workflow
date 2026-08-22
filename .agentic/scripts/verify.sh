@@ -175,23 +175,24 @@ else
     # Not under project root (should not happen given confinement, but be safe):
     cwd_rel="$(basename "$cwd")"
 fi
-local esc_cwd="$(json_escape "$cwd_rel")"
-        # reason_code: null if empty or literal "null"; otherwise escaped
-        local esc_rcode=""
+local esc_cwd
+esc_cwd="$(json_escape "$cwd_rel")"
+        # reason_code: JSON null if empty or literal "null"; otherwise a
+        # quoted, escaped string.
+        local esc_rcode="null"
         if [ "$rcode" ] && [ "$rcode" != "null" ]; then
-            esc_rcode="$(json_escape "$rcode")"
+            esc_rcode="\"$(json_escape "$rcode")\""
         fi
-        # exit_code (ec): null if empty or literal "null"; otherwise integer
-        local esc_ec=""
+        # exit_code: JSON null if empty or literal "null"; otherwise integer
+        local esc_ec="null"
         if [ "$ec" ] && [ "$ec" != "null" ]; then
             esc_ec="$ec"
         fi
 
         # Build check JSON object
-        local check_part="{\"id\":\"$esc_id\",\"requirement\":\"$req\",\"status\":\"$status\",\"working_directory\":\"$esc_cwd\"}"
-        check_part="$check_part,\"exit_code\":${esc_ec:-null}"
-        check_part="$check_part,\"duration_ms\":${dur:-0}"
-        check_part="$check_part,\"reason_code\":${esc_rcode:-null}"
+        local esc_id
+        esc_id="$(json_escape "$cid")"
+        local check_part="{\"id\":\"$esc_id\",\"requirement\":\"$req\",\"status\":\"$status\",\"working_directory\":\"$esc_cwd\",\"exit_code\":$esc_ec,\"duration_ms\":${dur:-0},\"reason_code\":$esc_rcode}"
         checks_json="${checks_json:+$checks_json,}$check_part"
     done < "$RESULTS_TMP"
 

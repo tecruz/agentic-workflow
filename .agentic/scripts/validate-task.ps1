@@ -68,6 +68,10 @@ function Output-TaskJson {
             message    = $Message
         }
     }
+    # Profile/task_status: null when not present or recognized — never invent
+    # defaults that would mislead automation (schema marks both nullable).
+    $profileOut = if ($script:ProfileName -in @('prototype', 'standard', 'high-assurance')) { $script:ProfileName } else { $null }
+    $statusOut = if ($script:StatusName -in @('planned', 'in-progress', 'blocked', 'done')) { $script:StatusName } else { $null }
     $resultObject = [ordered]@{
         schema_version   = 1
         protocol_version = "1.4.0"
@@ -76,8 +80,8 @@ function Output-TaskJson {
         result           = $Result
         exit_code        = $ExitCode
         task_file        = $TaskFile
-        profile          = if ($script:ProfileName) { $script:ProfileName } else { "standard" }
-        task_status      = if ($script:StatusName) { $script:StatusName } else { "planned" }
+        profile          = $profileOut
+        task_status      = $statusOut
         diagnostics      = $diagList
     }
     [Console]::Out.WriteLine(($resultObject | ConvertTo-Json -Depth 10 -Compress))

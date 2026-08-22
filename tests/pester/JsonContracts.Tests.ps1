@@ -96,45 +96,59 @@ Describe 'v1.4.0 JSON result contracts and schema validation' {
     It 'verification result JSON is text-mode backward compatible (stderr only)' {
         # In text mode, stdout should contain no JSON contamination;
         # only progress lines on stderr (captured here as they go to stderr).
+        # Skips on Windows like the bash-schema test: git-bash cannot consume
+        # the Windows-style script path; Linux/macOS jobs cover this.
+        if ($IsWindows) { return }
         $fixDir = Join-Path $fixtures 'node-npm'
         $tmpOut = [System.IO.Path]::GetTempFileName()
         Push-Location $fixDir
         try {
-            $outLines = & bash $verifySh 2> $null
+            $outLines = @(& bash $verifySh 2> $null)
             $code = $LASTEXITCODE
             [System.IO.File]::WriteAllLines($tmpOut, $outLines, [System.Text.UTF8Encoding]::new($false))
         }
         finally { Pop-Location }
         $code | Should -BeIn 0, 1, 2, 3
         # Verify stdout has no JSON document (only plain text or empty)
-        $stdoutContent = (-join $outLines | Select-String -Pattern '^{'} | Measure-Object).Count
+        $stdoutContent = (-join $outLines | Select-String -Pattern '^\{' | Measure-Object).Count
         $stdoutContent | Should -Be 0
         Remove-Item -LiteralPath $tmpOut -ErrorAction SilentlyContinue
     }
 
-    It 'verification result JSON validates serializer failure when python3 unavailable' {
-        # This test is environment-dependent; skip if python3 is available.
-        if (CommandExists 'python3') { return }
+    It 'verification result JSON stays well-formed when python3 is unavailable' {
+        # The Bash verifier's only python3 uses are duration timestamps with
+        # graceful fallbacks; shadow both interpreters with failing stubs and
+        # require the JSON contract to remain intact. Mirrors the bash-schema
+        # test's platform guard.
+        if ($IsWindows) { return }
         $fixDir = Join-Path $fixtures 'node-npm'
+        $stubDir = Join-Path $TestDrive 'pystub'
+        New-Item -ItemType Directory -Path $stubDir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $stubDir 'python3') -Value "#!/bin/sh`nexit 127" -NoNewline
+        Set-Content -LiteralPath (Join-Path $stubDir 'python') -Value "#!/bin/sh`nexit 127" -NoNewline
         $tmpOut = [System.IO.Path]::GetTempFileName()
         Push-Location $fixDir
         try {
-            # Temporarily clear PATH to remove python3
-            $env:PATH = [System.IO.Path]::GetDirectoryName($pscommandpath)
-            $outLines = & bash $verifySh --format json 2> $null
-            $code = $LASTEXITCODE
+            $oldPath = $env:PATH
+            $env:PATH = "$stubDir$([System.IO.Path]::PathSeparator)$oldPath"
+            try {
+                $outLines = @(& bash $verifySh --format json 2> $null)
+                $code = $LASTEXITCODE
+            }
+            finally { $env:PATH = $oldPath }
             [System.IO.File]::WriteAllLines($tmpOut, $outLines, [System.Text.UTF8Encoding]::new($false))
         }
         finally {
             Remove-Item -LiteralPath $tmpOut -ErrorAction SilentlyContinue
             Pop-Location
         }
-        # When python3 is unavailable, the verifier should still exit (possibly INVALID
-        # or UNSUPPORTED) rather than silently succeeding without JSON output.
-        $code | Should -Not -Be 0
+        # The verifier must still complete with exactly one well-formed JSON document.
+        $code | Should -BeIn 0, 1, 2, 3
+        $parsed = Get-Content -LiteralPath $tmpOut -Raw | ConvertFrom-Json
+        $parsed.schema_version | Should -Be 1
     }
 
-    It 'task validation result JSON includes raw_profile when profile declared' {
+    It 'task validation result JSON echoes declared profile and task_status' {
         $taskFile = Join-Path $tasksFixtures 'standard-valid.md'
         $tmpOut = [System.IO.Path]::GetTempFileName()
         $outLines = & pwsh -NoProfile -File $validatePs -Format Json $taskFile 2> $null
@@ -142,41 +156,46 @@ Describe 'v1.4.0 JSON result contracts and schema validation' {
         [System.IO.File]::WriteAllLines($tmpOut, $outLines, [System.Text.UTF8Encoding]::new($false))
         $code | Should -Be 0
         $parsed = Get-Content -LiteralPath $tmpOut -Raw | ConvertFrom-Json
-        # When a profile is declared, raw_profile should be present
-        $parsed | Should -HaveProperty 'raw_profile'
+        # Declared, recognized values pass through unchanged; no raw_* mirror
+        # fields are part of the contract.
+        $parsed.profile | Should -Be 'standard'
+        $parsed.task_status | Should -Be 'done'
+        ($parsed.PSObject.Properties.Name) | Should -Not -Contain 'raw_profile'
+        ($parsed.PSObject.Properties.Name) | Should -Not -Contain 'raw_task_status'
         Remove-Item -LiteralPath $tmpOut -ErrorAction SilentlyContinue
     }
 
-    It 'task validation result JSON includes raw_task_status when status declared' {
-        # Create a task with Status: done declared
-        $taskFile = Join-Path $fixtures 'tasks' 'done-code-wrapped-pending-blocked.md'
+    It 'task validation result JSON includes recognized values even when blocked' {
+        # The fixture is marked done with unresolved evidence: BLOCKED (2), but
+        # the declared status value is still echoed faithfully.
+        $taskFile = Join-Path $tasksFixtures 'done-code-wrapped-pending-blocked.md'
         $tmpOut = [System.IO.Path]::GetTempFileName()
         $outLines = & pwsh -NoProfile -File $validatePs -Format Json $taskFile 2> $null
         $code = $LASTEXITCODE
         [System.IO.File]::WriteAllLines($tmpOut, $outLines, [System.Text.UTF8Encoding]::new($false))
-        $code | Should -Be 0
+        $code | Should -Be 2
         $parsed = Get-Content -LiteralPath $tmpOut -Raw | ConvertFrom-Json
-        $parsed | Should -HaveProperty 'raw_task_status'
+        $parsed.task_status | Should -Be 'done'
         Remove-Item -LiteralPath $tmpOut -ErrorAction SilentlyContinue
     }
 
     It 'task validation result JSON has nullable profile when missing' {
-        # Create a task missing Profile: declaration
-        $taskFile = Join-Path $fixtures 'unknown-profile.md'
+        # The fixture declares Profile: wat, which is not a recognized profile.
+        $taskFile = Join-Path $tasksFixtures 'unknown-profile.md'
         $tmpOut = [System.IO.Path]::GetTempFileName()
         $outLines = & pwsh -NoProfile -File $validatePs -Format Json $taskFile 2> $null
         $code = $LASTEXITCODE
         [System.IO.File]::WriteAllLines($tmpOut, $outLines, [System.Text.UTF8Encoding]::new($false))
         $code | Should -Be 1
         $parsed = Get-Content -LiteralPath $tmpOut -Raw | ConvertFrom-Json
-        # profile should be null when not declared/recognized
+        # profile should be null when not declared/recognized; no defaults.
         $parsed.profile | Should -Be $null
         Remove-Item -LiteralPath $tmpOut -ErrorAction SilentlyContinue
     }
 
-    It 'task validation result JSON has nullable task_status when missing' {
-        # Create a task missing Status: declaration
-        $taskFile = Join-Path $fixtures 'missing-status-section-invalid.md'
+    It 'task validation result JSON has nullable task_status when unrecognized' {
+        # The fixture declares 'Status: not done', which is not a valid status.
+        $taskFile = Join-Path $tasksFixtures 'unknown-status.md'
         $tmpOut = [System.IO.Path]::GetTempFileName()
         $outLines = & pwsh -NoProfile -File $validatePs -Format Json $taskFile 2> $null
         $code = $LASTEXITCODE
