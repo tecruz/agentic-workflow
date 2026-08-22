@@ -1,0 +1,78 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://tecruz.github.io/agentic-workflow/schemas/verification-events-v1.schema.json",
+  "title": "VerificationEvents",
+  "description": "Schema for the optional JSONL run-event stream emitted by verify.sh --events / verify.ps1 -Events. Each line of the stream is one JSON object validated against exactly one of the four event definitions below.",
+  "type": "array",
+  "items": {
+    "oneOf": [
+      { "$ref": "#/definitions/verification_started" },
+      { "$ref": "#/definitions/check_started" },
+      { "$ref": "#/definitions/check_completed" },
+      { "$ref": "#/definitions/verification_completed" }
+    ]
+  },
+  "definitions": {
+    "event_name": {
+      "type": "object",
+      "required": ["event"],
+      "properties": {
+        "event": { "type": "string" }
+      }
+    },
+    "verification_started": {
+      "allOf": [
+        { "$ref": "#/definitions/event_name" },
+        {
+          "properties": {
+            "event": { "const": "verification_started" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "check_started": {
+      "allOf": [
+        { "$ref": "#/definitions/event_name" },
+        {
+          "required": ["check_id"],
+          "properties": {
+            "event": { "const": "check_started" },
+            "check_id": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "check_completed": {
+      "allOf": [
+        { "$ref": "#/definitions/event_name" },
+        {
+          "required": ["check_id", "status", "exit_code", "duration_ms"],
+          "properties": {
+            "event": { "const": "check_completed" },
+            "check_id": { "type": "string" },
+            "status": { "enum": ["PASS", "FAIL", "BLOCKED", "SKIPPED_OPTIONAL"] },
+            "exit_code": { "type": ["integer", "null"] },
+            "duration_ms": { "type": "integer", "minimum": 0 }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "verification_completed": {
+      "allOf": [
+        { "$ref": "#/definitions/event_name" },
+        {
+          "required": ["result", "exit_code"],
+          "properties": {
+            "event": { "const": "verification_completed" },
+            "result": { "enum": ["PASS", "FAIL", "BLOCKED", "UNSUPPORTED"] },
+            "exit_code": { "type": "integer", "enum": [0, 1, 2, 3] }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}
