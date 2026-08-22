@@ -41,5 +41,35 @@
         }
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "result": { "const": "PASS" } }, "required": ["result"] },
+      "then": { "properties": { "exit_code": { "const": 0 } } }
+    },
+    {
+      "if": { "properties": { "result": { "const": "FAIL" } }, "required": ["result"] },
+      "then": { "properties": { "exit_code": { "const": 1 } } }
+    },
+    {
+      "if": { "properties": { "result": { "const": "BLOCKED" } }, "required": ["result"] },
+      "then": { "properties": { "exit_code": { "const": 2 } } }
+    },
+    {
+      "if": { "properties": { "result": { "const": "UNSUPPORTED" } }, "required": ["result"] },
+      "then": { "properties": { "exit_code": { "const": 3 } } }
+    },
+    {
+      "if": { "properties": { "exit_code": { "const": 0 } }, "required": ["exit_code"] },
+      "then": { "properties": { "summary": { "properties": { "failed": { "const": 0 }, "blocked": { "const": 0 } } } } }
+    },
+    {
+      "if": { "properties": { "exit_code": { "const": 1 } }, "required": ["exit_code"] },
+      "then": { "properties": { "summary": { "properties": { "failed": { "minimum": 1 } } } } }
+    },
+    {
+      "if": { "properties": { "result": { "enum": ["PASS", "FAIL"] } }, "required": ["result"] },
+      "then": { "properties": { "summary": { "properties": { "checks_run": { "minimum": 1 } } } } }
+    }
+  ]
 }

@@ -35,6 +35,7 @@ set -uo pipefail
 
 FORMAT="text"
 EVENTS_FILE=""
+EVENTS_FORCE=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --format)
@@ -51,6 +52,10 @@ while [ $# -gt 0 ]; do
             ;;
         --events=*)
             EVENTS_FILE="${1#*=}"
+            shift
+            ;;
+        --events-force)
+            EVENTS_FORCE=1
             shift
             ;;
         *)
@@ -628,6 +633,30 @@ safe_detect_destination() {
     return 1
 }
 
+# Destination policy for the events stream: a relative path inside
+# .agentic/runs/ only. Lexical checks first (absolute paths and any '.' or
+# '..' segment are rejected, so traversal cannot bypass the runs-directory
+# prefix), then the physical confinement shared with safe_detect_destination,
+# which also rejects a symlink leaf or ancestor.
+safe_events_destination() {
+    local dest="$1" normalized segment
+    case "$dest" in
+        /*) return 1 ;;
+    esac
+    normalized="${dest#./}"
+    case "$normalized" in
+        .agentic/runs/*) ;;
+        *) return 1 ;;
+    esac
+    local IFS='/'
+    for segment in $normalized; do
+        case "$segment" in
+            ''|.|..) return 1 ;;
+        esac
+    done
+    safe_detect_destination "$normalized"
+}
+
 validate_checks_tsv() {
     local file="$1"
     local line_num=0
@@ -798,37 +827,58 @@ if [ "${1:-}" = "--validate-checks" ]; then
     validate_checks_arg "${2:-}"
 fi
 
-# Event stream initialization — placed after all function declarations so
-# safe_detect_destination is available. --events is independent of --format:
-if [ -n "$EVENTS_FILE" ]; then
-    if ! safe_detect_destination "$EVENTS_FILE"; then
-        echo "ERROR: refusing to write events to '$EVENTS_FILE': destination is not safely inside the project root." >&2
-        exit 1
-    fi
-    mkdir -p "$(dirname "$EVENTS_FILE")"
-    # Initial event: verification_started
-    printf '{"event":"verification_started"}\n' > "$EVENTS_FILE"
-fi
-
 if checks_defined; then
+    # Contract validation happens before the events stream is created, so a
+    # malformed project contract can never leave a started-but-unterminated
+    # event file behind.
     validate_checks_tsv "$(checks_file)"
-    log "Using project checks: .agentic/checks.tsv"
-    DETECTED=1
-    run_checks_from_file "$(checks_file)"
 else
     if [ -f "$(checks_file)" ]; then
         log "Note: .agentic/checks.tsv defines no checks; falling back to auto-detection."
     fi
     log "Auto-detecting project stack (no checks.tsv)..."
-    local_lines="$(detect)" || exit 1
-     if [ -n "$local_lines" ]; then
-         det_tmp="$(mktemp)"
-        printf '%s\n' "$local_lines" > "$det_tmp"
+    detected_lines="$(detect)" || exit 1
+    if [ -n "$detected_lines" ]; then
+        det_tmp="$(mktemp)"
+        printf '%s\n' "$detected_lines" > "$det_tmp"
         validate_checks_tsv "$det_tmp"
         rm -f "$det_tmp"
-        DETECTED=1
-        run_checks_from_file <(printf '%s\n' "$local_lines")
     fi
+fi
+
+# Event stream initialization — deliberately placed after every early-exit
+# mode and after contract validation succeeded, so any stream that is created
+# is guaranteed to receive exactly one terminal verification_completed event
+# below. --events is independent of --format.
+if [ -n "$EVENTS_FILE" ]; then
+    if ! safe_events_destination "$EVENTS_FILE"; then
+        echo "ERROR: events destination must be a relative path inside .agentic/runs/. '$EVENTS_FILE' is not allowed." >&2
+        exit 1
+    fi
+    if [ -e "$EVENTS_FILE" ] && [ "$EVENTS_FORCE" -ne 1 ]; then
+        echo "ERROR: refusing to overwrite existing event file '$EVENTS_FILE'. Use --events-force to overwrite." >&2
+        exit 1
+    fi
+    mkdir -p "$(dirname "$EVENTS_FILE")"
+    # Build in an unpredictable scratch name beside the destination and move
+    # into place atomically, so a crashed run can never truncate an existing
+    # event stream before its replacement is complete.
+    events_scratch="$(dirname "$EVENTS_FILE")/.verify-events.$$.$RANDOM"
+    printf '{"event":"verification_started"}\n' > "$events_scratch"
+    if [ "$EVENTS_FORCE" -eq 1 ]; then
+        mv -f "$events_scratch" "$EVENTS_FILE"
+    else
+        mv "$events_scratch" "$EVENTS_FILE"
+    fi
+fi
+
+if checks_defined; then
+    log "Using project checks: .agentic/checks.tsv"
+    DETECTED=1
+    run_checks_from_file "$(checks_file)"
+elif [ -n "${detected_lines:-}" ]; then
+    DETECTED=1
+    run_checks_from_file <(printf '%s\n' "$detected_lines")
 fi
 
 log ""

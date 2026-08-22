@@ -137,6 +137,10 @@ Describe 'v1.4.0 JSON result contracts and schema validation' {
             }
             finally { $env:PATH = $oldPath }
             [System.IO.File]::WriteAllLines($tmpOut, $outLines, [System.Text.UTF8Encoding]::new($false))
+            # Parse while the temp file still exists — the finally block below
+            # removes it, and parsing a deleted file would fail spuriously on
+            # Linux CI where this test actually runs.
+            $script:pyStubDoc = Get-Content -LiteralPath $tmpOut -Raw | ConvertFrom-Json
         }
         finally {
             Remove-Item -LiteralPath $tmpOut -ErrorAction SilentlyContinue
@@ -144,8 +148,7 @@ Describe 'v1.4.0 JSON result contracts and schema validation' {
         }
         # The verifier must still complete with exactly one well-formed JSON document.
         $code | Should -BeIn 0, 1, 2, 3
-        $parsed = Get-Content -LiteralPath $tmpOut -Raw | ConvertFrom-Json
-        $parsed.schema_version | Should -Be 1
+        $script:pyStubDoc.schema_version | Should -Be 1
     }
 
     It 'task validation result JSON echoes declared profile and task_status' {

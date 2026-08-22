@@ -1,14 +1,14 @@
 # Task fixture golden expectations: <fixture><TAB><expected-exit-code><TAB><expected-message>
 # 0 = VALID, 1 = INVALID, 2 = BLOCKED. Both validators must match these exactly.
 approval-early-date-invalid.md	1	INVALID: approval gate 'ag-1' has an invalid ISO date '2026-02-30'.
-approval-not-granted.md	1	INVALID: malformed approval entry in '## Approval gates': '- Approval not granted'.
-approval-plain-prose-invalid.md	1	INVALID: malformed approval entry in '## Approval gates': 'Security approval is still pending.'.
+approval-not-granted.md	1	INVALID: malformed approval entry in '## Approval gates': entries must be '- [ ] AG-N: <requirement>' or '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'.
+approval-plain-prose-invalid.md	1	INVALID: malformed approval entry in '## Approval gates': entries must be '- [ ] AG-N: <requirement>' or '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'.
 bare-criterion-invalid.md	1	INVALID: acceptance criteria must contain only canonical 'AC-N: <description>' list entries; identifiers may not appear in prose or non-canonical lines.
 bare-requirement-invalid.md	1	INVALID: high-assurance requirements must contain only canonical 'R-N: <description>' list entries; identifiers may not appear in prose or non-canonical lines.
 baseline-outside-verification.md	1	INVALID: missing '### baseline' subsection under '## Verification' for profile 'standard'.
 canonical-plus-prose-ac-invalid.md	1	INVALID: acceptance criteria must contain only canonical 'AC-N: <description>' list entries; identifiers may not appear in prose or non-canonical lines.
 canonical-plus-prose-r-invalid.md	1	INVALID: high-assurance requirements must contain only canonical 'R-N: <description>' list entries; identifiers may not appear in prose or non-canonical lines.
-checked-gate-plus-pending-prose-invalid.md	1	INVALID: malformed approval entry in '## Approval gates': 'Operations approval is still pending.'.
+checked-gate-plus-pending-prose-invalid.md	1	INVALID: malformed approval entry in '## Approval gates': entries must be '- [ ] AG-N: <requirement>' or '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'.
 checked-placeholder-approval-blocked.md	1	INVALID: approval gate 'ag-1' must be in the form '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'.
 checked-punctuation-only-approver-invalid.md	1	INVALID: approval gate 'ag-1' must record a meaningful approver.
 checked-real-approval-valid.md	0	VALID: profile=standard
@@ -72,7 +72,7 @@ invalid-year-zero.md	1	INVALID: Updated: must be a valid ISO date YYYY-MM-DD (fo
 lowercase-criterion-valid.md	0	VALID: profile=standard
 lowercase-identifiers-valid.md	0	VALID: profile=high-assurance
 lowercase-requirement-valid.md	0	VALID: profile=high-assurance
-malformed-approval-entry-invalid.md	1	INVALID: malformed approval entry in '## Approval gates': '- [ ] SECURITY: Security approval pending'.
+malformed-approval-entry-invalid.md	1	INVALID: malformed approval entry in '## Approval gates': entries must be '- [ ] AG-N: <requirement>' or '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'.
 missing-status-section-invalid.md	1	INVALID: Status: must be declared inside '## Status'.
 missing-updated-invalid.md	1	INVALID: task must declare exactly one 'Updated:' (found 0).
 mixed-canonical-and-bare-criteria-invalid.md	1	INVALID: acceptance criteria must contain only canonical 'AC-N: <description>' list entries; identifiers may not appear in prose or non-canonical lines.
@@ -88,13 +88,13 @@ na-matrix-placeholder-blocked.md	2	BLOCKED: requirement-to-evidence row 'r-1' ha
 na-matrix-valid.md	0	VALID: profile=high-assurance
 na-punctuation-only-rationale-invalid.md	1	INVALID: required evidence row 'ac-1' uses 'n/a' with a placeholder rationale.
 na-symbol-only-rationale-invalid.md	1	INVALID: required evidence row 'ac-1' uses 'n/a' with a placeholder rationale.
-negated-approval.md	1	INVALID: malformed approval entry in '## Approval gates': '- Not approved'.
+negated-approval.md	1	INVALID: malformed approval entry in '## Approval gates': entries must be '- [ ] AG-N: <requirement>' or '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'.
 non-ascii-criterion-evidence-valid.md	0	VALID: profile=standard
-none-identified-substring-invalid.md	1	INVALID: malformed approval entry in '## Approval gates': '- None identified yet; security approval is still pending.'.
-none-plus-pending-prose-invalid.md	1	INVALID: malformed approval entry in '## Approval gates': 'Security approval is still pending.'.
+none-identified-substring-invalid.md	1	INVALID: malformed approval entry in '## Approval gates': entries must be '- [ ] AG-N: <requirement>' or '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'.
+none-plus-pending-prose-invalid.md	1	INVALID: malformed approval entry in '## Approval gates': entries must be '- [ ] AG-N: <requirement>' or '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'.
 numbered-criterion-invalid.md	1	INVALID: acceptance criteria must contain only canonical 'AC-N: <description>' list entries; identifiers may not appear in prose or non-canonical lines.
 numbered-requirement-invalid.md	1	INVALID: high-assurance requirements must contain only canonical 'R-N: <description>' list entries; identifiers may not appear in prose or non-canonical lines.
-plus-bullet-malformed-gate-invalid.md	1	INVALID: malformed approval entry in '## Approval gates': '+ [ ] Security sign-off from Operations'.
+plus-bullet-malformed-gate-invalid.md	1	INVALID: malformed approval entry in '## Approval gates': entries must be '- [ ] AG-N: <requirement>' or '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'.
 plus-bullet-unchecked-gate-blocked.md	2	BLOCKED: task is marked complete but an approval gate remains unchecked.
 profile-outside-risk-profile-invalid.md	1	INVALID: Profile: must be declared inside '## Risk profile'.
 prototype-checked-gate-valid.md	0	VALID: profile=prototype
@@ -116,17 +116,17 @@ prototype-unchecked-gate-blocked.md	2	BLOCKED: task is marked complete but an ap
 prototype-valid.md	0	VALID: profile=prototype
 punctuation-only-evidence-cell-blocked.md	2	BLOCKED: required evidence row 'ac-1' has a placeholder evidence description.
 punctuation-only-table-row-blocked.md	2	BLOCKED: completed task verification under '## Files changed' is still a placeholder (TBD, TODO, Pending, or similar).
-required-evidence-empty-cell-no-leading-pipe-invalid.md	1	INVALID: required evidence table row 'AC-1|' must begin with a leading pipe.
+required-evidence-empty-cell-no-leading-pipe-invalid.md	1	INVALID: required evidence table rows must begin with a leading pipe.
 required-evidence-extra-column-invalid.md	1	INVALID: required evidence table row has 4 columns (expected 3).
-required-evidence-hidden-pending-empty-cell-invalid.md	1	INVALID: required evidence table row 'AC-1||Pending' must begin with a leading pipe.
+required-evidence-hidden-pending-empty-cell-invalid.md	1	INVALID: required evidence table rows must begin with a leading pipe.
 required-evidence-hidden-unresolved-duplicate-invalid.md	1	INVALID: required evidence table row has 4 columns (expected 3).
 required-evidence-malformed-id-invalid.md	1	INVALID: required evidence row 'AC-1a' has an unrecognized identifier.
 required-evidence-malformed-row-as-header-invalid.md	1	INVALID: required evidence table header must be '| AC ID | Evidence | Result |'.
-required-evidence-missing-column-no-leading-pipe-invalid.md	1	INVALID: required evidence table row 'AC-X|Pending' must begin with a leading pipe.
-required-evidence-row-without-leading-pipe-invalid.md	1	INVALID: required evidence table row 'AC-1 | Unit test `asset_url_test.go` | Passed' must begin with a leading pipe.
+required-evidence-missing-column-no-leading-pipe-invalid.md	1	INVALID: required evidence table rows must begin with a leading pipe.
+required-evidence-row-without-leading-pipe-invalid.md	1	INVALID: required evidence table rows must begin with a leading pipe.
 required-evidence-unknown-id-invalid.md	1	INVALID: required evidence row 'AC-X' has an unrecognized identifier.
 required-evidence-unknown-row-as-header-invalid.md	1	INVALID: required evidence table header must be '| AC ID | Evidence | Result |'.
-requirement-matrix-empty-cell-no-leading-pipe-invalid.md	1	INVALID: requirement-to-evidence table row 'R-2|' must begin with a leading pipe.
+requirement-matrix-empty-cell-no-leading-pipe-invalid.md	1	INVALID: requirement-to-evidence table rows must begin with a leading pipe.
 requirement-matrix-extra-column-invalid.md	1	INVALID: requirement-to-evidence table row has 4 columns (expected 3).
 requirement-matrix-malformed-row-as-header-invalid.md	1	INVALID: requirement-to-evidence table header must be '| Requirement ID | Evidence | Result |'.
 requirement-matrix-unknown-id-invalid.md	1	INVALID: requirement-to-evidence row 'R-X' has an unrecognized identifier.

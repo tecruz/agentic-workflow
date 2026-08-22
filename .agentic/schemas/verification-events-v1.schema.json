@@ -71,6 +71,23 @@
             "exit_code": { "type": "integer", "enum": [0, 1, 2, 3] }
           },
           "additionalProperties": false
+        },
+        {
+          "comment": "Terminal events must pair result with the state-model exit code (PASS=0, FAIL=1, BLOCKED=2, UNSUPPORTED=3). Cross-event ordering — exactly one terminal event per stream, emitted last — is a producer contract documented in ADR-0009 and covered by the test suites; JSON Schema cannot express ordering across array items.",
+          "if": { "properties": { "result": { "const": "PASS" } }, "required": ["result"] },
+          "then": { "properties": { "exit_code": { "const": 0 } } }
+        },
+        {
+          "if": { "properties": { "result": { "const": "FAIL" } }, "required": ["result"] },
+          "then": { "properties": { "exit_code": { "const": 1 } } }
+        },
+        {
+          "if": { "properties": { "result": { "const": "BLOCKED" } }, "required": ["result"] },
+          "then": { "properties": { "exit_code": { "const": 2 } } }
+        },
+        {
+          "if": { "properties": { "result": { "const": "UNSUPPORTED" } }, "required": ["result"] },
+          "then": { "properties": { "exit_code": { "const": 3 } } }
         }
       ]
     }

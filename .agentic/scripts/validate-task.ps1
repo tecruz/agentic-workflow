@@ -79,7 +79,7 @@ function Output-TaskJson {
         mode             = if ($Handoff) { "handoff" } else { "standard" }
         result           = $Result
         exit_code        = $ExitCode
-        task_file        = $TaskFile
+        task_file        = Get-TaskFileDisplay
         profile          = $profileOut
         task_status      = $statusOut
         diagnostics      = $diagList
@@ -87,19 +87,36 @@ function Output-TaskJson {
     [Console]::Out.WriteLine(($resultObject | ConvertTo-Json -Depth 10 -Compress))
 }
 
-function Write-Invalid {
-    param([string]$Message)
-    $code = 'CRITERION_INVALID'
-    if ($Message -like '*task file not found*') { $code = 'TASK_FILE_NOT_FOUND' }
-    elseif ($Message -like '*Profile:*' -or $Message -like '*risk profile*') { $code = 'PROFILE_UNKNOWN' }
-    elseif ($Message -like '*Status:*' -or $Message -like '*status*') { $code = 'STATUS_INVALID' }
-    elseif ($Message -like '*section*' -or $Message -like '*heading*') { $code = 'SECTION_MISSING' }
-    elseif ($Message -like '*required evidence*' -or $Message -like '*matrix*' -or $Message -like '*table*') { $code = 'EVIDENCE_MAPPING_INVALID' }
-    elseif ($Message -like '*approval*' -or $Message -like '*gate*') { $code = 'APPROVAL_INVALID' }
-    elseif ($Message -like '*prototype*' -or $Message -like '*production readiness*') { $code = 'PROTOTYPE_DECLARATION_INVALID' }
+function Get-TaskFileDisplay {
+    # Redacts the task file path for observable JSON output: passed through
+    # when already relative, made project-relative under the working
+    # directory, degraded to its basename otherwise, so an absolute user-home
+    # path can never leak into machine-readable results.
+    $rawNorm = ($TaskFile -replace '\\', '/')
+    if ($rawNorm -notmatch '^(/|[A-Za-z]:)') {
+        return ($rawNorm -replace '^\./', '')
+    }
+    $root = [System.IO.Path]::GetFullPath((Get-Location).Path).TrimEnd('\', '/')
+    try {
+        $full = [System.IO.Path]::GetFullPath($TaskFile).TrimEnd('\', '/')
+    }
+    catch {
+        return [System.IO.Path]::GetFileName($TaskFile)
+    }
+    if ($full.Equals($root, [System.StringComparison]::OrdinalIgnoreCase)) { return '.' }
+    if ($full.StartsWith($root + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return './' + $full.Substring($root.Length + 1).Replace('\', '/')
+    }
+    return [System.IO.Path]::GetFileName($full)
+}
 
+function Write-Invalid {
+    # Explicit diagnostic code at every failure site — never inferred from
+    # message keywords, because keyword matching diverged silently between
+    # implementations.
+    param([string]$Code, [string]$Section, [string]$Identifier, [string]$Message)
     if ($Format -eq 'Json') {
-        Output-TaskJson 'INVALID' 1 $Message $code
+        Output-TaskJson 'INVALID' 1 $Message $Code $Section $Identifier
         exit 1
     }
     else {
@@ -109,13 +126,10 @@ function Write-Invalid {
 }
 
 function Write-Blocked {
-    param([string]$Message)
-    $code = 'EVIDENCE_UNRESOLVED'
-    if ($Message -like '*approval gate*' -or $Message -like '*approval*') { $code = 'APPROVAL_UNRESOLVED' }
-    elseif ($Message -like '*handoff requires*' -or $Message -like '*Status: done*') { $code = 'STATUS_NOT_DONE' }
-
+    # Same explicit-arguments contract as Write-Invalid.
+    param([string]$Code, [string]$Section, [string]$Identifier, [string]$Message)
     if ($Format -eq 'Json') {
-        Output-TaskJson 'BLOCKED' 2 $Message $code
+        Output-TaskJson 'BLOCKED' 2 $Message $Code $Section $Identifier
         exit 2
     }
     else {
@@ -240,38 +254,38 @@ function Test-IsoDate {
 # Profile and status declarations.
 # ---------------------------------------------------------------------------
 if ($ProfileDecl -ne 1) {
-    Write-Invalid "task must declare exactly one 'Profile:' (found $ProfileDecl)."
+    Write-Invalid "PROFILE_DECLARATION_INVALID" '' '' "task must declare exactly one 'Profile:' (found $ProfileDecl)."
 }
 if (-not $ProfileInRisk) {
-    Write-Invalid "Profile: must be declared inside '## Risk profile'."
+    Write-Invalid "PROFILE_DECLARATION_INVALID" '' '' "Profile: must be declared inside '## Risk profile'."
 }
 if ($ProfileName -notin @('prototype', 'standard', 'high-assurance')) {
-    Write-Invalid 'task must declare a recognized risk profile (prototype, standard, or high-assurance).'
+    Write-Invalid "PROFILE_UNKNOWN" '' '' "task must declare a recognized risk profile (prototype, standard, or high-assurance)."
 }
 if ($StatusDecl -ne 1) {
-    Write-Invalid "task must declare exactly one 'Status:' (found $StatusDecl)."
+    Write-Invalid "STATUS_DECLARATION_INVALID" '' '' "task must declare exactly one 'Status:' (found $StatusDecl)."
 }
 if (-not $StatusInStatus) {
-    Write-Invalid "Status: must be declared inside '## Status'."
+    Write-Invalid "STATUS_DECLARATION_INVALID" '' '' "Status: must be declared inside '## Status'."
 }
 if ($StatusName -notin @('planned', 'in-progress', 'blocked', 'done')) {
-    Write-Invalid "task status must be one of: planned, in-progress, blocked, done (found '$StatusName')."
+    Write-Invalid "STATUS_INVALID" '' '' "task status must be one of: planned, in-progress, blocked, done (found '$StatusName')."
 }
 if ($UpdatedCount -ne 1) {
-    Write-Invalid "task must declare exactly one 'Updated:' (found $UpdatedCount)."
+    Write-Invalid "UPDATED_INVALID" '' '' "task must declare exactly one 'Updated:' (found $UpdatedCount)."
 }
 if (-not $UpdatedInStatus) {
-    Write-Invalid "Updated: must be declared inside '## Status'."
+    Write-Invalid "UPDATED_INVALID" '' '' "Updated: must be declared inside '## Status'."
 }
 if (-not $Updated) {
-    Write-Invalid "Updated: must have a value."
+    Write-Invalid "UPDATED_INVALID" '' '' "Updated: must have a value."
 }
 if (-not (Test-IsoDate $Updated)) {
-    Write-Invalid "Updated: must be a valid ISO date YYYY-MM-DD (found '$Updated')."
+    Write-Invalid "UPDATED_INVALID" '' '' "Updated: must be a valid ISO date YYYY-MM-DD (found '$Updated')."
 }
 $Completed = ($StatusName -eq 'done')
 if ($Handoff -and -not $Completed) {
-    Write-Blocked "handoff requires 'Status: done' (found '$StatusName')."
+    Write-Blocked "STATUS_NOT_DONE" '' '' "handoff requires 'Status: done' (found '$StatusName')."
 }
 
 # ---------------------------------------------------------------------------
@@ -280,11 +294,11 @@ if ($Handoff -and -not $Completed) {
 # ---------------------------------------------------------------------------
 $seenSections = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
 foreach ($s in $SECTIONS) {
-    if (-not $seenSections.Add($s)) { Write-Invalid "duplicate section heading '## $s'." }
+    if (-not $seenSections.Add($s)) { Write-Invalid "SECTION_DUPLICATE" '' '' "duplicate section heading '## $s'." }
 }
 $seenSubsections = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
 foreach ($s in $SUBSECTIONS) {
-    if (-not $seenSubsections.Add($s)) { Write-Invalid "duplicate subsection heading '### $s'." }
+    if (-not $seenSubsections.Add($s)) { Write-Invalid "SECTION_DUPLICATE" '' '' "duplicate subsection heading '### $s'." }
 }
 
 function Get-SectionContent {
@@ -445,8 +459,8 @@ function Assert-VerificationEvidence {
     param([string]$Kind, [string[]]$Content)
     $cls = Get-ContentClass $Content
     if ($cls -eq 'content') { return }
-    if ($cls -eq 'empty') { Write-Invalid "completed task must record verification evidence under '$Kind'." }
-    Write-Blocked "completed task verification under '$Kind' is still a placeholder (TBD, TODO, Pending, or similar)."
+    if ($cls -eq 'empty') { Write-Invalid "EVIDENCE_MAPPING_INVALID" $Kind '' "completed task must record verification evidence under '$Kind'." }
+    Write-Blocked "EVIDENCE_UNRESOLVED" $Kind '' "completed task verification under '$Kind' is still a placeholder (TBD, TODO, Pending, or similar)."
 }
 
 # Assert-VerificationEvidenceNone — like Assert-VerificationEvidence, but accepts
@@ -459,8 +473,8 @@ function Assert-VerificationEvidenceNone {
         $normalized = (($Content -join "`n").ToLowerInvariant() -replace '^\s*[-*+]\s+', '' -replace '[^a-z0-9]', '')
         if ($normalized -eq 'noneidentified') { return }
     }
-    if ($cls -eq 'empty') { Write-Invalid "completed task must record verification evidence under '$Kind'." }
-    Write-Blocked "completed task verification under '$Kind' is still a placeholder (TBD, TODO, Pending, or similar)."
+    if ($cls -eq 'empty') { Write-Invalid "EVIDENCE_MAPPING_INVALID" $Kind '' "completed task must record verification evidence under '$Kind'." }
+    Write-Blocked "EVIDENCE_UNRESOLVED" $Kind '' "completed task verification under '$Kind' is still a placeholder (TBD, TODO, Pending, or similar)."
 }
 
 # Assert-CompletionDescriptions — a completed task must give every declared
@@ -475,7 +489,7 @@ function Assert-CompletionDescriptions {
         $id = $idMatch.Value
         $desc = ([regex]::Match($lowLine, "^\s*[-*+]\s*$IdPattern\s*:\s*(.*?)\s*$")).Groups[1].Value
         if (-not $desc -or ((Get-ContentClass @($desc)) -eq 'placeholder')) {
-            Write-Blocked "$Kind '$id' has a placeholder description."
+            Write-Blocked "EVIDENCE_UNRESOLVED" $Kind $id "$Kind '$id' has a placeholder description."
         }
     }
 }
@@ -529,12 +543,12 @@ function Assert-CanonicalSection {
         $lowLine = $line.ToLowerInvariant()
         if ($lowLine -match $idBound) {
             if ($lowLine -notmatch "^[-*+]\s*$IdPattern\s*:\s*\S") {
-                Write-Invalid "$Label must contain only canonical '$EntryForm' list entries; identifiers may not appear in prose or non-canonical lines."
+                Write-Invalid "CRITERION_INVALID" $Label '' "$Label must contain only canonical '$EntryForm' list entries; identifiers may not appear in prose or non-canonical lines."
             }
         }
         if ($lowLine -notmatch '^([-*+]\s*|\d+[.)]\s+|(ac|r)-\d+\s*:)') { continue }
         if ($lowLine -notmatch "^[-*+]\s*$IdPattern\s*:\s*\S") {
-            Write-Invalid "$Label must contain only canonical '$EntryForm' list entries; identifiers may not appear in prose or non-canonical lines."
+            Write-Invalid "CRITERION_INVALID" $Label '' "$Label must contain only canonical '$EntryForm' list entries; identifiers may not appear in prose or non-canonical lines."
         }
     }
 }
@@ -592,13 +606,13 @@ function Test-Table {
             # A pipe-delimited line that omitted its leading pipe is a table
             # row; reject it rather than silently treating it as prose.
             if ($trimmed -match '[^|]+\|[^|]+\|[^|]+') {
-                Write-Invalid "$Label table row '$trimmed' must begin with a leading pipe."
+                Write-Invalid "EVIDENCE_MAPPING_INVALID" $Label '' "$Label table rows must begin with a leading pipe."
             }
             # Also reject a row that opens with a known identifier or the
             # expected header label even when its other cells are empty or
             # missing, so a malformed duplicate cannot hide an unresolved row.
             if ($trimmed -match "^($([regex]::Escape($idPrefix))|$([regex]::Escape($hl)))[^|]*\|") {
-                Write-Invalid "$Label table row '$trimmed' must begin with a leading pipe."
+                Write-Invalid "EVIDENCE_MAPPING_INVALID" $Label '' "$Label table rows must begin with a leading pipe."
             }
             continue
         }
@@ -606,59 +620,59 @@ function Test-Table {
         $id = if ($cells.Count -gt 0) { $cells[0] } else { '' }
         if ($stage -eq 0) {
             if (Test-TableRowIsSeparator $cells) {
-                Write-Invalid "$Label table must have a header row before its separator."
+                Write-Invalid "EVIDENCE_MAPPING_INVALID" $Label '' "$Label table must have a header row before its separator."
             }
             if ($id.ToLowerInvariant() -match "^$lp$") {
-                Write-Invalid "$Label table has a data row before its header."
+                Write-Invalid "EVIDENCE_MAPPING_INVALID" $Label '' "$Label table has a data row before its header."
             }
-            if ($cells.Count -ne 3) { Write-Invalid "$Label table row has $($cells.Count) columns (expected 3)." }
+            if ($cells.Count -ne 3) { Write-Invalid "EVIDENCE_MAPPING_INVALID" $Label '' "$Label table row has $($cells.Count) columns (expected 3)." }
             $h1 = $cells[0].ToLowerInvariant()
             $h2 = $cells[1].ToLowerInvariant()
             $h3 = $cells[2].ToLowerInvariant()
             if ($h1 -ne $hl -or $h2 -ne 'evidence' -or $h3 -ne 'result') {
-                Write-Invalid "$Label table header must be '| $HeaderLabel | Evidence | Result |'."
+                Write-Invalid "EVIDENCE_MAPPING_INVALID" $Label '' "$Label table header must be '| $HeaderLabel | Evidence | Result |'."
             }
             $stage = 1
             continue
         }
         if ($stage -eq 1) {
             if (-not (Test-TableRowIsSeparator $cells)) {
-                Write-Invalid "$Label table is missing its separator row."
+                Write-Invalid "EVIDENCE_MAPPING_INVALID" $Label '' "$Label table is missing its separator row."
             }
-            if ($cells.Count -ne 3) { Write-Invalid "$Label table separator has $($cells.Count) columns (expected 3)." }
+            if ($cells.Count -ne 3) { Write-Invalid "EVIDENCE_MAPPING_INVALID" $Label '' "$Label table separator has $($cells.Count) columns (expected 3)." }
             $stage = 2
             continue
         }
         # Canonical data row.
         if (Test-TableRowIsSeparator $cells) {
-            Write-Invalid "$Label table must not contain a second header or separator."
+            Write-Invalid "EVIDENCE_MAPPING_INVALID" $Label '' "$Label table must not contain a second header or separator."
         }
-        if ($cells.Count -ne 3) { Write-Invalid "$Label table row has $($cells.Count) columns (expected 3)." }
+        if ($cells.Count -ne 3) { Write-Invalid "EVIDENCE_MAPPING_INVALID" $Label '' "$Label table row has $($cells.Count) columns (expected 3)." }
         $ev = $cells[1]
         $res = $cells[2]
         if ($id -notmatch "^$IdPattern$") {
-            Write-Invalid "$Label row '$id' has an unrecognized identifier."
+            Write-Invalid "EVIDENCE_MAPPING_INVALID" $Label $id "$Label row '$id' has an unrecognized identifier."
         }
         $idLower = $id.ToLowerInvariant()
-        if (-not $ev) { Write-Invalid "$Label row '$idLower' has an empty evidence description." }
+        if (-not $ev) { Write-Invalid "EVIDENCE_MAPPING_INVALID" $Label $idLower "$Label row '$idLower' has an empty evidence description." }
         if ($script:Completed -and ((Get-ContentClass @($ev)) -eq 'placeholder')) {
-            Write-Blocked "$Label row '$idLower' has a placeholder evidence description."
+            Write-Blocked "EVIDENCE_UNRESOLVED" $Label $idLower "$Label row '$idLower' has a placeholder evidence description."
         }
-        if (-not $res) { Write-Invalid "$Label row '$idLower' has an empty result." }
+        if (-not $res) { Write-Invalid "EVIDENCE_MAPPING_INVALID" $Label $idLower "$Label row '$idLower' has an empty result." }
         $lres = $res.ToLowerInvariant()
         if ($AllowedResults -notcontains $lres) {
-            Write-Invalid "$Label row '$idLower' has unrecognized result '$res' (allowed: passed, satisfied, n/a, pending, partial, blocked, missing, not-run)."
+            Write-Invalid "EVIDENCE_MAPPING_INVALID" $Label $idLower "$Label row '$idLower' has unrecognized result '$res' (allowed: passed, satisfied, n/a, pending, partial, blocked, missing, not-run)."
         }
         if ($lres -eq 'n/a') {
             # A resolved 'n/a' must carry a structured 'N/A: <reason>'
             # rationale with meaningful text after the colon.
             $evLower = $ev.ToLowerInvariant()
             if ($evLower -notmatch '^\s*n/a\s*:\s*\S') {
-                Write-Invalid "$Label row '$idLower' uses 'n/a' without a substantive 'N/A: <reason>' rationale."
+                Write-Invalid "EVIDENCE_MAPPING_INVALID" $Label $idLower "$Label row '$idLower' uses 'n/a' without a substantive 'N/A: <reason>' rationale."
             }
             $rationale = ([regex]::Match($evLower, '^\s*n/a\s*:\s*(.*?)\s*$')).Groups[1].Value
             if ((Get-ContentClass @($rationale)) -ne 'content') {
-                Write-Invalid "$Label row '$idLower' uses 'n/a' with a placeholder rationale."
+                Write-Invalid "EVIDENCE_MAPPING_INVALID" $Label $idLower "$Label row '$idLower' uses 'n/a' with a placeholder rationale."
             }
         }
         if (-not $seen.Add($idLower)) { $script:TableDup = $true }
@@ -694,14 +708,14 @@ switch ($ProfileName) {
 }
 
 foreach ($s in $requiredSections) {
-    if ($SECTIONS -notcontains $s) { Write-Invalid "missing required section '## $s' for profile '$ProfileName'." }
+    if ($SECTIONS -notcontains $s) { Write-Invalid "SECTION_MISSING" '' '' "missing required section '## $s' for profile '$ProfileName'." }
 }
 foreach ($s in $requiredSubsections) {
     $found = $false
     for ($i = 0; $i -lt $SUBSECTIONS.Count; $i++) {
         if ($SUBSECTIONS[$i] -eq $s -and $SUB_SECTION[$i] -eq 'verification') { $found = $true; break }
     }
-    if (-not $found) { Write-Invalid "missing '### $s' subsection under '## Verification' for profile '$ProfileName'." }
+    if (-not $found) { Write-Invalid "SECTION_MISSING" '' '' "missing '### $s' subsection under '## Verification' for profile '$ProfileName'." }
 }
 
 # Completed tasks must record real evidence in every section the profile
@@ -736,17 +750,17 @@ if ($ProfileName -eq 'prototype') {
         if ($d -eq 'production readiness: not established') { $readinessDecl++ }
         elseif ($d -eq 'no production deployment or irreversible operation: confirmed') { $noDeployDecl++ }
         if ($d -match '^production\s+readiness\s*:' -and $d -ne 'production readiness: not established') {
-            Write-Invalid "prototype handoff declaration 'Production readiness' must appear as the exact line 'Production readiness: not established'."
+            Write-Invalid "PROTOTYPE_DECLARATION_INVALID" '' '' "prototype handoff declaration 'Production readiness' must appear as the exact line 'Production readiness: not established'."
         }
         if ($d -match '^no\s+production\s+deployment\s+or\s+irreversible\s+operation\s*:' -and $d -ne 'no production deployment or irreversible operation: confirmed') {
-            Write-Invalid "prototype handoff declaration 'No production deployment or irreversible operation' must appear as the exact line 'No production deployment or irreversible operation: confirmed'."
+            Write-Invalid "PROTOTYPE_DECLARATION_INVALID" '' '' "prototype handoff declaration 'No production deployment or irreversible operation' must appear as the exact line 'No production deployment or irreversible operation: confirmed'."
         }
     }
     if ($readinessDecl -ne 1) {
-        Write-Invalid "prototype handoff must state 'Production readiness: not established' exactly once."
+        Write-Invalid "PROTOTYPE_DECLARATION_INVALID" '' '' "prototype handoff must state 'Production readiness: not established' exactly once."
     }
     if ($noDeployDecl -ne 1) {
-        Write-Invalid "prototype handoff must declare 'No production deployment or irreversible operation: confirmed' exactly once."
+        Write-Invalid "PROTOTYPE_DECLARATION_INVALID" '' '' "prototype handoff must declare 'No production deployment or irreversible operation: confirmed' exactly once."
     }
     if ($Completed) {
         Assert-VerificationEvidence '## Task goal' (Get-SectionContent 'task goal')
@@ -761,50 +775,50 @@ if ($ProfileName -eq 'prototype') {
 # ---------------------------------------------------------------------------
 if ($ProfileName -ne 'prototype') {
     $acIds = Get-CanonicalIds (Get-SectionContent 'acceptance criteria') 'ac-\d+'
-    if ($script:MultiIds) { Write-Invalid "an acceptance criterion list entry declares more than one 'AC-N' identifier." }
-    if ($script:BadForm) { Write-Invalid "acceptance criteria must use the form '- AC-N: <description>'." }
-    if ($script:Unnumbered) { Write-Invalid "every acceptance criterion list entry must begin with exactly one 'AC-N:' identifier; explanatory prose belongs in a separate Notes section." }
+    if ($script:MultiIds) { Write-Invalid "CRITERION_INVALID" '' '' "an acceptance criterion list entry declares more than one 'AC-N' identifier." }
+    if ($script:BadForm) { Write-Invalid "CRITERION_INVALID" '' '' "acceptance criteria must use the form '- AC-N: <description>'." }
+    if ($script:Unnumbered) { Write-Invalid "CRITERION_INVALID" '' '' "every acceptance criterion list entry must begin with exactly one 'AC-N:' identifier; explanatory prose belongs in a separate Notes section." }
     Assert-CanonicalSection (Get-SectionContent 'acceptance criteria') 'ac-\d+' 'acceptance criteria' 'AC-N: <description>'
-    if ($acIds.Count -eq 0) { Write-Invalid "acceptance criteria must declare at least one 'AC-N' identifier." }
-    if ($script:DupIds) { Write-Invalid "acceptance criteria declare duplicate 'AC-N' identifiers." }
+    if ($acIds.Count -eq 0) { Write-Invalid "CRITERION_INVALID" '' '' "acceptance criteria must declare at least one 'AC-N' identifier." }
+    if ($script:DupIds) { Write-Invalid "CRITERION_INVALID" '' '' "acceptance criteria declare duplicate 'AC-N' identifiers." }
     if ($Completed) {
         Assert-CompletionDescriptions (Get-SectionContent 'acceptance criteria') 'ac-\d+' 'acceptance criterion'
     }
 
     $evIds = Test-Table 'required evidence' 'AC-\d+' 'required evidence' 'AC ID'
-    if ($evIds.Count -eq 0) { Write-Invalid "required evidence must map at least one 'AC-N' to evidence." }
-    if ($script:TableDup) { Write-Invalid "required evidence maps a criterion more than once." }
+    if ($evIds.Count -eq 0) { Write-Invalid "EVIDENCE_MAPPING_INVALID" '' '' "required evidence must map at least one 'AC-N' to evidence." }
+    if ($script:TableDup) { Write-Invalid "EVIDENCE_MAPPING_INVALID" '' '' "required evidence maps a criterion more than once." }
     if (((Get-SortedUnique $acIds) -join ' ') -ne ((Get-SortedUnique $evIds) -join ' ')) {
-        Write-Invalid "acceptance criteria and required evidence must list exactly the same 'AC-N' identifiers."
+        Write-Invalid "EVIDENCE_MAPPING_INVALID" '' '' "acceptance criteria and required evidence must list exactly the same 'AC-N' identifiers."
     }
     if ($Completed -and $script:HasUnresolved) {
-        Write-Blocked 'task is marked complete but required evidence remains unresolved (pending, partial, blocked, missing, or not-run).'
+        Write-Blocked "EVIDENCE_UNRESOLVED" '' '' "task is marked complete but required evidence remains unresolved (pending, partial, blocked, missing, or not-run)."
     }
 
     if ($ProfileName -eq 'high-assurance') {
         $rIds = Get-CanonicalIds (Get-SectionContent 'requirements') 'r-\d+'
-        if ($script:MultiIds) { Write-Invalid "a high-assurance requirement list entry declares more than one 'R-N' identifier." }
-        if ($script:BadForm) { Write-Invalid "high-assurance requirements must use the form '- R-N: <description>'." }
-        if ($script:Unnumbered) { Write-Invalid "every high-assurance requirement list entry must begin with exactly one 'R-N:' identifier; explanatory prose belongs in a separate Notes section." }
+        if ($script:MultiIds) { Write-Invalid "CRITERION_INVALID" '' '' "a high-assurance requirement list entry declares more than one 'R-N' identifier." }
+        if ($script:BadForm) { Write-Invalid "CRITERION_INVALID" '' '' "high-assurance requirements must use the form '- R-N: <description>'." }
+        if ($script:Unnumbered) { Write-Invalid "CRITERION_INVALID" '' '' "every high-assurance requirement list entry must begin with exactly one 'R-N:' identifier; explanatory prose belongs in a separate Notes section." }
         Assert-CanonicalSection (Get-SectionContent 'requirements') 'r-\d+' 'high-assurance requirements' 'R-N: <description>'
-        if ($rIds.Count -eq 0) { Write-Invalid "high-assurance requirements must declare at least one 'R-N' identifier." }
-        if ($script:DupIds) { Write-Invalid "high-assurance requirements declare duplicate 'R-N' identifiers." }
+        if ($rIds.Count -eq 0) { Write-Invalid "CRITERION_INVALID" '' '' "high-assurance requirements must declare at least one 'R-N' identifier." }
+        if ($script:DupIds) { Write-Invalid "CRITERION_INVALID" '' '' "high-assurance requirements declare duplicate 'R-N' identifiers." }
         if ($Completed) {
             Assert-CompletionDescriptions (Get-SectionContent 'requirements') 'r-\d+' 'high-assurance requirement'
         }
 
         $mIds = Test-Table 'requirement-to-evidence' 'R-\d+' 'requirement-to-evidence' 'Requirement ID'
-        if ($mIds.Count -eq 0) { Write-Invalid "the requirement-to-evidence matrix must map at least one 'R-N' to evidence." }
-        if ($script:TableDup) { Write-Invalid "the requirement-to-evidence matrix maps a requirement more than once." }
+        if ($mIds.Count -eq 0) { Write-Invalid "EVIDENCE_MAPPING_INVALID" '' '' "the requirement-to-evidence matrix must map at least one 'R-N' to evidence." }
+        if ($script:TableDup) { Write-Invalid "EVIDENCE_MAPPING_INVALID" '' '' "the requirement-to-evidence matrix maps a requirement more than once." }
         if (((Get-SortedUnique $rIds) -join ' ') -ne ((Get-SortedUnique $mIds) -join ' ')) {
-            Write-Invalid "requirements and the requirement-to-evidence matrix must list exactly the same 'R-N' identifiers."
+            Write-Invalid "EVIDENCE_MAPPING_INVALID" '' '' "requirements and the requirement-to-evidence matrix must list exactly the same 'R-N' identifiers."
         }
         if ($Completed -and $script:HasUnresolved) {
-            Write-Blocked 'task is marked complete but the requirement-to-evidence matrix has unresolved rows.'
+            Write-Blocked "EVIDENCE_UNRESOLVED" '' '' "task is marked complete but the requirement-to-evidence matrix has unresolved rows."
         }
 
         foreach ($s in @('risk analysis', 'negative-path and boundary tests', 'integration verification', 'recovery plan', 'independent review')) {
-            if (-not (Test-SectionRealContent $s)) { Write-Invalid "high-assurance section '## $s' must contain real content (no headings, placeholders, or separators)." }
+            if (-not (Test-SectionRealContent $s)) { Write-Invalid "CRITERION_INVALID" $s '' "high-assurance section '## $s' must contain real content (no headings, placeholders, or separators)." }
         }
     }
 }
@@ -827,21 +841,21 @@ if ($SECTIONS -contains 'approval gates') {
         if ($bodyLow -eq 'none identified') { $hasNone = $true; continue }
         if ($glLow -match '^[-*+]\s*\[[ xX]\]') {
             if ($glLow -notmatch '^[-*+]\s*\[[ xX]\]\s*ag-\d+\s*:') {
-                Write-Invalid "malformed approval entry in '## Approval gates': '$gl'."
+                Write-Invalid "APPROVAL_INVALID" '## Approval gates' '' "malformed approval entry in '## Approval gates': entries must be '- [ ] AG-N: <requirement>' or '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'."
             }
             $m = [regex]::Match($glLow, '^[-*+]\s*\[([ xX])\]\s*(ag-\d+)\s*:\s*(.*?)\s*$')
             $gid = $m.Groups[2].Value
             $gbox = $m.Groups[1].Value
             $gdet = $m.Groups[3].Value.Trim()
             $gateCount++
-            if (-not $gateSeen.Add($gid)) { Write-Invalid "approval gate '$gid' is declared more than once." }
+            if (-not $gateSeen.Add($gid)) { Write-Invalid "APPROVAL_INVALID" '## Approval gates' $gid "approval gate '$gid' is declared more than once." }
             if ($gbox -eq 'x') {
                 $checked++
                 if ($gdet -notmatch '^approved\s+by\s+.+\s+on\s+\d{4}-\d{2}-\d{2}\s*$') {
-                    Write-Invalid "approval gate '$gid' must be in the form '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'."
+                    Write-Invalid "APPROVAL_INVALID" '## Approval gates' $gid "approval gate '$gid' must be in the form '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'."
                 }
                 if ($gdet -match '<approver>|tbd|pending|unknown|n/a|not\s+approved|approval\s+not\s+granted') {
-                    Write-Invalid "approval gate '$gid' must not use placeholder values."
+                    Write-Invalid "APPROVAL_INVALID" '## Approval gates' $gid "approval gate '$gid' must not use placeholder values."
                 }
                 # Parse anchored groups so the date validated is the trailing
                 # approval date, not an earlier date that happens to appear in
@@ -849,42 +863,42 @@ if ($SECTIONS -contains 'approval gates') {
                 $am = [regex]::Match($gdet, '^approved\s+by\s+(.+?)\s+on\s+(\d{4}-\d{2}-\d{2})\s*$')
                 $approvalDate = $am.Groups[2].Value
                 $approver = $am.Groups[1].Value
-                if (-not $approvalDate) { Write-Invalid "approval gate '$gid' must record an ISO date YYYY-MM-DD." }
-                if (-not (Test-IsoDate $approvalDate)) { Write-Invalid "approval gate '$gid' has an invalid ISO date '$approvalDate'." }
-                if (-not $approver) { Write-Invalid "approval gate '$gid' must record an approver." }
-                if ($approver -match '[<>]') { Write-Invalid "approval gate '$gid' must not use template placeholders." }
-                if (-not (Test-MeaningfulChar $approver)) { Write-Invalid "approval gate '$gid' must record a meaningful approver." }
+                if (-not $approvalDate) { Write-Invalid "APPROVAL_INVALID" '## Approval gates' $gid "approval gate '$gid' must record an ISO date YYYY-MM-DD." }
+                if (-not (Test-IsoDate $approvalDate)) { Write-Invalid "APPROVAL_INVALID" '## Approval gates' $gid "approval gate '$gid' has an invalid ISO date '$approvalDate'." }
+                if (-not $approver) { Write-Invalid "APPROVAL_INVALID" '## Approval gates' $gid "approval gate '$gid' must record an approver." }
+                if ($approver -match '[<>]') { Write-Invalid "APPROVAL_INVALID" '## Approval gates' $gid "approval gate '$gid' must not use template placeholders." }
+                if (-not (Test-MeaningfulChar $approver)) { Write-Invalid "APPROVAL_INVALID" '## Approval gates' $gid "approval gate '$gid' must record a meaningful approver." }
             }
             else {
                 $unchecked++
-                if (-not $gdet) { Write-Invalid "approval gate '$gid' must describe the required approval." }
+                if (-not $gdet) { Write-Invalid "APPROVAL_INVALID" '## Approval gates' $gid "approval gate '$gid' must describe the required approval." }
                 if ($gdet -match '^approved\s+by\s+.+\s+on\s+\d{4}-\d{2}-\d{2}\s*$') {
-                    Write-Invalid "unchecked approval gate '$gid' cannot record an approval; describe the requirement instead."
+                    Write-Invalid "APPROVAL_INVALID" '## Approval gates' $gid "unchecked approval gate '$gid' cannot record an approval; describe the requirement instead."
                 }
             }
             continue
         }
         if ($glLow -match '\[[ xX]\]') {
-            Write-Invalid "malformed approval entry in '## Approval gates': '$gl'."
+            Write-Invalid "APPROVAL_INVALID" '## Approval gates' '' "malformed approval entry in '## Approval gates': entries must be '- [ ] AG-N: <requirement>' or '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'."
         }
         if ($glLow -match '^[-*+]\s+') {
-            Write-Invalid "malformed approval entry in '## Approval gates': '$gl'."
+            Write-Invalid "APPROVAL_INVALID" '## Approval gates' '' "malformed approval entry in '## Approval gates': entries must be '- [ ] AG-N: <requirement>' or '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'."
         }
-        Write-Invalid "malformed approval entry in '## Approval gates': '$gl'."
+        Write-Invalid "APPROVAL_INVALID" '## Approval gates' '' "malformed approval entry in '## Approval gates': entries must be '- [ ] AG-N: <requirement>' or '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'."
     }
 
     if ($hasNone -and $gateCount -gt 0) {
-        Write-Invalid "approval gates cannot both declare 'None identified' and structured gates."
+        Write-Invalid "APPROVAL_INVALID" '## Approval gates' '' "approval gates cannot both declare 'None identified' and structured gates."
     }
     if ($ProfileName -eq 'high-assurance') {
-        if ($hasNone) { Write-Invalid "high-assurance tasks require explicit approval gates ('None identified' is not permitted)." }
-        if ($gateCount -eq 0) { Write-Invalid "high-assurance tasks must declare at least one approval gate 'AG-N'." }
+        if ($hasNone) { Write-Invalid "APPROVAL_INVALID" '## Approval gates' '' "high-assurance tasks require explicit approval gates ('None identified' is not permitted)." }
+        if ($gateCount -eq 0) { Write-Invalid "APPROVAL_INVALID" '## Approval gates' '' "high-assurance tasks must declare at least one approval gate 'AG-N'." }
     }
     elseif (-not $hasNone -and $gateCount -eq 0) {
-        Write-Invalid "approval gates must declare structured 'AG-N' records or 'None identified'."
+        Write-Invalid "APPROVAL_INVALID" '## Approval gates' '' "approval gates must declare structured 'AG-N' records or 'None identified'."
     }
     if ($Completed -and $unchecked -gt 0) {
-        Write-Blocked 'task is marked complete but an approval gate remains unchecked.'
+        Write-Blocked "APPROVAL_UNRESOLVED" '## Approval gates' '' "task is marked complete but an approval gate remains unchecked."
     }
 }
 

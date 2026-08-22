@@ -28,7 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Refined redaction policy: project-relative paths only; no raw malformed source lines in JSON diagnostics.
 - Strengthened JSON schemas with `additionalProperties: false`, integer bounds on summary counts/durations, and protocol_version constraining to "1.4.0".
-- Diagnostic code functions now accept explicit codes with fallback inference for transition safety.
+- Strengthened schemas further with draft-07 `if/then` invariants pairing every `result` with its exit code and requiring diagnostics on task-validation failures; the stable diagnostic codes are now a closed set enumerated in the schema.
+- Diagnostic code helpers take explicit `<code> <section> <identifier> <message>` arguments at every call site; message-keyword inference removed from both validators.
 
 ### Fixed
 - Bash `--events` initialization ordering (function hoisting).
@@ -37,7 +38,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PowerShell event string-concatenation vulnerabilities (now use `ConvertTo-Json`).
 - PowerShell working_directory and task_file redaction to project-relative paths.
 - Invalid task metadata no longer generates misleading JSON defaults.
-- Diagnostic code fallback inference preserved backward compatibility during transition.
+- Event streams initialize only after contract validation succeeds, so contract failures never leave an unterminated stream or a mismatched UNSUPPORTED/exit-1 pairing; destinations are confined to `.agentic/runs/` lexically and physically, created atomically, and never overwritten without `--events-force` / `-EventsForce`.
+- Bash task-validator JSON mode now requires `python3` only for `--format json` (text mode unchanged) and propagates serializer failures as nonzero exits instead of emitting empty documents.
+- JsonContracts suite parses verifier output before its temp-file cleanup, so the python3-stub test can pass on Linux CI where it actually runs.
 
 ## [1.3.0] - 2026-08-21
 

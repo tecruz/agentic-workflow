@@ -21,12 +21,49 @@
         "additionalProperties": false,
         "required": ["code", "section", "identifier", "message"],
         "properties": {
-          "code": { "type": "string" },
+          "code": {
+            "type": "string",
+            "enum": [
+              "TASK_FILE_NOT_FOUND",
+              "PROFILE_UNKNOWN",
+              "PROFILE_DECLARATION_INVALID",
+              "STATUS_INVALID",
+              "STATUS_DECLARATION_INVALID",
+              "UPDATED_INVALID",
+              "SECTION_MISSING",
+              "SECTION_DUPLICATE",
+              "CRITERION_INVALID",
+              "EVIDENCE_MAPPING_INVALID",
+              "APPROVAL_INVALID",
+              "APPROVAL_UNRESOLVED",
+              "PROTOTYPE_DECLARATION_INVALID",
+              "EVIDENCE_UNRESOLVED",
+              "STATUS_NOT_DONE"
+            ]
+          },
           "section": { "type": ["string", "null"] },
           "identifier": { "type": ["string", "null"] },
           "message": { "type": "string" }
         }
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "result": { "const": "VALID" } }, "required": ["result"] },
+      "then": { "properties": { "exit_code": { "const": 0 } } }
+    },
+    {
+      "if": { "properties": { "result": { "const": "INVALID" } }, "required": ["result"] },
+      "then": { "properties": { "exit_code": { "const": 1 }, "diagnostics": { "type": "array", "minItems": 1 } } }
+    },
+    {
+      "if": { "properties": { "result": { "const": "BLOCKED" } }, "required": ["result"] },
+      "then": { "properties": { "exit_code": { "const": 2 }, "diagnostics": { "type": "array", "minItems": 1 } } }
+    },
+    {
+      "if": { "properties": { "exit_code": { "const": 0 } }, "required": ["exit_code"] },
+      "then": { "properties": { "diagnostics": { "type": "array", "maxItems": 0 } } }
+    }
+  ]
 }
