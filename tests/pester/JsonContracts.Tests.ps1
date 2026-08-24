@@ -314,8 +314,8 @@ Describe 'v1.4.0 JSON result contracts and schema validation' {
         $proj = Join-Path $TestDrive "required-fail-$([guid]::NewGuid().ToString('N'))"
         New-Item -ItemType Directory -Path (Join-Path $proj '.agentic') -Force | Out-Null
         @(
-            "required`tbroken`t.`tsh`t-c`texit`t3",
-            "optional`tfine`t.`tsh`t-c`ttrue"
+            "required`tbroken`t.`tsh`t-c`texit 3",
+            "optional`tfine`t.`tsh`t-c`texit 0"
         ) | Set-Content -LiteralPath (Join-Path $proj '.agentic/checks.tsv')
         $tmpOut = [System.IO.Path]::GetTempFileName()
         Push-Location $proj
