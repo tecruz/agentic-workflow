@@ -264,7 +264,7 @@ function Test-IsoDate {
 # Profile and status declarations.
 # ---------------------------------------------------------------------------
 if ($ProfileDecl -ne 1) {
-    Write-Invalid "PROFILE_DECLARATION_INVALID" '' '' "task must declare exactly one 'Profile:' (found $ProfileDecl)."
+    Write-Invalid "PROFILE_DECLARATION_INVALID" '' '' "task must declare exactly one 'Profile:'."
 }
 if (-not $ProfileInRisk) {
     Write-Invalid "PROFILE_DECLARATION_INVALID" '' '' "Profile: must be declared inside '## Risk profile'."
@@ -273,16 +273,16 @@ if ($ProfileName -notin @('prototype', 'standard', 'high-assurance')) {
     Write-Invalid "PROFILE_UNKNOWN" '' '' "task must declare a recognized risk profile (prototype, standard, or high-assurance)."
 }
 if ($StatusDecl -ne 1) {
-    Write-Invalid "STATUS_DECLARATION_INVALID" '' '' "task must declare exactly one 'Status:' (found $StatusDecl)."
+    Write-Invalid "STATUS_DECLARATION_INVALID" '' '' "task must declare exactly one 'Status:'."
 }
 if (-not $StatusInStatus) {
     Write-Invalid "STATUS_DECLARATION_INVALID" '' '' "Status: must be declared inside '## Status'."
 }
 if ($StatusName -notin @('planned', 'in-progress', 'blocked', 'done')) {
-    Write-Invalid "STATUS_INVALID" '' '' "task status must be one of: planned, in-progress, blocked, done (found '$StatusName')."
+    Write-Invalid "STATUS_INVALID" '' '' "task status is not one of the supported values."
 }
 if ($UpdatedCount -ne 1) {
-    Write-Invalid "UPDATED_INVALID" '' '' "task must declare exactly one 'Updated:' (found $UpdatedCount)."
+    Write-Invalid "UPDATED_INVALID" '' '' "task must declare exactly one 'Updated:'."
 }
 if (-not $UpdatedInStatus) {
     Write-Invalid "UPDATED_INVALID" '' '' "Updated: must be declared inside '## Status'."
@@ -291,11 +291,11 @@ if (-not $Updated) {
     Write-Invalid "UPDATED_INVALID" '' '' "Updated: must have a value."
 }
 if (-not (Test-IsoDate $Updated)) {
-    Write-Invalid "UPDATED_INVALID" '' '' "Updated: must be a valid ISO date YYYY-MM-DD (found '$Updated')."
+    Write-Invalid "UPDATED_INVALID" '' '' "Updated: must be a valid ISO date YYYY-MM-DD."
 }
 $Completed = ($StatusName -eq 'done')
 if ($Handoff -and -not $Completed) {
-    Write-Blocked "STATUS_NOT_DONE" '' '' "handoff requires 'Status: done' (found '$StatusName')."
+    Write-Blocked "STATUS_NOT_DONE" '' '' "handoff requires 'Status: done'."
 }
 
 # ---------------------------------------------------------------------------
@@ -304,11 +304,11 @@ if ($Handoff -and -not $Completed) {
 # ---------------------------------------------------------------------------
 $seenSections = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
 foreach ($s in $SECTIONS) {
-    if (-not $seenSections.Add($s)) { Write-Invalid "SECTION_DUPLICATE" '' '' "duplicate section heading '## $s'." }
+    if (-not $seenSections.Add($s)) { Write-Invalid "SECTION_DUPLICATE" '' '' "duplicate section heading." }
 }
 $seenSubsections = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
 foreach ($s in $SUBSECTIONS) {
-    if (-not $seenSubsections.Add($s)) { Write-Invalid "SECTION_DUPLICATE" '' '' "duplicate subsection heading '### $s'." }
+    if (-not $seenSubsections.Add($s)) { Write-Invalid "SECTION_DUPLICATE" '' '' "duplicate subsection heading." }
 }
 
 function Get-SectionContent {
@@ -499,7 +499,7 @@ function Assert-CompletionDescriptions {
         $id = $idMatch.Value
         $desc = ([regex]::Match($lowLine, "^\s*[-*+]\s*$IdPattern\s*:\s*(.*?)\s*$")).Groups[1].Value
         if (-not $desc -or ((Get-ContentClass @($desc)) -eq 'placeholder')) {
-            Write-Blocked "EVIDENCE_UNRESOLVED" $Kind $id "$Kind '$id' has a placeholder description."
+            Write-Blocked "EVIDENCE_UNRESOLVED" $Kind $id "entry has a placeholder description."
         }
     }
 }
@@ -661,28 +661,28 @@ function Test-Table {
         $ev = $cells[1]
         $res = $cells[2]
         if ($id -notmatch "^$IdPattern$") {
-            Write-Invalid "EVIDENCE_MAPPING_INVALID" $Label $id "$Label row '$id' has an unrecognized identifier."
+            Write-Invalid "EVIDENCE_MAPPING_INVALID" $Label $id "row has an unrecognized identifier."
         }
         $idLower = $id.ToLowerInvariant()
-        if (-not $ev) { Write-Invalid "EVIDENCE_MAPPING_INVALID" $Label $idLower "$Label row '$idLower' has an empty evidence description." }
+        if (-not $ev) { Write-Invalid "EVIDENCE_MAPPING_INVALID" $Label $idLower "row has an empty evidence description." }
         if ($script:Completed -and ((Get-ContentClass @($ev)) -eq 'placeholder')) {
-            Write-Blocked "EVIDENCE_UNRESOLVED" $Label $idLower "$Label row '$idLower' has a placeholder evidence description."
+            Write-Blocked "EVIDENCE_UNRESOLVED" $Label $idLower "row has a placeholder evidence description."
         }
-        if (-not $res) { Write-Invalid "EVIDENCE_MAPPING_INVALID" $Label $idLower "$Label row '$idLower' has an empty result." }
+        if (-not $res) { Write-Invalid "EVIDENCE_MAPPING_INVALID" $Label $idLower "row has an empty result." }
         $lres = $res.ToLowerInvariant()
         if ($AllowedResults -notcontains $lres) {
-            Write-Invalid "EVIDENCE_MAPPING_INVALID" $Label $idLower "$Label row '$idLower' has unrecognized result '$res' (allowed: passed, satisfied, n/a, pending, partial, blocked, missing, not-run)."
+            Write-Invalid "EVIDENCE_MAPPING_INVALID" $Label $idLower "row has an unrecognized result value."
         }
         if ($lres -eq 'n/a') {
             # A resolved 'n/a' must carry a structured 'N/A: <reason>'
             # rationale with meaningful text after the colon.
             $evLower = $ev.ToLowerInvariant()
             if ($evLower -notmatch '^\s*n/a\s*:\s*\S') {
-                Write-Invalid "EVIDENCE_MAPPING_INVALID" $Label $idLower "$Label row '$idLower' uses 'n/a' without a substantive 'N/A: <reason>' rationale."
+                Write-Invalid "EVIDENCE_MAPPING_INVALID" $Label $idLower "row uses 'n/a' without a substantive 'N/A: <reason>' rationale."
             }
             $rationale = ([regex]::Match($evLower, '^\s*n/a\s*:\s*(.*?)\s*$')).Groups[1].Value
             if ((Get-ContentClass @($rationale)) -ne 'content') {
-                Write-Invalid "EVIDENCE_MAPPING_INVALID" $Label $idLower "$Label row '$idLower' uses 'n/a' with a placeholder rationale."
+                Write-Invalid "EVIDENCE_MAPPING_INVALID" $Label $idLower "row uses 'n/a' with a placeholder rationale."
             }
         }
         if (-not $seen.Add($idLower)) { $script:TableDup = $true }
@@ -858,14 +858,14 @@ if ($SECTIONS -contains 'approval gates') {
             $gbox = $m.Groups[1].Value
             $gdet = $m.Groups[3].Value.Trim()
             $gateCount++
-            if (-not $gateSeen.Add($gid)) { Write-Invalid "APPROVAL_INVALID" '## Approval gates' $gid "approval gate '$gid' is declared more than once." }
+            if (-not $gateSeen.Add($gid)) { Write-Invalid "APPROVAL_INVALID" '## Approval gates' $gid "approval gate is declared more than once." }
             if ($gbox -eq 'x') {
                 $checked++
                 if ($gdet -notmatch '^approved\s+by\s+.+\s+on\s+\d{4}-\d{2}-\d{2}\s*$') {
-                    Write-Invalid "APPROVAL_INVALID" '## Approval gates' $gid "approval gate '$gid' must be in the form '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'."
+                    Write-Invalid "APPROVAL_INVALID" '## Approval gates' $gid "approval gate must be in the form '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'."
                 }
                 if ($gdet -match '<approver>|tbd|pending|unknown|n/a|not\s+approved|approval\s+not\s+granted') {
-                    Write-Invalid "APPROVAL_INVALID" '## Approval gates' $gid "approval gate '$gid' must not use placeholder values."
+                    Write-Invalid "APPROVAL_INVALID" '## Approval gates' $gid "approval gate must not use placeholder values."
                 }
                 # Parse anchored groups so the date validated is the trailing
                 # approval date, not an earlier date that happens to appear in
@@ -873,17 +873,17 @@ if ($SECTIONS -contains 'approval gates') {
                 $am = [regex]::Match($gdet, '^approved\s+by\s+(.+?)\s+on\s+(\d{4}-\d{2}-\d{2})\s*$')
                 $approvalDate = $am.Groups[2].Value
                 $approver = $am.Groups[1].Value
-                if (-not $approvalDate) { Write-Invalid "APPROVAL_INVALID" '## Approval gates' $gid "approval gate '$gid' must record an ISO date YYYY-MM-DD." }
-                if (-not (Test-IsoDate $approvalDate)) { Write-Invalid "APPROVAL_INVALID" '## Approval gates' $gid "approval gate '$gid' has an invalid ISO date '$approvalDate'." }
-                if (-not $approver) { Write-Invalid "APPROVAL_INVALID" '## Approval gates' $gid "approval gate '$gid' must record an approver." }
-                if ($approver -match '[<>]') { Write-Invalid "APPROVAL_INVALID" '## Approval gates' $gid "approval gate '$gid' must not use template placeholders." }
-                if (-not (Test-MeaningfulChar $approver)) { Write-Invalid "APPROVAL_INVALID" '## Approval gates' $gid "approval gate '$gid' must record a meaningful approver." }
+                if (-not $approvalDate) { Write-Invalid "APPROVAL_INVALID" '## Approval gates' $gid "approval gate must record an ISO date YYYY-MM-DD." }
+                if (-not (Test-IsoDate $approvalDate)) { Write-Invalid "APPROVAL_INVALID" '## Approval gates' $gid "approval gate has an invalid ISO date." }
+                if (-not $approver) { Write-Invalid "APPROVAL_INVALID" '## Approval gates' $gid "approval gate must record an approver." }
+                if ($approver -match '[<>]') { Write-Invalid "APPROVAL_INVALID" '## Approval gates' $gid "approval gate must not use template placeholders." }
+                if (-not (Test-MeaningfulChar $approver)) { Write-Invalid "APPROVAL_INVALID" '## Approval gates' $gid "approval gate must record a meaningful approver." }
             }
             else {
                 $unchecked++
-                if (-not $gdet) { Write-Invalid "APPROVAL_INVALID" '## Approval gates' $gid "approval gate '$gid' must describe the required approval." }
+                if (-not $gdet) { Write-Invalid "APPROVAL_INVALID" '## Approval gates' $gid "approval gate must describe the required approval." }
                 if ($gdet -match '^approved\s+by\s+.+\s+on\s+\d{4}-\d{2}-\d{2}\s*$') {
-                    Write-Invalid "APPROVAL_INVALID" '## Approval gates' $gid "unchecked approval gate '$gid' cannot record an approval; describe the requirement instead."
+                    Write-Invalid "APPROVAL_INVALID" '## Approval gates' $gid "unchecked approval gate cannot record an approval; describe the requirement instead."
                 }
             }
             continue

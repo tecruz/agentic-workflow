@@ -106,7 +106,13 @@ function Write-VerificationEvent {
     # Single choke point for the JSONL events stream: keeps serialization
     # (ConvertTo-Json) and newline handling identical for every event type.
     if ($Events) {
-        [System.IO.File]::AppendAllText($Events, ($Event | ConvertTo-Json -Compress) + "`n", [System.Text.UTF8Encoding]::new($false))
+        try {
+            [System.IO.File]::AppendAllText($Events, ($Event | ConvertTo-Json -Compress) + "`n", [System.Text.UTF8Encoding]::new($false))
+        }
+        catch {
+            [Console]::Error.WriteLine("ERROR: failed to write event to stream.")
+            exit 1
+        }
     }
 }
 
@@ -115,12 +121,26 @@ function Complete-Verification {
     # exactly one terminal verification_completed event (events mode), then
     # exits with the state-model exit code.
     param([string] $ResultStr, [int] $ExitCode)
-    if ($Format -eq 'Json') { Output-VerificationJson $ResultStr $ExitCode }
-    Write-VerificationEvent ([ordered]@{
-        event     = "verification_completed"
-        result    = $ResultStr
-        exit_code = $ExitCode
-    })
+    if ($Format -eq 'Json') { 
+        try {
+            Output-VerificationJson $ResultStr $ExitCode
+        }
+        catch {
+            [Console]::Error.WriteLine("ERROR: failed to write JSON verification result.")
+            exit 1
+        }
+    }
+    try {
+        Write-VerificationEvent ([ordered]@{
+            event     = "verification_completed"
+            result    = $ResultStr
+            exit_code = $ExitCode
+        })
+    }
+    catch {
+        [Console]::Error.WriteLine("ERROR: failed to finalize verification event stream.")
+        exit 1
+    }
     exit $ExitCode
 }
 
@@ -170,6 +190,8 @@ function Invoke-Check {
         [string[]] $ArgsList
     )
 
+    $cwdDisplay = Get-CwdDisplay $Cwd
+
     $cwdAbsolute = Join-Path (Get-Location).Path $Cwd
     try {
         $resolvedCwdPath = Resolve-PhysicalPath $cwdAbsolute
@@ -185,10 +207,21 @@ function Invoke-Check {
             id                = $Id
             requirement       = $Requirement
             status            = $st
-            working_directory = (Get-CwdDisplay $Cwd)
+            working_directory = $cwdDisplay
             exit_code         = $null
             duration_ms       = 0
             reason_code       = 'WORKING_DIR_MISSING'
+        }
+        if ($Events) {
+            Write-VerificationEvent ([ordered]@{
+                event             = "check_completed"
+                check_id          = $Id
+                status            = $st
+                exit_code         = $null
+                duration_ms       = 0
+                working_directory = $cwdDisplay
+                reason_code       = 'WORKING_DIR_MISSING'
+            })
         }
         return
     }
@@ -218,10 +251,21 @@ function Invoke-Check {
             id                = $Id
             requirement       = $Requirement
             status            = $st
-            working_directory = (Get-CwdDisplay $Cwd)
+            working_directory = $cwdDisplay
             exit_code         = $null
             duration_ms       = 0
             reason_code       = 'EXECUTABLE_MISSING'
+        }
+        if ($Events) {
+            Write-VerificationEvent ([ordered]@{
+                event             = "check_completed"
+                check_id          = $Id
+                status            = $st
+                exit_code         = $null
+                duration_ms       = 0
+                working_directory = $cwdDisplay
+                reason_code       = 'EXECUTABLE_MISSING'
+            })
         }
         return
     }
@@ -234,8 +278,9 @@ function Invoke-Check {
 
     if ($Events) {
         Write-VerificationEvent ([ordered]@{
-            event    = "check_started"
-            check_id = $Id
+            event             = "check_started"
+            check_id          = $Id
+            working_directory = $cwdDisplay
         })
     }
 
@@ -266,22 +311,25 @@ function Invoke-Check {
             Write-Log "  WARNING: optional check '$Id' failed"
         }
     }
+    $reasonCode = if ($checkFailed) { 'CHECK_FAILED' } else { $null }
     $script:CheckResults += [ordered]@{
         id                = $Id
         requirement       = $Requirement
         status            = $st
-        working_directory = (Get-CwdDisplay $Cwd)
+        working_directory = $cwdDisplay
         exit_code         = $code
         duration_ms       = $durationMs
-        reason_code       = $null
+        reason_code       = $reasonCode
     }
     if ($Events) {
         Write-VerificationEvent ([ordered]@{
-            event       = "check_completed"
-            check_id    = $Id
-            status      = $st
-            exit_code   = $code
-            duration_ms = $durationMs
+            event             = "check_completed"
+            check_id          = $Id
+            status            = $st
+            exit_code         = $code
+            duration_ms       = $durationMs
+            working_directory = $cwdDisplay
+            reason_code       = $reasonCode
         })
     }
 }

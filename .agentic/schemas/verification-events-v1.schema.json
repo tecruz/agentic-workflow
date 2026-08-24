@@ -35,10 +35,11 @@
       "allOf": [
         { "$ref": "#/definitions/event_name" },
         {
-          "required": ["check_id"],
+          "required": ["check_id", "working_directory"],
           "properties": {
             "event": { "const": "check_started" },
-            "check_id": { "type": "string" }
+            "check_id": { "type": "string" },
+            "working_directory": { "type": "string" }
           },
           "additionalProperties": false
         }
@@ -48,13 +49,15 @@
       "allOf": [
         { "$ref": "#/definitions/event_name" },
         {
-          "required": ["check_id", "status", "exit_code", "duration_ms"],
+          "required": ["check_id", "status", "exit_code", "duration_ms", "working_directory", "reason_code"],
           "properties": {
             "event": { "const": "check_completed" },
             "check_id": { "type": "string" },
             "status": { "enum": ["PASS", "FAIL", "BLOCKED", "SKIPPED_OPTIONAL"] },
             "exit_code": { "type": ["integer", "null"] },
-            "duration_ms": { "type": "integer", "minimum": 0 }
+            "duration_ms": { "type": "integer", "minimum": 0 },
+            "working_directory": { "type": "string" },
+            "reason_code": { "type": ["string", "null"] }
           },
           "additionalProperties": false
         }

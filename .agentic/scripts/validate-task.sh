@@ -450,27 +450,27 @@ validate_table() {
         ev="${CELLS[1]:-}"
         res="${CELLS[2]:-}"
         printf '%s' "$id" | lower | grep -qE "^$lp\$" \
-            || fail_invalid "EVIDENCE_MAPPING_INVALID" "$label" "$id" "$label row '$id' has an unrecognized identifier."
+            || fail_invalid "EVIDENCE_MAPPING_INVALID" "$label" "$id" "row has an unrecognized identifier."
         id="$(printf '%s' "$id" | lower)"
-        [ -n "$ev" ] || fail_invalid "EVIDENCE_MAPPING_INVALID" "$label" "$id" "$label row '$id' has an empty evidence description."
+        [ -n "$ev" ] || fail_invalid "EVIDENCE_MAPPING_INVALID" "$label" "$id" "row has an empty evidence description."
         if [ "$COMPLETED" -eq 1 ] && [ "$(content_class "$ev")" = "placeholder" ]; then
-            fail_blocked "EVIDENCE_UNRESOLVED" "$label" "$id" "$label row '$id' has a placeholder evidence description."
+            fail_blocked "EVIDENCE_UNRESOLVED" "$label" "$id" "row has a placeholder evidence description."
         fi
-        [ -n "$res" ] || fail_invalid "EVIDENCE_MAPPING_INVALID" "$label" "$id" "$label row '$id' has an empty result."
+        [ -n "$res" ] || fail_invalid "EVIDENCE_MAPPING_INVALID" "$label" "$id" "row has an empty result."
         lres="$(printf '%s' "$res" | lower)"
         case " $RESULT_ALLOWED " in
             *" $lres "*) ;;
-            *) fail_invalid "EVIDENCE_MAPPING_INVALID" "$label" "$id" "$label row '$id' has unrecognized result '$res' (allowed: passed, satisfied, n/a, pending, partial, blocked, missing, not-run)." ;;
+            *) fail_invalid "EVIDENCE_MAPPING_INVALID" "$label" "$id" "row has an unrecognized result value." ;;
         esac
         if [ "$lres" = "n/a" ]; then
             # A resolved 'n/a' must carry a structured 'N/A: <reason>'
             # rationale with meaningful text after the colon.
             ev_low="$(printf '%s' "$ev" | lower)"
             printf '%s' "$ev_low" | grep -qE '^[[:space:]]*n/a[[:space:]]*:[[:space:]]*[^[:space:]]' \
-                || fail_invalid "EVIDENCE_MAPPING_INVALID" "$label" "$id" "$label row '$id' uses 'n/a' without a substantive 'N/A: <reason>' rationale."
+                || fail_invalid "EVIDENCE_MAPPING_INVALID" "$label" "$id" "row uses 'n/a' without a substantive 'N/A: <reason>' rationale."
             rationale="$(printf '%s' "$ev_low" | sed -nE 's#^[[:space:]]*n/a[[:space:]]*:[[:space:]]*(.*)[[:space:]]*$#\1#p')"
             [ "$(content_class "$rationale")" = "content" ] \
-                || fail_invalid "EVIDENCE_MAPPING_INVALID" "$label" "$id" "$label row '$id' uses 'n/a' with a placeholder rationale."
+                || fail_invalid "EVIDENCE_MAPPING_INVALID" "$label" "$id" "row uses 'n/a' with a placeholder rationale."
         fi
         case " $seen " in
             *" $id "*) TABLE_DUP=1 ;;
@@ -740,7 +740,7 @@ check_completion_descriptions() {
         [ -n "$id" ] || continue
         desc="$(printf '%s' "$lowline" | sed -nE "s/^[[:space:]]*[-*+][[:space:]]*$idpat[[:space:]]*:[[:space:]]*(.*)[[:space:]]*$/\1/p")"
         if [ -z "$desc" ] || [ "$(content_class "$desc")" = "placeholder" ]; then
-            fail_blocked "EVIDENCE_UNRESOLVED" "$kind" "$id" "$kind '$id' has a placeholder description."
+            fail_blocked "EVIDENCE_UNRESOLVED" "$kind" "$id" "entry has a placeholder description."
         fi
     done <<< "$content"
 }
@@ -857,26 +857,26 @@ fi
 # ---------------------------------------------------------------------------
 # Profile and status declarations.
 # ---------------------------------------------------------------------------
-[ "$PROFILE_DECL" -eq 1 ] || fail_invalid "PROFILE_DECLARATION_INVALID" '' '' "task must declare exactly one 'Profile:' (found $PROFILE_DECL)."
+[ "$PROFILE_DECL" -eq 1 ] || fail_invalid "PROFILE_DECLARATION_INVALID" '' '' "task must declare exactly one 'Profile:'."
 [ "$PROFILE_IN_RISK" -eq 1 ] || fail_invalid "PROFILE_DECLARATION_INVALID" '' '' "Profile: must be declared inside '## Risk profile'."
 case "$PROFILE" in
     prototype|standard|high-assurance) ;;
     *) fail_invalid "PROFILE_UNKNOWN" '' '' "task must declare a recognized risk profile (prototype, standard, or high-assurance)." ;;
 esac
-[ "$STATUS_DECL" -eq 1 ] || fail_invalid "STATUS_DECLARATION_INVALID" '' '' "task must declare exactly one 'Status:' (found $STATUS_DECL)."
+[ "$STATUS_DECL" -eq 1 ] || fail_invalid "STATUS_DECLARATION_INVALID" '' '' "task must declare exactly one 'Status:'."
 [ "$STATUS_IN_STATUS" -eq 1 ] || fail_invalid "STATUS_DECLARATION_INVALID" '' '' "Status: must be declared inside '## Status'."
 case "$STATUS" in
     planned|in-progress|blocked|done) ;;
-    *) fail_invalid "STATUS_INVALID" '' '' "task status must be one of: planned, in-progress, blocked, done (found '$STATUS')." ;;
+    *) fail_invalid "STATUS_INVALID" '' '' "task status is not one of the supported values." ;;
 esac
-[ "$UPDATED_COUNT" -eq 1 ] || fail_invalid "UPDATED_INVALID" '' '' "task must declare exactly one 'Updated:' (found $UPDATED_COUNT)."
+[ "$UPDATED_COUNT" -eq 1 ] || fail_invalid "UPDATED_INVALID" '' '' "task must declare exactly one 'Updated:'."
 [ "$UPDATED_IN_STATUS" -eq 1 ] || fail_invalid "UPDATED_INVALID" '' '' "Updated: must be declared inside '## Status'."
 [ -n "$UPDATED" ] || fail_invalid "UPDATED_INVALID" '' '' "Updated: must have a value."
-validate_date "$UPDATED" || fail_invalid "UPDATED_INVALID" '' '' "Updated: must be a valid ISO date YYYY-MM-DD (found '$UPDATED')."
+validate_date "$UPDATED" || fail_invalid "UPDATED_INVALID" '' '' "Updated: must be a valid ISO date YYYY-MM-DD."
 COMPLETED=0
 [ "$STATUS" = "done" ] && COMPLETED=1
 if [ "$HANDOFF" -eq 1 ] && [ "$COMPLETED" -eq 0 ]; then
-    fail_blocked "STATUS_NOT_DONE" '' '' "handoff requires 'Status: done' (found '$STATUS')."
+    fail_blocked "STATUS_NOT_DONE" '' '' "handoff requires 'Status: done'."
 fi
 
 # ---------------------------------------------------------------------------
@@ -887,7 +887,7 @@ seen=""
 if [ "${#SECTIONS[@]}" -gt 0 ]; then
     for s in "${SECTIONS[@]}"; do
         case "|$seen|" in
-            *"|$s|"*) fail_invalid "SECTION_DUPLICATE" '' '' "duplicate section heading '## $s'." ;;
+            *"|$s|"*) fail_invalid "SECTION_DUPLICATE" '' '' "duplicate section heading." ;;
         esac
         seen="$seen|$s"
     done
@@ -896,7 +896,7 @@ seen=""
 if [ "${#SUBSECTIONS[@]}" -gt 0 ]; then
     for s in "${SUBSECTIONS[@]}"; do
         case "|$seen|" in
-            *"|$s|"*) fail_invalid "SECTION_DUPLICATE" '' '' "duplicate subsection heading '### $s'." ;;
+            *"|$s|"*) fail_invalid "SECTION_DUPLICATE" '' '' "duplicate subsection heading." ;;
         esac
         seen="$seen|$s"
     done
@@ -1070,31 +1070,31 @@ if has_section "approval gates"; then
             gbox="$(printf '%s\n' "$gl_low" | sed -nE 's/^[-*+][[:space:]]*\[([ xX])\][[:space:]]*(ag-[0-9]+)[[:space:]]*:[[:space:]]*(.*)[[:space:]]*$/\1/p')"
             gdet="$(printf '%s\n' "$gl_low" | sed -nE 's/^[-*+][[:space:]]*\[([ xX])\][[:space:]]*(ag-[0-9]+)[[:space:]]*:[[:space:]]*(.*)[[:space:]]*$/\3/p' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
             case " $gate_seen " in
-                *" $gid "*) fail_invalid "APPROVAL_INVALID" "## Approval gates" "$gid" "approval gate '$gid' is declared more than once." ;;
+                *" $gid "*) fail_invalid "APPROVAL_INVALID" "## Approval gates" "$gid" "approval gate is declared more than once." ;;
             esac
             gate_seen="$gate_seen $gid"
             case "$gbox" in
                 x)
                     checked=$(( checked + 1 ))
                     printf '%s' "$gdet" | grep -qE '^approved[[:space:]]+by[[:space:]]+.+[[:space:]]+on[[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]*$' \
-                        || fail_invalid "APPROVAL_INVALID" "## Approval gates" "$gid" "approval gate '$gid' must be in the form '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'."
+                        || fail_invalid "APPROVAL_INVALID" "## Approval gates" "$gid" "approval gate must be in the form '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'."
                     printf '%s' "$gdet" | grep -qE '<approver>|tbd|pending|unknown|n/a|not[[:space:]]+approved|approval[[:space:]]+not[[:space:]]+granted' \
-                        && fail_invalid "APPROVAL_INVALID" "## Approval gates" "$gid" "approval gate '$gid' must not use placeholder values."
+                        && fail_invalid "APPROVAL_INVALID" "## Approval gates" "$gid" "approval gate must not use placeholder values."
                     adate="$(printf '%s\n' "$gdet" | sed -nE 's/^.*[[:space:]]+on[[:space:]]+([0-9]{4}-[0-9]{2}-[0-9]{2})[[:space:]]*$/\1/p')"
-                    [ -n "$adate" ] || fail_invalid "APPROVAL_INVALID" "## Approval gates" "$gid" "approval gate '$gid' must record an ISO date YYYY-MM-DD."
-                    validate_date "$adate" || fail_invalid "APPROVAL_INVALID" "## Approval gates" "$gid" "approval gate '$gid' has an invalid ISO date '$adate'."
+                    [ -n "$adate" ] || fail_invalid "APPROVAL_INVALID" "## Approval gates" "$gid" "approval gate must record an ISO date YYYY-MM-DD."
+                    validate_date "$adate" || fail_invalid "APPROVAL_INVALID" "## Approval gates" "$gid" "approval gate has an invalid ISO date."
                     approver="$(printf '%s\n' "$gdet" | awk '{ sub(/^approved[[:space:]]+by[[:space:]]+/, ""); sub(/[[:space:]]+on[[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]*$/, ""); print }')"
-                    [ -n "$approver" ] || fail_invalid "APPROVAL_INVALID" "## Approval gates" "$gid" "approval gate '$gid' must record an approver."
+                    [ -n "$approver" ] || fail_invalid "APPROVAL_INVALID" "## Approval gates" "$gid" "approval gate must record an approver."
                     printf '%s' "$approver" | grep -q '[<>]' \
-                        && fail_invalid "APPROVAL_INVALID" "## Approval gates" "$gid" "approval gate '$gid' must not use template placeholders."
+                        && fail_invalid "APPROVAL_INVALID" "## Approval gates" "$gid" "approval gate must not use template placeholders."
                     has_meaningful_char "$approver" \
-                        || fail_invalid "APPROVAL_INVALID" "## Approval gates" "$gid" "approval gate '$gid' must record a meaningful approver."
+                        || fail_invalid "APPROVAL_INVALID" "## Approval gates" "$gid" "approval gate must record a meaningful approver."
                     ;;
                 *)
                     unchecked=$(( unchecked + 1 ))
-                    [ -n "$gdet" ] || fail_invalid "APPROVAL_INVALID" "## Approval gates" "$gid" "approval gate '$gid' must describe the required approval."
+                    [ -n "$gdet" ] || fail_invalid "APPROVAL_INVALID" "## Approval gates" "$gid" "approval gate must describe the required approval."
                     printf '%s' "$gdet" | grep -qE '^approved[[:space:]]+by[[:space:]]+.+[[:space:]]+on[[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]*$' \
-                        && fail_invalid "APPROVAL_INVALID" "## Approval gates" "$gid" "unchecked approval gate '$gid' cannot record an approval; describe the requirement instead."
+                        && fail_invalid "APPROVAL_INVALID" "## Approval gates" "$gid" "unchecked approval gate cannot record an approval; describe the requirement instead."
                     ;;
             esac
             continue
