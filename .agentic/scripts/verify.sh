@@ -1034,6 +1034,14 @@ if [ -n "$EVENTS_FILE" ]; then
         echo "ERROR: events destination must be a relative path inside .agentic/runs/. '$EVENTS_FILE' is not allowed." >&2
         exit 1
     fi
+    # mv -f returns success when the destination is an existing directory (it
+    # moves the source inside it), which would strand the scratch stream where
+    # the exit trap cannot remove it. Reject any existing non-regular file up
+    # front; symlink leaves are already refused by safe_events_destination.
+    if [ -e "$EVENTS_FILE" ] && [ ! -f "$EVENTS_FILE" ]; then
+        echo "ERROR: event destination exists and is not a regular file." >&2
+        exit 1
+    fi
     # Atomic exclusive creation using hard link (O_CREAT|O_EXCL semantics).
     # The scratch file is created with mktemp on the same filesystem.
     # Hard-link creation fails atomically if the destination already exists.
@@ -1054,11 +1062,20 @@ if [ -n "$EVENTS_FILE" ]; then
     fi
     if [ "$EVENTS_FORCE" -eq 1 ]; then
         # Force mode: use mv -f and check result
-        if ! mv -f "$events_scratch" "$EVENTS_FILE"; then
+        if ! mv -f -- "$events_scratch" "$EVENTS_FILE"; then
             echo "ERROR: failed to promote event stream (forced)." >&2
             rm -f "$events_scratch"
             exit 1
         fi
+        # Postcondition: promotion must leave a regular file at the exact
+        # destination path, never a relocation into some other filesystem
+        # entry that happened to occupy the path.
+        if [ ! -f "$EVENTS_FILE" ]; then
+            echo "ERROR: event promotion produced no regular file." >&2
+            rm -f "$events_scratch"
+            exit 1
+        fi
+        EVENTS_SCRATCH=""
     else
         # No-clobber mode: use atomic hard-link creation
         if ! ln "$events_scratch" "$EVENTS_FILE" 2>/dev/null; then

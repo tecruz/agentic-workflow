@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bash JSON preserves full project-relative working-directory labels for nested monorepo paths (`apps/api` becomes `./apps/api`, never a bare basename), matching PowerShell labels exactly; relative labels are normalized lexically like the validated checks.tsv contract.
 - Task-validator not-found diagnostics no longer leak absolute task paths into serialized JSON: the message carries only the redacted display value, and Windows-drive-style paths degrade to their basename on non-Windows hosts.
 - Bash event streams are built under an unpredictable `mktemp` scratch name beside the destination and promoted with a no-clobber recheck immediately before the atomic rename; failed promotions clean up the scratch file.
+- Bash `--events-force` rejects existing non-regular destinations (directories, FIFOs, devices) before promotion instead of letting `mv -f` move the scratch stream inside a directory and report success; forced promotion now verifies that a regular file actually landed at the destination path and releases the scratch tracker on success.
 - Bash `--events` initialization ordering (function hoisting).
 - Bash JSON stdout contamination (all messages routed through `log()`).
 - Bash serialization failure propagation (`|| exit 1` on python3 failure).

@@ -473,6 +473,25 @@ run_checks_in_tmp() {  # run_checks_in_tmp <line>...
     rm -rf "$TMPD"
 }
 
+@test "--events-force refuses a directory destination and leaves no scratch file" {
+    have sh || skip "sh not available"
+    TMPD="$(mktemp -d)"
+    mkdir -p "$TMPD/.agentic"
+    printf 'required\tok\t.\tsh\t-c\ttrue\n' > "$TMPD/.agentic/checks.tsv"
+    # A directory occupies the destination path despite its .jsonl name;
+    # mv -f would move the scratch stream inside it and report success.
+    mkdir -p "$TMPD/.agentic/runs/events.jsonl"
+    run bash -c "cd '$TMPD' && bash '$VERIFY' --events .agentic/runs/events.jsonl --events-force 2>&1"
+    [ "$status" -eq 1 ]
+    printf '%s' "$output" | grep -q 'not a regular file'
+    # Destination must remain a directory, never replaced by a regular file.
+    [ -d "$TMPD/.agentic/runs/events.jsonl" ]
+    [ ! -f "$TMPD/.agentic/runs/events.jsonl" ]
+    # No scratch file may survive inside or beside the destination directory.
+    [ -z "$(find "$TMPD/.agentic/runs" -name '.verify-events.*' -print -quit)" ]
+    rm -rf "$TMPD"
+}
+
 # The detected-checks contract for a fixture, sorted and comment-free. Used by
 # both the golden-output tests and the Bash/PowerShell parity test.
 detected_lines() {  # detected_lines <fixture-dir>
