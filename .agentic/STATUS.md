@@ -12,9 +12,10 @@
   reusable CI, extracted-archive and release-to-release upgrade tests, release
   workflow. Released as `v1.2.2`. Superseded by v1.3.0.
 - [x] PR #7 & PR #8 — Risk profiles and evidence contracts and v1.3.0 finalization (PR #8): `prototype`/`standard`/
-  `high-assurance` profiles, task validators, risk-aware task template, release upgrade tests, and release finalization. Released as `v1.3.0`.
+  `high-assurance` profiles, task validators, risk-aware task template, release upgrade tests, and release finalization. Released as `v1.3.0`. Superseded by v1.4.0.
 - [x] PR #9 — Versioned JSON result contracts (`v1.4.0`): machine-readable verification and task-validation result contracts, JSON output modes for verifiers and task validators (`--format json` / `-Format Json`), managed JSON schemas (`.agentic/schemas/`), stable diagnostic codes, clean stdout isolation, redaction policy, ADR-0009, and schema compliance tests.
 - [x] TASK-004 — PR #9 second-review blocker: Bash `--events-force` rejected directory destinations and stranded the scratch stream (see `.agentic/tasks/TASK-004-bash-events-force-directory.md`)
+- [x] TASK-005 — v1.4.0 publication: changelog publication-date alignment (`b4f1248`), annotated `v1.4.0` tag, workflow-built and published assets, and supersede bookkeeping (see `.agentic/tasks/TASK-005-v140-release-publication.md`)
 
 ## Recent Decisions
 
@@ -25,6 +26,13 @@
 
 ## Notes
 
+- **v1.4.0 released 2026-08-24** as annotated tag `v1.4.0` on commit `b4f1248`.
+  The Release workflow passed: metadata validation (VERSION/CHANGELOG/tag
+  agreement), full CI on the tagged SHA, bundle build, extracted-archive tests
+  for both archives, SHA256SUMS verification with re-download of uploaded
+  assets, and publication as Latest. Published assets
+  (`agentic-workflow-1.4.0.tar.gz`, `.zip`, `SHA256SUMS`). The v1.3.0 release
+  is marked as superseded.
 - **v1.3.0 released 2026-08-21** as annotated tag `v1.3.0`. Introduces risk profiles (`prototype`, `standard`, `high-assurance`), task evidence contracts, structural validators (Bash & PowerShell), and comprehensive release-to-release upgrade testing from v1.2.2. The v1.2.2 release is marked as superseded.
 - **v1.2.2 released 2026-08-18** as annotated tag `v1.2.2` on commit `c835edf`.
   The Release workflow passed on Windows, Ubuntu, and macOS: metadata
