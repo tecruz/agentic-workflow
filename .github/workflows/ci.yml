@@ -185,6 +185,42 @@ jobs:
         run: |
           bash tests/parity/run-parity.sh
 
+  # ── JSON contract tests (single run) ───────────────────────────────────
+  # Runs the machine-readable-contract Pester suite (schemas, JSON modes,
+  # events streams) on Linux where its bash-validator legs execute natively.
+  # Like validator-parity it invokes pwsh -NoProfile -File per case, so it
+  # pins to ubuntu-22.04 to avoid the ubuntu-latest pwsh segfault. The
+  # jsonschema version is pinned so schema-validation behavior cannot drift
+  # between local runs and CI.
+  json-contracts:
+    name: JSON contracts (Ubuntu)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      # actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.ref || '' }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Pester and pinned jsonschema
+        shell: pwsh
+        run: |
+          Install-Module Pester -RequiredVersion 5.6.0 -Scope CurrentUser -Force -SkipPublisherCheck
+          sudo apt-get update -o Acquire::Retries=5 && sudo apt-get install -y python3-pip python-is-python3
+          # Plain first (Ubuntu 22.04 pip predates PEP 668); fall back to the
+          # --break-system-packages flag for images where the marker exists.
+          python3 -m pip install jsonschema==4.23.0 || python3 -m pip install --break-system-packages jsonschema==4.23.0
+          python -c "import jsonschema; print('jsonschema', jsonschema.__version__)"
+
+      - name: Run JSON contract tests
+        shell: pwsh
+        run: |
+          Import-Module Pester -MinimumVersion 5.0
+          $r = Invoke-Pester -Script 'tests/pester/JsonContracts.Tests.ps1' -PassThru
+          if ($r.FailedCount -gt 0) { exit 1 }
+
   # ── Aggregator ─────────────────────────────────────────────────────────
   ci-required:
     name: ci-required
@@ -195,12 +231,13 @@ jobs:
       - powershell-fast
       - macos-compat
       - validator-parity
+      - json-contracts
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Verify all required jobs succeeded
         run: |
-          results="${{ needs.lint.result }} ${{ needs.bash-fast.result }} ${{ needs.powershell-fast.result }} ${{ needs.macos-compat.result }} ${{ needs.validator-parity.result }}"
+          results="${{ needs.lint.result }} ${{ needs.bash-fast.result }} ${{ needs.powershell-fast.result }} ${{ needs.macos-compat.result }} ${{ needs.validator-parity.result }} ${{ needs.json-contracts.result }}"
           echo "Job results: $results"
           for r in $results; do
             if [ "$r" != "success" ]; then

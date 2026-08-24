@@ -1259,8 +1259,9 @@ SH
     V122_DIR="$V122_SRC/dist/agentic-workflow-1.2.2"
 
     # Build the current bundle
+    CURRENT_VERSION="$(cat "$REPO_ROOT/.agentic/VERSION")"
     bash "$REPO_ROOT/scripts/build-bundle.sh" --no-archives
-    CURRENT_BUNDLE="$REPO_ROOT/dist/agentic-workflow-$(cat "$REPO_ROOT/.agentic/VERSION")"
+    CURRENT_BUNDLE="$REPO_ROOT/dist/agentic-workflow-$CURRENT_VERSION"
 
     PROJECT="$TMP/upgrade-project"
     mkdir -p "$PROJECT"
@@ -1293,8 +1294,9 @@ SH
     run bash "$CURRENT_BUNDLE/install.sh" . --tools all
     [ "$status" -eq 0 ]
 
-    # Step 6: Verify v1.3.0 additions and preservation
-    [ "$(cat .agentic/VERSION)" = "1.3.0" ]
+    # Step 6: Verify post-1.2.2 additions and preservation (current version is
+    # read from the repo, not hardcoded — it advances with protocol releases)
+    [ "$(cat .agentic/VERSION)" = "$CURRENT_VERSION" ]
     [ -f .agentic/profiles/README.md ]
     [ -f .agentic/profiles/prototype.md ]
     [ -f .agentic/profiles/standard.md ]

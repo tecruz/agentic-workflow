@@ -42,16 +42,18 @@
 
 set -uo pipefail
 
+FORMAT="text"
 HANDOFF=0
 TASK_FILE=""
 
 usage() {
     cat <<'EOF'
-Usage: validate-task.sh [--handoff] <task-file>
+Usage: validate-task.sh [--format text|json] [--handoff] <task-file>
 
 Validates the structural evidence contract of an agentic task file.
 
 Options:
+  --format    Output format: text (default) or json.
   --handoff   Require Status: done and enforce the completion gate.
   -h, --help  Show this help.
 
@@ -64,7 +66,14 @@ EOF
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --handoff) HANDOFF=1 ;;
+        --format)
+            if [ $# -lt 2 ]; then
+                echo "ERROR: --format requires a value ('text' or 'json')." >&2
+                exit 1
+            fi
+            FORMAT="$2"; shift 2 ;;
+        --format=*) FORMAT="${1#*=}"; shift ;;
+        --handoff) HANDOFF=1; shift ;;
         -h|--help) usage; exit 0 ;;
         -*) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
         *)
@@ -73,22 +82,164 @@ while [ $# -gt 0 ]; do
                 exit 1
             fi
             TASK_FILE="$1"
+            shift
             ;;
     esac
-    shift
 done
+
+# The output format is a versioned CLI contract: unknown or missing values are
+# rejected exactly like the PowerShell ValidateSet rejects them instead of
+# silently degrading to text mode. Comparison is case-insensitive so Bash and
+# PowerShell accept the same spellings.
+case "$(printf '%s' "$FORMAT" | tr '[:upper:]' '[:lower:]')" in
+    text) FORMAT="text" ;;
+    json) FORMAT="json" ;;
+    *)
+        echo "ERROR: --format must be 'text' or 'json'." >&2
+        exit 1
+        ;;
+esac
 
 if [ -z "$TASK_FILE" ]; then
     usage >&2
     exit 1
 fi
+
+# Python 3 is required only for JSON serialization; text mode must work
+# without any Python installation.
+if [ "$FORMAT" = "json" ]; then
+    command -v python3 >/dev/null 2>&1 || { echo "ERROR: Python 3 is required for --format json" >&2; exit 1; }
+fi
+
+# Display form of the task file path for JSON output: passed through when
+# already relative, made project-relative when it lives under the working
+# directory, degraded to its basename otherwise, so an absolute user-home
+# path can never leak into machine-readable results.
+display_path() {
+    local p="$1"
+    local norm="${p//\\//}"
+    norm="${norm#./}"
+    case "$norm" in
+        "$PWD") printf '.' ; return ;;
+        "$PWD"/*) printf './%s' "${norm#"$PWD"/}" ; return ;;
+        /*|[A-Za-z]:*) printf '%s' "$(basename "$norm")" ; return ;;
+    esac
+    printf '%s' "$norm"
+}
+
+output_task_json() {
+    local res_str="$1" exit_code="$2" msg="$3" code="${4:-CRITERION_INVALID}" section="${5:-null}" ident="${6:-null}"
+    python3 -c '
+import json, sys
+
+res_str = sys.argv[1]
+exit_code = int(sys.argv[2])
+task_file = sys.argv[3]
+profile = sys.argv[4]
+task_status = sys.argv[5]
+diag_code = sys.argv[6]
+diag_section = sys.argv[7]
+diag_ident = sys.argv[8]
+diag_msg = sys.argv[9]
+mode = sys.argv[10]
+
+diagnostics = []
+if res_str != "VALID":
+    diagnostics.append({
+        "code": diag_code,
+        "section": diag_section if diag_section != "null" else None,
+        "identifier": diag_ident if diag_ident != "null" else None,
+        "message": diag_msg
+    })
+
+# Profile and task_status: null when not present or unrecognized, to avoid
+# inventing "standard"/"planned" defaults that are misleading for automation.
+# The schema marks both fields nullable; no raw_* mirror fields are emitted.
+if profile and profile in ("prototype", "standard", "high-assurance"):
+    profile_out = profile
+else:
+    profile_out = None
+
+if task_status and task_status in ("planned", "in-progress", "blocked", "done"):
+    task_status_out = task_status
+else:
+    task_status_out = None
+
+doc = {
+    "schema_version": 1,
+    "protocol_version": "1.4.0",
+    "kind": "task_validation_result",
+    "mode": mode,
+    "result": res_str,
+    "exit_code": exit_code,
+    "task_file": task_file,
+    "profile": profile_out,
+    "task_status": task_status_out,
+}
+doc["diagnostics"] = diagnostics
+
+print(json.dumps(doc))
+' "$res_str" "$exit_code" "$(display_path "$TASK_FILE")" "${PROFILE:-}" "${STATUS:-}" "$code" "$section" "$ident" "$msg" "$( [ "$HANDOFF" -eq 1 ] && echo handoff || echo standard )"
+    if [ $? -ne 0 ]; then
+        # A failed serialization must never masquerade as a successful
+        # validation: propagate the failure with a non-zero exit.
+        echo "ERROR: failed to serialize JSON result." >&2
+        exit 1
+    fi
+}
+
 if [ ! -f "$TASK_FILE" ]; then
-    echo "Error: task file not found: $TASK_FILE" >&2
+    if [ "$FORMAT" = "json" ]; then
+        # The diagnostic message carries only the redacted display value: the
+        # raw input path must never leak into serialized JSON through a
+        # message when its structured field is redacted.
+        output_task_json "INVALID" 1 "Task file was not found: $(display_path "$TASK_FILE")" "TASK_FILE_NOT_FOUND"
+    else
+        echo "Error: task file not found: $TASK_FILE" >&2
+    fi
     exit 1
 fi
 
-fail_invalid() { echo "INVALID: $*" >&2; exit 1; }
-fail_blocked() { echo "BLOCKED: $*" >&2; exit 2; }
+# Emit an INVALID diagnostic and exit 1. Arguments are explicit at every call
+# site — the diagnostic code is never inferred from message keywords, because
+# keyword matching diverged silently between implementations.
+#   fail_invalid <code> <section-or-''> <identifier-or-''> <message>
+fail_invalid() {
+    if [ "$#" -ne 4 ]; then
+        echo "INTERNAL ERROR: fail_invalid requires <code> <section> <identifier> <message>" >&2
+        exit 1
+    fi
+    local code="$1" section="$2" ident="$3" msg="$4"
+    [ -n "$section" ] || section="null"
+    [ -n "$ident" ] || ident="null"
+    if [ "$FORMAT" = "json" ]; then
+        output_task_json "INVALID" 1 "$msg" "$code" "$section" "$ident"
+        exit 1
+    else
+        echo "INVALID: $msg" >&2
+        exit 1
+    fi
+}
+
+# Emit a BLOCKED diagnostic and exit 2. Same explicit-arguments contract as
+# fail_invalid: no message-keyword inference.
+#   fail_blocked <code> <section-or-''> <identifier-or-''> <message>
+fail_blocked() {
+    if [ "$#" -ne 4 ]; then
+        echo "INTERNAL ERROR: fail_blocked requires <code> <section> <identifier> <message>" >&2
+        exit 1
+    fi
+    local code="$1" section="$2" ident="$3" msg="$4"
+    [ -n "$section" ] || section="null"
+    [ -n "$ident" ] || ident="null"
+    if [ "$FORMAT" = "json" ]; then
+        output_task_json "BLOCKED" 2 "$msg" "$code" "$section" "$ident"
+        exit 2
+    else
+        echo "BLOCKED: $msg" >&2
+        exit 2
+    fi
+}
 
 lower() { tr '[:upper:]' '[:lower:]'; }
 
@@ -192,11 +343,11 @@ check_canonical_section() {
         lowline="$(printf '%s' "$line" | lower)"
         if printf '%s' "$lowline" | grep -qE "$idbound"; then
             printf '%s' "$lowline" | grep -qE "^[-*+][[:space:]]*$idpat[[:space:]]*:[[:space:]]*[^[:space:]]" \
-                || fail_invalid "$label must contain only canonical '$entryform' list entries; identifiers may not appear in prose or non-canonical lines."
+                || fail_invalid "CRITERION_INVALID" "$label" "" "$label must contain only canonical '$entryform' list entries; identifiers may not appear in prose or non-canonical lines."
         fi
         printf '%s' "$lowline" | grep -qE '^([-*+][[:space:]]*|[0-9]+[.)][[:space:]]+|(ac|r)-[0-9]+[[:space:]]*:)' || continue
         printf '%s' "$lowline" | grep -qE "^[-*+][[:space:]]*$idpat[[:space:]]*:[[:space:]]*[^[:space:]]" \
-            || fail_invalid "$label must contain only canonical '$entryform' list entries; identifiers may not appear in prose or non-canonical lines."
+            || fail_invalid "CRITERION_INVALID" "$label" "" "$label must contain only canonical '$entryform' list entries; identifiers may not appear in prose or non-canonical lines."
     done <<< "$content"
 }
 
@@ -259,67 +410,67 @@ validate_table() {
             # A pipe-delimited line that omitted its leading pipe is a table
             # row; reject it rather than silently treating it as prose.
             printf '%s' "$trimmed" | grep -qE '[^|]+\|[^|]+\|[^|]+' \
-                && fail_invalid "$label table row '$trimmed' must begin with a leading pipe."
+                && fail_invalid "EVIDENCE_MAPPING_INVALID" "$label" "" "$label table rows must begin with a leading pipe."
             # Also reject a row that opens with a known identifier or the
             # expected header label even when its other cells are empty or
             # missing, so a malformed duplicate cannot hide an unresolved row.
             printf '%s' "$trimmed" | grep -qiE "^($idprefix|$hl)[^|]*\|" \
-                && fail_invalid "$label table row '$trimmed' must begin with a leading pipe."
+                && fail_invalid "EVIDENCE_MAPPING_INVALID" "$label" "" "$label table rows must begin with a leading pipe."
             continue
         fi
         table_row_parts "$trimmed"
         id="${CELLS[0]:-}"
         if [ "$stage" -eq 0 ]; then
             if table_row_is_separator; then
-                fail_invalid "$label table must have a header row before its separator."
+                fail_invalid "EVIDENCE_MAPPING_INVALID" "$label" "" "$label table must have a header row before its separator."
             fi
             if printf '%s' "$id" | lower | grep -qE "^$lp\$"; then
-                fail_invalid "$label table has a data row before its header."
+                fail_invalid "EVIDENCE_MAPPING_INVALID" "$label" "" "$label table has a data row before its header."
             fi
-            [ "$CELL_COUNT" -eq 3 ] || fail_invalid "$label table row has $CELL_COUNT columns (expected 3)."
+            [ "$CELL_COUNT" -eq 3 ] || fail_invalid "EVIDENCE_MAPPING_INVALID" "$label" "" "$label table row has $CELL_COUNT columns (expected 3)."
             h1="$(printf '%s' "${CELLS[0]:-}" | lower)"
             h2="$(printf '%s' "${CELLS[1]:-}" | lower)"
             h3="$(printf '%s' "${CELLS[2]:-}" | lower)"
             [ "$h1" = "$hl" ] && [ "$h2" = "evidence" ] && [ "$h3" = "result" ] \
-                || fail_invalid "$label table header must be '| $header_label | Evidence | Result |'."
+                || fail_invalid "EVIDENCE_MAPPING_INVALID" "$label" "" "$label table header must be '| $header_label | Evidence | Result |'."
             stage=1
             continue
         fi
         if [ "$stage" -eq 1 ]; then
-            table_row_is_separator || fail_invalid "$label table is missing its separator row."
-            [ "$CELL_COUNT" -eq 3 ] || fail_invalid "$label table separator has $CELL_COUNT columns (expected 3)."
+            table_row_is_separator || fail_invalid "EVIDENCE_MAPPING_INVALID" "$label" "" "$label table is missing its separator row."
+            [ "$CELL_COUNT" -eq 3 ] || fail_invalid "EVIDENCE_MAPPING_INVALID" "$label" "" "$label table separator has $CELL_COUNT columns (expected 3)."
             stage=2
             continue
         fi
         # Canonical data row.
         if table_row_is_separator; then
-            fail_invalid "$label table must not contain a second header or separator."
+            fail_invalid "EVIDENCE_MAPPING_INVALID" "$label" "" "$label table must not contain a second header or separator."
         fi
-        [ "$CELL_COUNT" -eq 3 ] || fail_invalid "$label table row has $CELL_COUNT columns (expected 3)."
+        [ "$CELL_COUNT" -eq 3 ] || fail_invalid "EVIDENCE_MAPPING_INVALID" "$label" "" "$label table row has $CELL_COUNT columns (expected 3)."
         ev="${CELLS[1]:-}"
         res="${CELLS[2]:-}"
         printf '%s' "$id" | lower | grep -qE "^$lp\$" \
-            || fail_invalid "$label row '$id' has an unrecognized identifier."
+            || fail_invalid "EVIDENCE_MAPPING_INVALID" "$label" "$id" "row has an unrecognized identifier."
         id="$(printf '%s' "$id" | lower)"
-        [ -n "$ev" ] || fail_invalid "$label row '$id' has an empty evidence description."
+        [ -n "$ev" ] || fail_invalid "EVIDENCE_MAPPING_INVALID" "$label" "$id" "row has an empty evidence description."
         if [ "$COMPLETED" -eq 1 ] && [ "$(content_class "$ev")" = "placeholder" ]; then
-            fail_blocked "$label row '$id' has a placeholder evidence description."
+            fail_blocked "EVIDENCE_UNRESOLVED" "$label" "$id" "row has a placeholder evidence description."
         fi
-        [ -n "$res" ] || fail_invalid "$label row '$id' has an empty result."
+        [ -n "$res" ] || fail_invalid "EVIDENCE_MAPPING_INVALID" "$label" "$id" "row has an empty result."
         lres="$(printf '%s' "$res" | lower)"
         case " $RESULT_ALLOWED " in
             *" $lres "*) ;;
-            *) fail_invalid "$label row '$id' has unrecognized result '$res' (allowed: passed, satisfied, n/a, pending, partial, blocked, missing, not-run)." ;;
+            *) fail_invalid "EVIDENCE_MAPPING_INVALID" "$label" "$id" "row has an unrecognized result value." ;;
         esac
         if [ "$lres" = "n/a" ]; then
             # A resolved 'n/a' must carry a structured 'N/A: <reason>'
             # rationale with meaningful text after the colon.
             ev_low="$(printf '%s' "$ev" | lower)"
             printf '%s' "$ev_low" | grep -qE '^[[:space:]]*n/a[[:space:]]*:[[:space:]]*[^[:space:]]' \
-                || fail_invalid "$label row '$id' uses 'n/a' without a substantive 'N/A: <reason>' rationale."
+                || fail_invalid "EVIDENCE_MAPPING_INVALID" "$label" "$id" "row uses 'n/a' without a substantive 'N/A: <reason>' rationale."
             rationale="$(printf '%s' "$ev_low" | sed -nE 's#^[[:space:]]*n/a[[:space:]]*:[[:space:]]*(.*)[[:space:]]*$#\1#p')"
             [ "$(content_class "$rationale")" = "content" ] \
-                || fail_invalid "$label row '$id' uses 'n/a' with a placeholder rationale."
+                || fail_invalid "EVIDENCE_MAPPING_INVALID" "$label" "$id" "row uses 'n/a' with a placeholder rationale."
         fi
         case " $seen " in
             *" $id "*) TABLE_DUP=1 ;;
@@ -408,7 +559,7 @@ has_meaningful_char() {
     # parent-process pre-flight below guarantees this branch is never reached
     # with perl missing, so the error cannot be swallowed by a subshell.
     command -v perl >/dev/null 2>&1 \
-        || fail_invalid "perl is required to classify non-ASCII content; install perl or keep evidence ASCII-only."
+        fail_invalid "TOOLING_UNAVAILABLE" "" "" "perl is required to classify non-ASCII content; install perl or keep evidence ASCII-only."
     perl -CS -0777 -ne 'exit(/[\p{L}\p{N}]/ ? 0 : 1)' <<< "$1" 2>/dev/null
 }
 
@@ -555,8 +706,8 @@ verify_completion_evidence() {
     cls="$(content_class "$content")"
     case "$cls" in
         content) return 0 ;;
-        empty) fail_invalid "completed task must record verification evidence under '$kind'." ;;
-        *) fail_blocked "completed task verification under '$kind' is still a placeholder (TBD, TODO, Pending, or similar)." ;;
+        empty) fail_invalid "EVIDENCE_MAPPING_INVALID" "$kind" "" "completed task must record verification evidence under '$kind'." ;;
+        *) fail_blocked "EVIDENCE_UNRESOLVED" "$kind" "" "completed task verification under '$kind' is still a placeholder (TBD, TODO, Pending, or similar)." ;;
     esac
 }
 
@@ -572,8 +723,8 @@ verify_completion_evidence_none() {
         [ "$normalized" = "noneidentified" ] && return 0
     fi
     case "$cls" in
-        empty) fail_invalid "completed task must record verification evidence under '$kind'." ;;
-        *) fail_blocked "completed task verification under '$kind' is still a placeholder (TBD, TODO, Pending, or similar)." ;;
+        empty) fail_invalid "EVIDENCE_MAPPING_INVALID" "$kind" "" "completed task must record verification evidence under '$kind'." ;;
+        *) fail_blocked "EVIDENCE_UNRESOLVED" "$kind" "" "completed task verification under '$kind' is still a placeholder (TBD, TODO, Pending, or similar)." ;;
     esac
 }
 
@@ -589,7 +740,7 @@ check_completion_descriptions() {
         [ -n "$id" ] || continue
         desc="$(printf '%s' "$lowline" | sed -nE "s/^[[:space:]]*[-*+][[:space:]]*$idpat[[:space:]]*:[[:space:]]*(.*)[[:space:]]*$/\1/p")"
         if [ -z "$desc" ] || [ "$(content_class "$desc")" = "placeholder" ]; then
-            fail_blocked "$kind '$id' has a placeholder description."
+            fail_blocked "EVIDENCE_UNRESOLVED" "$kind" "$id" "entry has a placeholder description."
         fi
     done <<< "$content"
 }
@@ -698,7 +849,7 @@ done < "$TASK_FILE"
 if ! command -v perl >/dev/null 2>&1 && [ "${#CONTENT_LINES[@]}" -gt 0 ]; then
     for line in "${CONTENT_LINES[@]}"; do
         if LC_ALL=C grep -q '[^[:print:]]' <<< "$line"; then
-            fail_invalid "perl is required to classify non-ASCII content; install perl or keep evidence ASCII-only."
+            fail_invalid "TOOLING_UNAVAILABLE" "" "" "perl is required to classify non-ASCII content; install perl or keep evidence ASCII-only."
         fi
     done
 fi
@@ -706,26 +857,26 @@ fi
 # ---------------------------------------------------------------------------
 # Profile and status declarations.
 # ---------------------------------------------------------------------------
-[ "$PROFILE_DECL" -eq 1 ] || fail_invalid "task must declare exactly one 'Profile:' (found $PROFILE_DECL)."
-[ "$PROFILE_IN_RISK" -eq 1 ] || fail_invalid "Profile: must be declared inside '## Risk profile'."
+[ "$PROFILE_DECL" -eq 1 ] || fail_invalid "PROFILE_DECLARATION_INVALID" '' '' "task must declare exactly one 'Profile:'."
+[ "$PROFILE_IN_RISK" -eq 1 ] || fail_invalid "PROFILE_DECLARATION_INVALID" '' '' "Profile: must be declared inside '## Risk profile'."
 case "$PROFILE" in
     prototype|standard|high-assurance) ;;
-    *) fail_invalid "task must declare a recognized risk profile (prototype, standard, or high-assurance)." ;;
+    *) fail_invalid "PROFILE_UNKNOWN" '' '' "task must declare a recognized risk profile (prototype, standard, or high-assurance)." ;;
 esac
-[ "$STATUS_DECL" -eq 1 ] || fail_invalid "task must declare exactly one 'Status:' (found $STATUS_DECL)."
-[ "$STATUS_IN_STATUS" -eq 1 ] || fail_invalid "Status: must be declared inside '## Status'."
+[ "$STATUS_DECL" -eq 1 ] || fail_invalid "STATUS_DECLARATION_INVALID" '' '' "task must declare exactly one 'Status:'."
+[ "$STATUS_IN_STATUS" -eq 1 ] || fail_invalid "STATUS_DECLARATION_INVALID" '' '' "Status: must be declared inside '## Status'."
 case "$STATUS" in
     planned|in-progress|blocked|done) ;;
-    *) fail_invalid "task status must be one of: planned, in-progress, blocked, done (found '$STATUS')." ;;
+    *) fail_invalid "STATUS_INVALID" '' '' "task status is not one of the supported values." ;;
 esac
-[ "$UPDATED_COUNT" -eq 1 ] || fail_invalid "task must declare exactly one 'Updated:' (found $UPDATED_COUNT)."
-[ "$UPDATED_IN_STATUS" -eq 1 ] || fail_invalid "Updated: must be declared inside '## Status'."
-[ -n "$UPDATED" ] || fail_invalid "Updated: must have a value."
-validate_date "$UPDATED" || fail_invalid "Updated: must be a valid ISO date YYYY-MM-DD (found '$UPDATED')."
+[ "$UPDATED_COUNT" -eq 1 ] || fail_invalid "UPDATED_INVALID" '' '' "task must declare exactly one 'Updated:'."
+[ "$UPDATED_IN_STATUS" -eq 1 ] || fail_invalid "UPDATED_INVALID" '' '' "Updated: must be declared inside '## Status'."
+[ -n "$UPDATED" ] || fail_invalid "UPDATED_INVALID" '' '' "Updated: must have a value."
+validate_date "$UPDATED" || fail_invalid "UPDATED_INVALID" '' '' "Updated: must be a valid ISO date YYYY-MM-DD."
 COMPLETED=0
 [ "$STATUS" = "done" ] && COMPLETED=1
 if [ "$HANDOFF" -eq 1 ] && [ "$COMPLETED" -eq 0 ]; then
-    fail_blocked "handoff requires 'Status: done' (found '$STATUS')."
+    fail_blocked "STATUS_NOT_DONE" '' '' "handoff requires 'Status: done'."
 fi
 
 # ---------------------------------------------------------------------------
@@ -736,7 +887,7 @@ seen=""
 if [ "${#SECTIONS[@]}" -gt 0 ]; then
     for s in "${SECTIONS[@]}"; do
         case "|$seen|" in
-            *"|$s|"*) fail_invalid "duplicate section heading '## $s'." ;;
+            *"|$s|"*) fail_invalid "SECTION_DUPLICATE" '' '' "duplicate section heading." ;;
         esac
         seen="$seen|$s"
     done
@@ -745,7 +896,7 @@ seen=""
 if [ "${#SUBSECTIONS[@]}" -gt 0 ]; then
     for s in "${SUBSECTIONS[@]}"; do
         case "|$seen|" in
-            *"|$s|"*) fail_invalid "duplicate subsection heading '### $s'." ;;
+            *"|$s|"*) fail_invalid "SECTION_DUPLICATE" '' '' "duplicate subsection heading." ;;
         esac
         seen="$seen|$s"
     done
@@ -768,11 +919,11 @@ case "$PROFILE" in
 esac
 
 for s in ${REQUIRED_SECTIONS[@]+"${REQUIRED_SECTIONS[@]}"}; do
-    has_section "$s" || fail_invalid "missing required section '## $s' for profile '$PROFILE'."
+    has_section "$s" || fail_invalid "SECTION_MISSING" '' '' "missing required section '## $s' for profile '$PROFILE'."
 done
 for s in ${REQUIRED_SUBSECTIONS[@]+"${REQUIRED_SUBSECTIONS[@]}"}; do
     has_subsection_under "$s" "verification" \
-        || fail_invalid "missing '### $s' subsection under '## Verification' for profile '$PROFILE'."
+        || fail_invalid "SECTION_MISSING" '' '' "missing '### $s' subsection under '## Verification' for profile '$PROFILE'."
 done
 
 # Completed tasks must record real evidence in every section the profile
@@ -813,17 +964,17 @@ if [ "$PROFILE" = "prototype" ]; then
         esac
         if printf '%s' "$d" | grep -qE '^production[[:space:]]+readiness[[:space:]]*:' \
             && [ "$d" != 'production readiness: not established' ]; then
-            fail_invalid "prototype handoff declaration 'Production readiness' must appear as the exact line 'Production readiness: not established'."
+            fail_invalid "PROTOTYPE_DECLARATION_INVALID" '' '' "prototype handoff declaration 'Production readiness' must appear as the exact line 'Production readiness: not established'."
         fi
         if printf '%s' "$d" | grep -qE '^no[[:space:]]+production[[:space:]]+deployment[[:space:]]+or[[:space:]]+irreversible[[:space:]]+operation[[:space:]]*:' \
             && [ "$d" != 'no production deployment or irreversible operation: confirmed' ]; then
-            fail_invalid "prototype handoff declaration 'No production deployment or irreversible operation' must appear as the exact line 'No production deployment or irreversible operation: confirmed'."
+            fail_invalid "PROTOTYPE_DECLARATION_INVALID" '' '' "prototype handoff declaration 'No production deployment or irreversible operation' must appear as the exact line 'No production deployment or irreversible operation: confirmed'."
         fi
     done <<< "$handoff"
     [ "$readiness_decl" -eq 1 ] \
-        || fail_invalid "prototype handoff must state 'Production readiness: not established' exactly once."
+        || fail_invalid "PROTOTYPE_DECLARATION_INVALID" '' '' "prototype handoff must state 'Production readiness: not established' exactly once."
     [ "$no_deploy_decl" -eq 1 ] \
-        || fail_invalid "prototype handoff must declare 'No production deployment or irreversible operation: confirmed' exactly once."
+        || fail_invalid "PROTOTYPE_DECLARATION_INVALID" '' '' "prototype handoff must declare 'No production deployment or irreversible operation: confirmed' exactly once."
     if [ "$COMPLETED" -eq 1 ]; then
         verify_completion_evidence "## Task goal" "$(section_content "task goal" || true)"
         verify_completion_evidence "## Known limitations" "$(section_content "known limitations" || true)"
@@ -839,54 +990,54 @@ if [ "$PROFILE" != "prototype" ]; then
     ac_content="$(section_content "acceptance criteria" || true)"
     ac_ids=""
     collect_canonical_ids "$ac_content" 'ac-[0-9]+' ac_ids
-    [ "$MULTI_IDS" -eq 0 ] || fail_invalid "an acceptance criterion list entry declares more than one 'AC-N' identifier."
-    [ "$BAD_FORM" -eq 0 ] || fail_invalid "acceptance criteria must use the form '- AC-N: <description>'."
-    [ "$UNNUMBERED" -eq 0 ] || fail_invalid "every acceptance criterion list entry must begin with exactly one 'AC-N:' identifier; explanatory prose belongs in a separate Notes section."
+    [ "$MULTI_IDS" -eq 0 ] || fail_invalid "CRITERION_INVALID" '' '' "an acceptance criterion list entry declares more than one 'AC-N' identifier."
+    [ "$BAD_FORM" -eq 0 ] || fail_invalid "CRITERION_INVALID" '' '' "acceptance criteria must use the form '- AC-N: <description>'."
+    [ "$UNNUMBERED" -eq 0 ] || fail_invalid "CRITERION_INVALID" '' '' "every acceptance criterion list entry must begin with exactly one 'AC-N:' identifier; explanatory prose belongs in a separate Notes section."
     check_canonical_section "$ac_content" 'ac-[0-9]+' "acceptance criteria" 'AC-N: <description>'
-    [ -n "$ac_ids" ] || fail_invalid "acceptance criteria must declare at least one 'AC-N' identifier."
-    [ "$DUP_IDS" -eq 0 ] || fail_invalid "acceptance criteria declare duplicate 'AC-N' identifiers."
+    [ -n "$ac_ids" ] || fail_invalid "CRITERION_INVALID" '' '' "acceptance criteria must declare at least one 'AC-N' identifier."
+    [ "$DUP_IDS" -eq 0 ] || fail_invalid "CRITERION_INVALID" '' '' "acceptance criteria declare duplicate 'AC-N' identifiers."
     if [ "$COMPLETED" -eq 1 ]; then
         check_completion_descriptions "$ac_content" 'ac-[0-9]+' "acceptance criterion"
     fi
 
     ev_ids=""
     validate_table "required evidence" 'AC-[0-9]+' "required evidence" "AC ID" ev_ids
-    [ -n "$ev_ids" ] || fail_invalid "required evidence must map at least one 'AC-N' to evidence."
-    [ "$TABLE_DUP" -eq 0 ] || fail_invalid "required evidence maps a criterion more than once."
+    [ -n "$ev_ids" ] || fail_invalid "EVIDENCE_MAPPING_INVALID" '' '' "required evidence must map at least one 'AC-N' to evidence."
+    [ "$TABLE_DUP" -eq 0 ] || fail_invalid "EVIDENCE_MAPPING_INVALID" '' '' "required evidence maps a criterion more than once."
     if [ "$(sorted_unique "$ac_ids")" != "$(sorted_unique "$ev_ids")" ]; then
-        fail_invalid "acceptance criteria and required evidence must list exactly the same 'AC-N' identifiers."
+        fail_invalid "EVIDENCE_MAPPING_INVALID" '' '' "acceptance criteria and required evidence must list exactly the same 'AC-N' identifiers."
     fi
     if [ "$COMPLETED" -eq 1 ] && [ "$HAS_UNRESOLVED" -eq 1 ]; then
-        fail_blocked "task is marked complete but required evidence remains unresolved (pending, partial, blocked, missing, or not-run)."
+        fail_blocked "EVIDENCE_UNRESOLVED" '' '' "task is marked complete but required evidence remains unresolved (pending, partial, blocked, missing, or not-run)."
     fi
 
     if [ "$PROFILE" = "high-assurance" ]; then
         req_content="$(section_content "requirements" || true)"
         r_ids=""
         collect_canonical_ids "$req_content" 'r-[0-9]+' r_ids
-        [ "$MULTI_IDS" -eq 0 ] || fail_invalid "a high-assurance requirement list entry declares more than one 'R-N' identifier."
-        [ "$BAD_FORM" -eq 0 ] || fail_invalid "high-assurance requirements must use the form '- R-N: <description>'."
-        [ "$UNNUMBERED" -eq 0 ] || fail_invalid "every high-assurance requirement list entry must begin with exactly one 'R-N:' identifier; explanatory prose belongs in a separate Notes section."
+        [ "$MULTI_IDS" -eq 0 ] || fail_invalid "CRITERION_INVALID" '' '' "a high-assurance requirement list entry declares more than one 'R-N' identifier."
+        [ "$BAD_FORM" -eq 0 ] || fail_invalid "CRITERION_INVALID" '' '' "high-assurance requirements must use the form '- R-N: <description>'."
+        [ "$UNNUMBERED" -eq 0 ] || fail_invalid "CRITERION_INVALID" '' '' "every high-assurance requirement list entry must begin with exactly one 'R-N:' identifier; explanatory prose belongs in a separate Notes section."
         check_canonical_section "$req_content" 'r-[0-9]+' "high-assurance requirements" 'R-N: <description>'
-        [ -n "$r_ids" ] || fail_invalid "high-assurance requirements must declare at least one 'R-N' identifier."
-        [ "$DUP_IDS" -eq 0 ] || fail_invalid "high-assurance requirements declare duplicate 'R-N' identifiers."
+        [ -n "$r_ids" ] || fail_invalid "CRITERION_INVALID" '' '' "high-assurance requirements must declare at least one 'R-N' identifier."
+        [ "$DUP_IDS" -eq 0 ] || fail_invalid "CRITERION_INVALID" '' '' "high-assurance requirements declare duplicate 'R-N' identifiers."
         if [ "$COMPLETED" -eq 1 ]; then
             check_completion_descriptions "$req_content" 'r-[0-9]+' "high-assurance requirement"
         fi
 
         m_ids=""
         validate_table "requirement-to-evidence" 'R-[0-9]+' "requirement-to-evidence" "Requirement ID" m_ids
-        [ -n "$m_ids" ] || fail_invalid "the requirement-to-evidence matrix must map at least one 'R-N' to evidence."
-        [ "$TABLE_DUP" -eq 0 ] || fail_invalid "the requirement-to-evidence matrix maps a requirement more than once."
+        [ -n "$m_ids" ] || fail_invalid "EVIDENCE_MAPPING_INVALID" '' '' "the requirement-to-evidence matrix must map at least one 'R-N' to evidence."
+        [ "$TABLE_DUP" -eq 0 ] || fail_invalid "EVIDENCE_MAPPING_INVALID" '' '' "the requirement-to-evidence matrix maps a requirement more than once."
         if [ "$(sorted_unique "$r_ids")" != "$(sorted_unique "$m_ids")" ]; then
-            fail_invalid "requirements and the requirement-to-evidence matrix must list exactly the same 'R-N' identifiers."
+            fail_invalid "EVIDENCE_MAPPING_INVALID" '' '' "requirements and the requirement-to-evidence matrix must list exactly the same 'R-N' identifiers."
         fi
         if [ "$COMPLETED" -eq 1 ] && [ "$HAS_UNRESOLVED" -eq 1 ]; then
-            fail_blocked "task is marked complete but the requirement-to-evidence matrix has unresolved rows."
+            fail_blocked "EVIDENCE_UNRESOLVED" '' '' "task is marked complete but the requirement-to-evidence matrix has unresolved rows."
         fi
 
         for s in "risk analysis" "negative-path and boundary tests" "integration verification" "recovery plan" "independent review"; do
-            section_has_real_content "$s" || fail_invalid "high-assurance section '## $s' must contain real content (no headings, placeholders, or separators)."
+            section_has_real_content "$s" || fail_invalid "CRITERION_INVALID" "$s" "" "high-assurance section '## $s' must contain real content (no headings, placeholders, or separators)."
         done
     fi
 fi
@@ -913,64 +1064,68 @@ if has_section "approval gates"; then
         fi
         if printf '%s' "$gl_low" | grep -qE '^[-*+][[:space:]]*\[[ xX]\]'; then
             printf '%s' "$gl_low" | grep -qE '^[-*+][[:space:]]*\[[ xX]\][[:space:]]*ag-[0-9]+[[:space:]]*:' \
-                || fail_invalid "malformed approval entry in '## Approval gates': '$gl'."
+                || fail_invalid "APPROVAL_INVALID" "## Approval gates" "" "malformed approval entry in '## Approval gates': entries must be '- [ ] AG-N: <requirement>' or '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'."
             gate_count=$(( gate_count + 1 ))
             gid="$(printf '%s\n' "$gl_low" | sed -nE 's/^[-*+][[:space:]]*\[([ xX])\][[:space:]]*(ag-[0-9]+)[[:space:]]*:[[:space:]]*(.*)[[:space:]]*$/\2/p')"
             gbox="$(printf '%s\n' "$gl_low" | sed -nE 's/^[-*+][[:space:]]*\[([ xX])\][[:space:]]*(ag-[0-9]+)[[:space:]]*:[[:space:]]*(.*)[[:space:]]*$/\1/p')"
             gdet="$(printf '%s\n' "$gl_low" | sed -nE 's/^[-*+][[:space:]]*\[([ xX])\][[:space:]]*(ag-[0-9]+)[[:space:]]*:[[:space:]]*(.*)[[:space:]]*$/\3/p' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
             case " $gate_seen " in
-                *" $gid "*) fail_invalid "approval gate '$gid' is declared more than once." ;;
+                *" $gid "*) fail_invalid "APPROVAL_INVALID" "## Approval gates" "$gid" "approval gate is declared more than once." ;;
             esac
             gate_seen="$gate_seen $gid"
             case "$gbox" in
                 x)
                     checked=$(( checked + 1 ))
                     printf '%s' "$gdet" | grep -qE '^approved[[:space:]]+by[[:space:]]+.+[[:space:]]+on[[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]*$' \
-                        || fail_invalid "approval gate '$gid' must be in the form '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'."
+                        || fail_invalid "APPROVAL_INVALID" "## Approval gates" "$gid" "approval gate must be in the form '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'."
                     printf '%s' "$gdet" | grep -qE '<approver>|tbd|pending|unknown|n/a|not[[:space:]]+approved|approval[[:space:]]+not[[:space:]]+granted' \
-                        && fail_invalid "approval gate '$gid' must not use placeholder values."
+                        && fail_invalid "APPROVAL_INVALID" "## Approval gates" "$gid" "approval gate must not use placeholder values."
                     adate="$(printf '%s\n' "$gdet" | sed -nE 's/^.*[[:space:]]+on[[:space:]]+([0-9]{4}-[0-9]{2}-[0-9]{2})[[:space:]]*$/\1/p')"
-                    [ -n "$adate" ] || fail_invalid "approval gate '$gid' must record an ISO date YYYY-MM-DD."
-                    validate_date "$adate" || fail_invalid "approval gate '$gid' has an invalid ISO date '$adate'."
+                    [ -n "$adate" ] || fail_invalid "APPROVAL_INVALID" "## Approval gates" "$gid" "approval gate must record an ISO date YYYY-MM-DD."
+                    validate_date "$adate" || fail_invalid "APPROVAL_INVALID" "## Approval gates" "$gid" "approval gate has an invalid ISO date."
                     approver="$(printf '%s\n' "$gdet" | awk '{ sub(/^approved[[:space:]]+by[[:space:]]+/, ""); sub(/[[:space:]]+on[[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]*$/, ""); print }')"
-                    [ -n "$approver" ] || fail_invalid "approval gate '$gid' must record an approver."
+                    [ -n "$approver" ] || fail_invalid "APPROVAL_INVALID" "## Approval gates" "$gid" "approval gate must record an approver."
                     printf '%s' "$approver" | grep -q '[<>]' \
-                        && fail_invalid "approval gate '$gid' must not use template placeholders."
+                        && fail_invalid "APPROVAL_INVALID" "## Approval gates" "$gid" "approval gate must not use template placeholders."
                     has_meaningful_char "$approver" \
-                        || fail_invalid "approval gate '$gid' must record a meaningful approver."
+                        || fail_invalid "APPROVAL_INVALID" "## Approval gates" "$gid" "approval gate must record a meaningful approver."
                     ;;
                 *)
                     unchecked=$(( unchecked + 1 ))
-                    [ -n "$gdet" ] || fail_invalid "approval gate '$gid' must describe the required approval."
+                    [ -n "$gdet" ] || fail_invalid "APPROVAL_INVALID" "## Approval gates" "$gid" "approval gate must describe the required approval."
                     printf '%s' "$gdet" | grep -qE '^approved[[:space:]]+by[[:space:]]+.+[[:space:]]+on[[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]*$' \
-                        && fail_invalid "unchecked approval gate '$gid' cannot record an approval; describe the requirement instead."
+                        && fail_invalid "APPROVAL_INVALID" "## Approval gates" "$gid" "unchecked approval gate cannot record an approval; describe the requirement instead."
                     ;;
             esac
             continue
         fi
         if printf '%s' "$gl_low" | grep -qE '\[[ xX]\]'; then
-            fail_invalid "malformed approval entry in '## Approval gates': '$gl'."
+            fail_invalid "APPROVAL_INVALID" "## Approval gates" "" "malformed approval entry in '## Approval gates': entries must be '- [ ] AG-N: <requirement>' or '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'."
         fi
         if printf '%s' "$gl_low" | grep -qE '^[-*+][[:space:]]+'; then
-            fail_invalid "malformed approval entry in '## Approval gates': '$gl'."
+            fail_invalid "APPROVAL_INVALID" "## Approval gates" "" "malformed approval entry in '## Approval gates': entries must be '- [ ] AG-N: <requirement>' or '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'."
         fi
-        fail_invalid "malformed approval entry in '## Approval gates': '$gl'."
+        fail_invalid "APPROVAL_INVALID" "## Approval gates" "" "malformed approval entry in '## Approval gates': entries must be '- [ ] AG-N: <requirement>' or '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'."
     done <<< "$gates"
 
     if [ "$has_none" -eq 1 ] && [ "$gate_count" -gt 0 ]; then
-        fail_invalid "approval gates cannot both declare 'None identified' and structured gates."
+        fail_invalid "APPROVAL_INVALID" "## Approval gates" "" "approval gates cannot both declare 'None identified' and structured gates."
     fi
     if [ "$PROFILE" = "high-assurance" ]; then
-        [ "$has_none" -eq 0 ] || fail_invalid "high-assurance tasks require explicit approval gates ('None identified' is not permitted)."
-        [ "$gate_count" -gt 0 ] || fail_invalid "high-assurance tasks must declare at least one approval gate 'AG-N'."
+        [ "$has_none" -eq 0 ] || fail_invalid "APPROVAL_INVALID" "## Approval gates" "" "high-assurance tasks require explicit approval gates ('None identified' is not permitted)."
+        [ "$gate_count" -gt 0 ] || fail_invalid "APPROVAL_INVALID" "## Approval gates" "" "high-assurance tasks must declare at least one approval gate 'AG-N'."
     else
         [ "$has_none" -eq 1 ] || [ "$gate_count" -gt 0 ] \
-            || fail_invalid "approval gates must declare structured 'AG-N' records or 'None identified'."
+            || fail_invalid "APPROVAL_INVALID" "## Approval gates" "" "approval gates must declare structured 'AG-N' records or 'None identified'."
     fi
     if [ "$COMPLETED" -eq 1 ] && [ "$unchecked" -gt 0 ]; then
-        fail_blocked "task is marked complete but an approval gate remains unchecked."
+        fail_blocked "APPROVAL_UNRESOLVED" "## Approval gates" "" "task is marked complete but an approval gate remains unchecked."
     fi
 fi
 
-echo "VALID: profile=$PROFILE"
+if [ "$FORMAT" = "json" ]; then
+    output_task_json "VALID" 0 "Task is valid." "VALID"
+else
+    echo "VALID: profile=$PROFILE"
+fi
 exit 0

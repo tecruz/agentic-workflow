@@ -1,0 +1,6 @@
+# Nested monorepo working directories: JSON output must preserve the full
+# project-relative label (./apps/api), never collapse it to a basename.
+# pwsh is the executable so the fixture passes identically on every platform.
+required	api	apps/api	pwsh	-NoProfile	-Command	exit 0
+required	svc	services/api	pwsh	-NoProfile	-Command	exit 0
+required	shared	packages/shared	pwsh	-NoProfile	-Command	exit 0

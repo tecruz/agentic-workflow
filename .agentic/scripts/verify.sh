@@ -33,6 +33,323 @@
 
 set -uo pipefail
 
+FORMAT="text"
+EVENTS_FILE=""
+EVENTS_FORCE=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --format)
+            if [ $# -lt 2 ]; then
+                echo "ERROR: --format requires a value ('text' or 'json')." >&2
+                exit 1
+            fi
+            FORMAT="$2"
+            shift 2
+            ;;
+        --format=*)
+            FORMAT="${1#*=}"
+            shift
+            ;;
+        --events)
+            if [ $# -lt 2 ]; then
+                echo "ERROR: --events requires a file path." >&2
+                exit 1
+            fi
+            EVENTS_FILE="$2"
+            shift 2
+            ;;
+        --events=*)
+            EVENTS_FILE="${1#*=}"
+            shift
+            ;;
+        --events-force)
+            EVENTS_FORCE=1
+            shift
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+# The output format is a versioned CLI contract: unknown or missing values are
+# rejected exactly like the PowerShell ValidateSet rejects them instead of
+# silently degrading to text mode. Comparison is case-insensitive so Bash and
+# PowerShell accept the same spellings.
+case "$(printf '%s' "$FORMAT" | tr '[:upper:]' '[:lower:]')" in
+    text) FORMAT="text" ;;
+    json) FORMAT="json" ;;
+    *)
+        echo "ERROR: --format must be 'text' or 'json'." >&2
+        exit 1
+        ;;
+esac
+
+# v1.4.0: simultaneous JSON stdout and event stream is not supported.
+# Each output is reliable independently; combined use could produce
+# contradictory terminal event vs process exit. Reject at parse time.
+if [ "$FORMAT" = "json" ] && [ -n "$EVENTS_FILE" ]; then
+    echo "ERROR: --format json and --events cannot be used together in v1.4.0." >&2
+    echo "Use JSON stdout OR an event stream, not both." >&2
+    exit 1
+fi
+
+RESULTS_TMP="$(mktemp)"
+EVENTS_SCRATCH=""
+cleanup_verify() {
+    rm -f "$RESULTS_TMP" 2>/dev/null || true
+    if [ -n "$EVENTS_SCRATCH" ]; then
+        rm -f "$EVENTS_SCRATCH" 2>/dev/null || true
+    fi
+}
+trap cleanup_verify EXIT
+
+# Project root for path redaction: working_directory values are made
+# project-relative so absolute user-home paths never leak into JSON output.
+PROJECT_ROOT="$(pwd -P)"
+
+log() {
+    if [ "$FORMAT" = "json" ]; then
+        printf '%s\n' "$*" >&2
+    else
+        printf '%s\n' "$*"
+    fi
+}
+
+# Emits a JSON event line to the event stream file.
+# Returns 0 on success, 1 on write failure.
+write_event() {
+    local payload="$1"
+    if [ -n "$EVENTS_FILE" ]; then
+        printf '%s\n' "$payload" >> "$EVENTS_FILE" || return 1
+    fi
+    return 0
+}
+
+# Emits check_started event with working_directory.
+# Returns 0 on success, 1 on write failure.
+emit_check_started() {
+    local check_id="$1" cwd_rel="$2"
+    local esc_id esc_cwd
+    esc_id="$(json_escape "$check_id")"
+    esc_cwd="$(json_escape "$cwd_rel")"
+    local payload="{\"event\":\"check_started\",\"check_id\":\"$esc_id\",\"working_directory\":\"$esc_cwd\"}"
+    write_event "$payload"
+}
+
+# Emits check_completed event with all required fields including working_directory and reason_code.
+# Returns 0 on success, 1 on write failure.
+emit_check_completed() {
+    local check_id="$1" status="$2" exit_code="$3" duration_ms="$4" cwd_rel="$5" reason_code="$6"
+    local esc_id esc_cwd esc_rcode esc_ec
+    esc_id="$(json_escape "$check_id")"
+    esc_cwd="$(json_escape "$cwd_rel")"
+    if [ -n "$reason_code" ] && [ "$reason_code" != "null" ]; then
+        esc_rcode="\"$(json_escape "$reason_code")\""
+    else
+        esc_rcode="null"
+    fi
+    if [ -n "$exit_code" ] && [ "$exit_code" != "null" ]; then
+        esc_ec="$exit_code"
+    else
+        esc_ec="null"
+    fi
+    local payload="{\"event\":\"check_completed\",\"check_id\":\"$esc_id\",\"status\":\"$status\",\"exit_code\":$esc_ec,\"duration_ms\":${duration_ms:-0},\"working_directory\":\"$esc_cwd\",\"reason_code\":$esc_rcode}"
+    write_event "$payload"
+}
+
+# Emits verification_completed terminal event.
+# Returns 0 on success, 1 on write failure.
+emit_verification_completed() {
+    local result="$1" exit_code="$2"
+    local payload="{\"event\":\"verification_completed\",\"result\":\"$result\",\"exit_code\":$exit_code}"
+    write_event "$payload"
+}
+
+# Outputs the JSON verification result to stdout.
+# Returns 0 on success, 1 on write failure.
+output_json_checked() {
+    local res_str="$1" exit_code="$2"
+    local source_type="checks_tsv"
+    if ! checks_defined; then
+        source_type="auto_detected"
+    fi
+
+    local checks_json="" summary=""
+    local passed=0 failed=0 opt_failed=0 blocked=0 opt_skipped=0 checks_run=0 required_run=0 checks_defined=0
+
+    while IFS= read -r line || [ -n "$line" ]; do
+        [ -z "$line" ] && continue
+        local -a parts=()
+        IFS=$'\t' read -ra parts <<< "$line"
+        [ "${#parts[@]}" -lt 7 ] && continue
+
+        local req="${parts[0]}"
+        local cid="${parts[1]}"
+        local cwd="${parts[2]}"
+        local status="${parts[3]}"
+        local ec="${parts[4]}"
+        local dur="${parts[5]}"
+        local rcode="${parts[6]}"
+
+        checks_defined=$((checks_defined + 1))
+
+        case "$status" in
+            PASS)  passed=$((passed + 1)); checks_run=$((checks_run + 1)); [ "$req" = "required" ] && required_run=$((required_run + 1)) ;;
+            FAIL)
+                checks_run=$((checks_run + 1))
+                if [ "$req" = "required" ]; then
+                    failed=$((failed + 1))
+                    required_run=$((required_run + 1))
+                else
+                    opt_failed=$((opt_failed + 1))
+                fi
+                ;;
+            BLOCKED) blocked=$((blocked + 1)) ;;
+            SKIPPED_OPTIONAL) opt_skipped=$((opt_skipped + 1)) ;;
+        esac
+
+        local cwd_rel
+        case "$cwd" in
+            .)
+                cwd_rel="."
+                ;;
+            /*)
+                if [ "$cwd" = "$PROJECT_ROOT" ]; then
+                    cwd_rel="."
+                elif [[ "$cwd" == "$PROJECT_ROOT/"* ]]; then
+                    cwd_rel="./${cwd#"$PROJECT_ROOT"/}"
+                else
+                    cwd_rel="$(basename "$cwd")"
+                fi
+                ;;
+            *)
+                cwd_rel="$(normalize_project_rel "$cwd")"
+                ;;
+        esac
+        local esc_cwd
+        esc_cwd="$(json_escape "$cwd_rel")"
+
+        local esc_rcode="null"
+        if [ "$rcode" ] && [ "$rcode" != "null" ]; then
+            esc_rcode="\"$(json_escape "$rcode")\""
+        fi
+
+        local esc_ec="null"
+        if [ "$ec" ] && [ "$ec" != "null" ]; then
+            esc_ec="$ec"
+        fi
+
+        local esc_id
+        esc_id="$(json_escape "$cid")"
+        local check_part="{\"id\":\"$esc_id\",\"requirement\":\"$req\",\"status\":\"$status\",\"working_directory\":\"$esc_cwd\",\"exit_code\":$esc_ec,\"duration_ms\":${dur:-0},\"reason_code\":$esc_rcode}"
+        checks_json="${checks_json:+$checks_json,}$check_part"
+    done < "$RESULTS_TMP"
+
+    summary="{\"checks_defined\":$checks_defined,\"checks_run\":$checks_run,\"required_run\":$required_run,\"passed\":$passed,\"failed\":$failed,\"optional_failed\":$opt_failed,\"blocked\":$blocked,\"optional_skipped\":$opt_skipped}"
+
+    local source_value
+    if [ "$source_type" = "auto_detected" ]; then
+        source_value="\"source\":\"auto_detected\""
+    else
+        source_value="\"source\":\"checks_tsv\""
+    fi
+
+    printf '{"schema_version":1,"protocol_version":"1.4.0","kind":"verification_result","result":"%s","exit_code":%d,%s,"summary":%s,"checks":[%s]}\n' \
+        "$res_str" "$exit_code" "$source_value" "$summary" "$checks_json"
+}
+
+# Single finalization path: first appends terminal event to event stream,
+# then emits JSON result (if requested), then exits with state-model code.
+# This ensures the event stream is complete before the JSON document is exposed.
+complete_verification() {
+    local result="$1"
+    local exit_code="$2"
+
+    # First: finalize event stream if requested
+    if [ -n "$EVENTS_FILE" ]; then
+        if ! emit_verification_completed "$result" "$exit_code"; then
+            echo "ERROR: failed to finalize verification event stream." >&2
+            exit 1
+        fi
+    fi
+
+    # Then: emit JSON result if requested
+    if [ "$FORMAT" = "json" ]; then
+        if ! output_json_checked "$result" "$exit_code"; then
+            echo "ERROR: failed to write JSON verification result." >&2
+            exit 1
+        fi
+    fi
+
+    exit "$exit_code"
+}
+
+# Escapes a string for safe inclusion inside a JSON string literal.
+# Handles: backslash, double-quote, tab, newline, carriage-return,
+# and remaining C0 control characters (0x00-0x1F except the above) as \u00XX.
+# UTF-8 continuation bytes (>= 0x80) pass through as valid JSON.
+json_escape() {
+    local s="$1"
+    # Quick escape for common JSON special characters.
+    # Order matters: backslashes first, then double-quotes.
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    # Escape tab, newline, carriage-return
+    s="${s//$'\t'/\\t}"
+    s="${s//$'\n'/\\n}"
+    s="${s//$'\r'/\\r}"
+    # Remaining C0 control characters (0x00-0x1F) are escaped as \u00XX.
+    # UTF-8 continuation bytes (>= 0x80) pass through as valid JSON.
+    local result="" i len ch ascii
+    len="${#s}"
+    for (( i = 0; i < len; i++ )); do
+        ch="${s:i:1}"
+        ascii=$(printf '%d' "'$ch" 2>/dev/null || echo 0)
+        # Guard against non-numeric ascii (e.g. multi-byte UTF-8 start)
+        if ! [[ "$ascii" =~ ^[0-9]+$ ]] || [ "$ascii" -gt 255 ]; then
+            # Pass through unknown characters as-is
+            result+="$ch"
+        elif [ "$ascii" -lt 32 ] && [ "$ascii" -ne 9 ] && [ "$ascii" -ne 10 ] && [ "$ascii" -ne 13 ]; then
+            # Control character: escape as \u00XX
+            result+="$(printf '\\u%02x' "$ascii")"
+        else
+            result+="$ch"
+        fi
+    done
+    # Fallback: if result is empty for some reason, return the original string
+    # minimally escaped (just backslash and quote).
+    printf '%s' "${result:-$s}"
+}
+
+# Lexically normalizes an already-validated project-relative path so JSON
+# working_directory labels are canonical and stable: './' prefixes collapse,
+# '.' segments drop, and '..' pops the previous segment (validate_checks_tsv
+# guarantees '..' can never pop above the project root). Prints '.' for an
+# empty result; non-empty results are prefixed with './'. Nested labels keep
+# their full shape ('apps/api' -> './apps/api'), matching PowerShell labels.
+normalize_project_rel() {
+    local p="${1#./}" seg out=""
+    local -a segs=()
+    IFS='/' read -r -a segs <<< "$p"
+    # Guarded expansion: bash 3.2 (macOS) treats expanding an empty array
+    # under `set -u` as an unbound variable.
+    if [ "${#segs[@]}" -gt 0 ]; then
+        for seg in "${segs[@]}"; do
+            case "$seg" in
+                ''|.) ;;
+                ..) out="${out%/*}" ;;
+                *) out="$out/$seg" ;;
+            esac
+        done
+    fi
+    if [ -n "$out" ]; then
+        printf '%s' "./${out#/}"
+    else
+        printf '%s' "."
+    fi
+}
+
 FAILED=0
 RAN=0
 RAN_REQUIRED=0
@@ -48,16 +365,45 @@ run_check() {
     shift 4
     local -a args=("$@")
 
-    echo ""
+    log ""
     # `:-` guards the display-only expansion because bash 3.2 (macOS) treats
     # expanding an empty array under `set -u` as an unbound variable.
-    echo "==> [$id] $exe ${args[*]:-}"
+    log "==> [$id] $exe ${args[*]:-}"
+
+    # Compute project-relative working directory for events and results
+    local cwd_rel
+    case "$cwd" in
+        .)
+            cwd_rel="."
+            ;;
+        /*)
+            if [ "$cwd" = "$PROJECT_ROOT" ]; then
+                cwd_rel="."
+            elif [[ "$cwd" == "$PROJECT_ROOT/"* ]]; then
+                cwd_rel="./${cwd#"$PROJECT_ROOT"/}"
+            else
+                cwd_rel="$(basename "$cwd")"
+            fi
+            ;;
+        *)
+            cwd_rel="$(normalize_project_rel "$cwd")"
+            ;;
+    esac
 
     if [ ! -d "$cwd" ]; then
         if [ "$requirement" = "required" ]; then
             BLOCKED=1
         fi
-        echo "  BLOCKED: working directory '$cwd' does not exist"
+        log "  BLOCKED: working directory '$cwd' does not exist"
+        local status="SKIPPED_OPTIONAL"
+        [ "$requirement" = "required" ] && status="BLOCKED"
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$requirement" "$id" "$cwd" "$status" "null" "0" "WORKING_DIR_MISSING" >> "$RESULTS_TMP"
+        if [ -n "$EVENTS_FILE" ]; then
+            if ! emit_check_completed "$id" "$status" "null" "0" "$cwd_rel" "WORKING_DIR_MISSING"; then
+                echo "ERROR: failed to write check_completed event." >&2
+                exit 1
+            fi
+        fi
         return
     fi
 
@@ -65,18 +411,36 @@ run_check() {
         if [ ! -x "$cwd/$exe" ]; then
             if [ "$requirement" = "required" ]; then
                 BLOCKED=1
-                echo "  BLOCKED: executable '$exe' was not found"
+                log "  BLOCKED: executable '$exe' was not found"
             else
-                echo "  skip (optional): executable '$exe' was not found"
+                log "  skip (optional): executable '$exe' was not found"
+            fi
+            local status="SKIPPED_OPTIONAL"
+            [ "$requirement" = "required" ] && status="BLOCKED"
+            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$requirement" "$id" "$cwd" "$status" "null" "0" "EXECUTABLE_MISSING" >> "$RESULTS_TMP"
+            if [ -n "$EVENTS_FILE" ]; then
+                if ! emit_check_completed "$id" "$status" "null" "0" "$cwd_rel" "EXECUTABLE_MISSING"; then
+                    echo "ERROR: failed to write check_completed event." >&2
+                    exit 1
+                fi
             fi
             return
         fi
     elif ! command -v "$exe" >/dev/null 2>&1; then
         if [ "$requirement" = "required" ]; then
             BLOCKED=1
-            echo "  BLOCKED: executable '$exe' was not found"
+            log "  BLOCKED: executable '$exe' was not found"
         else
-            echo "  skip (optional): executable '$exe' was not found"
+            log "  skip (optional): executable '$exe' was not found"
+        fi
+        local status="SKIPPED_OPTIONAL"
+        [ "$requirement" = "required" ] && status="BLOCKED"
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$requirement" "$id" "$cwd" "$status" "null" "0" "EXECUTABLE_MISSING" >> "$RESULTS_TMP"
+        if [ -n "$EVENTS_FILE" ]; then
+            if ! emit_check_completed "$id" "$status" "null" "0" "$cwd_rel" "EXECUTABLE_MISSING"; then
+                echo "ERROR: failed to write check_completed event." >&2
+                exit 1
+            fi
         fi
         return
     fi
@@ -86,19 +450,61 @@ run_check() {
         RAN_REQUIRED=1
     fi
 
+    if [ -n "$EVENTS_FILE" ]; then
+        if ! emit_check_started "$id" "$cwd_rel"; then
+            echo "ERROR: failed to write check_started event." >&2
+            exit 1
+        fi
+    fi
+
+    local start_ms
+    start_ms="$(python3 -c 'import time; print(int(time.time()*1000))' 2>/dev/null || python -c 'import time; print(int(time.time()*1000))' 2>/dev/null || echo 0)"
+
     # bash 3.2 (macOS) treats expanding an empty array under `set -u` as an
     # unbound variable, so branch on whether the check takes arguments.
     local check_ok=0
-    if [ "${#args[@]}" -gt 0 ]; then
-        (cd "$cwd" && "$exe" "${args[@]}") && check_ok=1
+    if [ "$FORMAT" = "json" ]; then
+        if [ "${#args[@]}" -gt 0 ]; then
+            (cd "$cwd" && "$exe" "${args[@]}") >&2 && check_ok=1
+        else
+            (cd "$cwd" && "$exe") >&2 && check_ok=1
+        fi
     else
-        (cd "$cwd" && "$exe") && check_ok=1
+        if [ "${#args[@]}" -gt 0 ]; then
+            (cd "$cwd" && "$exe" "${args[@]}") && check_ok=1
+        else
+            (cd "$cwd" && "$exe") && check_ok=1
+        fi
     fi
+    local code=$?
+    # if command succeeded via &&, code is 0; if failed, code is nonzero
+    if [ "$check_ok" -eq 1 ]; then
+        code=0
+    else
+        [ "$code" -eq 0 ] && code=1
+    fi
+
+    local end_ms
+    end_ms="$(python3 -c 'import time; print(int(time.time()*1000))' 2>/dev/null || python -c 'import time; print(int(time.time()*1000))' 2>/dev/null || echo 0)"
+    local duration_ms=$(( end_ms - start_ms ))
+    [ "$duration_ms" -ge 0 ] || duration_ms=0
+
+    local status="PASS"
+    local reason_code="null"
     if [ "$check_ok" -eq 0 ]; then
+        status="FAIL"
+        reason_code="CHECK_FAILED"
         if [ "$requirement" = "required" ]; then
             FAILED=1
         else
-            echo "  WARNING: optional check '$id' failed"
+            log "  WARNING: optional check '$id' failed"
+        fi
+    fi
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$requirement" "$id" "$cwd" "$status" "$code" "$duration_ms" "$reason_code" >> "$RESULTS_TMP"
+    if [ -n "$EVENTS_FILE" ]; then
+        if ! emit_check_completed "$id" "$status" "$code" "$duration_ms" "$cwd_rel" "$reason_code"; then
+            echo "ERROR: failed to write check_completed event." >&2
+            exit 1
         fi
     fi
 }
@@ -406,6 +812,30 @@ safe_detect_destination() {
     return 1
 }
 
+# Destination policy for the events stream: a relative path inside
+# .agentic/runs/ only. Lexical checks first (absolute paths and any '.' or
+# '..' segment are rejected, so traversal cannot bypass the runs-directory
+# prefix), then the physical confinement shared with safe_detect_destination,
+# which also rejects a symlink leaf or ancestor.
+safe_events_destination() {
+    local dest="$1" normalized segment
+    case "$dest" in
+        /*) return 1 ;;
+    esac
+    normalized="${dest#./}"
+    case "$normalized" in
+        .agentic/runs/*) ;;
+        *) return 1 ;;
+    esac
+    local IFS='/'
+    for segment in $normalized; do
+        case "$segment" in
+            ''|.|..) return 1 ;;
+        esac
+    done
+    safe_detect_destination "$normalized"
+}
+
 validate_checks_tsv() {
     local file="$1"
     local line_num=0
@@ -577,45 +1007,115 @@ if [ "${1:-}" = "--validate-checks" ]; then
 fi
 
 if checks_defined; then
+    # Contract validation happens before the events stream is created, so a
+    # malformed project contract can never leave a started-but-unterminated
+    # event file behind.
     validate_checks_tsv "$(checks_file)"
-    echo "Using project checks: .agentic/checks.tsv"
-    DETECTED=1
-    run_checks_from_file "$(checks_file)"
 else
     if [ -f "$(checks_file)" ]; then
-        echo "Note: .agentic/checks.tsv defines no checks; falling back to auto-detection."
+        log "Note: .agentic/checks.tsv defines no checks; falling back to auto-detection."
     fi
-    echo "Auto-detecting project stack (no checks.tsv)..."
-    local_lines="$(detect)" || exit 1
-     if [ -n "$local_lines" ]; then
-         det_tmp="$(mktemp)"
-        printf '%s\n' "$local_lines" > "$det_tmp"
+    log "Auto-detecting project stack (no checks.tsv)..."
+    detected_lines="$(detect)" || exit 1
+    if [ -n "$detected_lines" ]; then
+        det_tmp="$(mktemp)"
+        printf '%s\n' "$detected_lines" > "$det_tmp"
         validate_checks_tsv "$det_tmp"
         rm -f "$det_tmp"
-        DETECTED=1
-        run_checks_from_file <(printf '%s\n' "$local_lines")
     fi
 fi
 
-echo ""
+# Event stream initialization — deliberately placed after every early-exit
+# mode and after contract validation succeeded, so any stream that is created
+# is guaranteed to receive exactly one terminal verification_completed event
+# below. --events is independent of --format.
+if [ -n "$EVENTS_FILE" ]; then
+    if ! safe_events_destination "$EVENTS_FILE"; then
+        echo "ERROR: events destination must be a relative path inside .agentic/runs/. '$EVENTS_FILE' is not allowed." >&2
+        exit 1
+    fi
+    # mv -f returns success when the destination is an existing directory (it
+    # moves the source inside it), which would strand the scratch stream where
+    # the exit trap cannot remove it. Reject any existing non-regular file up
+    # front; symlink leaves are already refused by safe_events_destination.
+    if [ -e "$EVENTS_FILE" ] && [ ! -f "$EVENTS_FILE" ]; then
+        echo "ERROR: event destination exists and is not a regular file." >&2
+        exit 1
+    fi
+    # Atomic exclusive creation using hard link (O_CREAT|O_EXCL semantics).
+    # The scratch file is created with mktemp on the same filesystem.
+    # Hard-link creation fails atomically if the destination already exists.
+    if [ -e "$EVENTS_FILE" ] && [ "$EVENTS_FORCE" -ne 1 ]; then
+        echo "ERROR: refusing to overwrite existing event file '$EVENTS_FILE'. Use --events-force to overwrite." >&2
+        exit 1
+    fi
+    mkdir -p "$(dirname "$EVENTS_FILE")"
+    # Build in an unpredictable scratch name beside the destination (mktemp,
+    # not $$/$RANDOM) on the same filesystem.
+    events_scratch="$(mktemp "$(dirname "$EVENTS_FILE")/.verify-events.XXXXXX")" || exit 1
+    EVENTS_SCRATCH="$events_scratch"
+    # Write the initial event; fail if the write fails.
+    if ! printf '{"event":"verification_started"}\n' > "$events_scratch"; then
+        echo "ERROR: failed to initialize event stream." >&2
+        rm -f "$events_scratch"
+        exit 1
+    fi
+    if [ "$EVENTS_FORCE" -eq 1 ]; then
+        # Force mode: use mv -f and check result
+        if ! mv -f -- "$events_scratch" "$EVENTS_FILE"; then
+            echo "ERROR: failed to promote event stream (forced)." >&2
+            rm -f "$events_scratch"
+            exit 1
+        fi
+        # Postcondition: promotion must leave a regular file at the exact
+        # destination path, never a relocation into some other filesystem
+        # entry that happened to occupy the path.
+        if [ ! -f "$EVENTS_FILE" ]; then
+            echo "ERROR: event promotion produced no regular file." >&2
+            rm -f "$events_scratch"
+            exit 1
+        fi
+        EVENTS_SCRATCH=""
+    else
+        # No-clobber mode: use atomic hard-link creation
+        if ! ln "$events_scratch" "$EVENTS_FILE" 2>/dev/null; then
+            echo "ERROR: refusing to overwrite existing event file '$EVENTS_FILE'. Use --events-force to overwrite." >&2
+            rm -f "$events_scratch"
+            exit 1
+        fi
+        rm -f "$events_scratch"
+        EVENTS_SCRATCH=""
+    fi
+fi
+
+if checks_defined; then
+    log "Using project checks: .agentic/checks.tsv"
+    DETECTED=1
+    run_checks_from_file "$(checks_file)"
+elif [ -n "${detected_lines:-}" ]; then
+    DETECTED=1
+    run_checks_from_file <(printf '%s\n' "$detected_lines")
+fi
+
+log ""
 # Priority: a real failure beats a blocked check; a blocked required check
 # beats "PASS" because not every required check ran, so "all passed" cannot
 # be claimed.
 if [ "$FAILED" -ne 0 ]; then
-    echo "VERIFICATION FAILED: $RAN check(s) ran, at least one required check failed."
-    exit 1
+    log "VERIFICATION FAILED: $RAN check(s) ran, at least one required check failed."
+    complete_verification "FAIL" 1
 fi
 if [ "$BLOCKED" -ne 0 ]; then
-    echo "VERIFICATION BLOCKED: $RAN check(s) ran; required tooling was unavailable."
-    exit 2
+    log "VERIFICATION BLOCKED: $RAN check(s) ran; required tooling was unavailable."
+    complete_verification "BLOCKED" 2
 fi
 if [ "$RAN_REQUIRED" -ne 0 ]; then
-    echo "VERIFICATION PASSED: $RAN check(s) ran."
-    exit 0
+    log "VERIFICATION PASSED: $RAN check(s) ran."
+    complete_verification "PASS" 0
 fi
 if [ "$DETECTED" -ne 0 ]; then
-    echo "VERIFICATION BLOCKED: $RAN check(s) ran; required tooling was unavailable."
-    exit 2
+    log "VERIFICATION BLOCKED: $RAN check(s) ran; required tooling was unavailable."
+    complete_verification "BLOCKED" 2
 fi
-echo "VERIFICATION UNSUPPORTED: no supported project or check configuration found."
-exit 3
+log "VERIFICATION UNSUPPORTED: no supported project or check configuration found."
+complete_verification "UNSUPPORTED" 3

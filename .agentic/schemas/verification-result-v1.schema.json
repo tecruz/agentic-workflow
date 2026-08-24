@@ -1,0 +1,90 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "VerificationResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "protocol_version", "kind", "result", "exit_code", "source", "summary", "checks"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "protocol_version": { "type": "string", "const": "1.4.0" },
+    "kind": { "type": "string", "const": "verification_result" },
+    "result": { "type": "string", "enum": ["PASS", "FAIL", "BLOCKED", "UNSUPPORTED"] },
+    "exit_code": { "type": "integer", "enum": [0, 1, 2, 3] },
+    "source": { "type": "string", "enum": ["checks_tsv", "auto_detected"] },
+    "summary": {
+      "type": "object",
+      "required": ["checks_defined", "checks_run", "required_run", "passed", "failed", "optional_failed", "blocked", "optional_skipped"],
+      "properties": {
+        "checks_defined": { "type": "integer", "minimum": 0 },
+        "checks_run": { "type": "integer", "minimum": 0 },
+        "required_run": { "type": "integer", "minimum": 0 },
+        "passed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0, "description": "Number of failed required checks. Optional failures are counted separately in optional_failed and never affect the result." },
+        "optional_failed": { "type": "integer", "minimum": 0, "description": "Number of failed optional checks. Optional failures never fail a run." },
+        "blocked": { "type": "integer", "minimum": 0 },
+        "optional_skipped": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "requirement", "status", "working_directory", "exit_code", "duration_ms", "reason_code"],
+        "properties": {
+          "id": { "type": "string" },
+          "requirement": { "type": "string", "enum": ["required", "optional"] },
+          "status": { "type": "string", "enum": ["PASS", "FAIL", "BLOCKED", "SKIPPED_OPTIONAL"] },
+          "working_directory": { "type": "string" },
+          "exit_code": { "type": ["integer", "null"] },
+          "duration_ms": { "type": "integer", "minimum": 0 },
+          "reason_code": { "type": ["string", "null"] }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "result": { "const": "PASS" } }, "required": ["result"] },
+      "then": { "properties": { "exit_code": { "const": 0 } } }
+    },
+    {
+      "if": { "properties": { "result": { "const": "PASS" } }, "required": ["result"] },
+      "then": {
+        "properties": {
+          "summary": {
+            "properties": {
+              "required_run": { "minimum": 1 },
+              "failed": { "const": 0 },
+              "blocked": { "const": 0 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "result": { "const": "FAIL" } }, "required": ["result"] },
+      "then": { "properties": { "exit_code": { "const": 1 } } }
+    },
+    {
+      "if": { "properties": { "result": { "const": "BLOCKED" } }, "required": ["result"] },
+      "then": { "properties": { "exit_code": { "const": 2 } } }
+    },
+    {
+      "if": { "properties": { "result": { "const": "UNSUPPORTED" } }, "required": ["result"] },
+      "then": { "properties": { "exit_code": { "const": 3 } } }
+    },
+    {
+      "if": { "properties": { "exit_code": { "const": 0 } }, "required": ["exit_code"] },
+      "then": { "properties": { "summary": { "properties": { "failed": { "const": 0 }, "blocked": { "const": 0 } } } } }
+    },
+    {
+      "if": { "properties": { "exit_code": { "const": 1 } }, "required": ["exit_code"] },
+      "then": { "properties": { "summary": { "properties": { "failed": { "minimum": 1 } } } } }
+    },
+    {
+      "if": { "properties": { "result": { "enum": ["PASS", "FAIL"] } }, "required": ["result"] },
+      "then": { "properties": { "summary": { "properties": { "checks_run": { "minimum": 1 } } } } }
+    }
+  ]
+}

@@ -1,0 +1,131 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://tecruz.github.io/agentic-workflow/schemas/verification-events-v1.schema.json",
+  "title": "VerificationEvent",
+  "description": "Schema for a single JSONL event object emitted by verify.sh --events / verify.ps1 -Events. Each line of the event stream is one JSON object validated against exactly one of the four event definitions below.",
+  "oneOf": [
+    { "$ref": "#/definitions/verification_started" },
+    { "$ref": "#/definitions/check_started" },
+    { "$ref": "#/definitions/check_completed" },
+    { "$ref": "#/definitions/verification_completed" }
+  ],
+  "definitions": {
+    "event_name": {
+      "type": "object",
+      "required": ["event"],
+      "properties": {
+        "event": { "type": "string" }
+      }
+    },
+    "verification_started": {
+      "allOf": [
+        { "$ref": "#/definitions/event_name" },
+        {
+          "properties": {
+            "event": { "const": "verification_started" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "check_started": {
+      "allOf": [
+        { "$ref": "#/definitions/event_name" },
+        {
+          "required": ["check_id", "working_directory"],
+          "properties": {
+            "event": { "const": "check_started" },
+            "check_id": { "type": "string" },
+            "working_directory": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "check_completed": {
+      "allOf": [
+        { "$ref": "#/definitions/event_name" },
+        {
+          "required": ["check_id", "status", "exit_code", "duration_ms", "working_directory", "reason_code"],
+          "properties": {
+            "event": { "const": "check_completed" },
+            "check_id": { "type": "string" },
+            "status": { "enum": ["PASS", "FAIL", "BLOCKED", "SKIPPED_OPTIONAL"] },
+            "exit_code": { "type": ["integer", "null"] },
+            "duration_ms": { "type": "integer", "minimum": 0 },
+            "working_directory": { "type": "string" },
+            "reason_code": { "enum": ["CHECK_FAILED", "WORKING_DIR_MISSING", "EXECUTABLE_MISSING", null] }
+          },
+          "additionalProperties": false
+        },
+        {
+          "if": { "properties": { "status": { "const": "PASS" } }, "required": ["status"] },
+          "then": {
+            "properties": {
+              "exit_code": { "const": 0 },
+              "reason_code": { "const": null }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "const": "FAIL" } }, "required": ["status"] },
+          "then": {
+            "properties": {
+              "exit_code": { "type": "integer", "minimum": 1 },
+              "reason_code": { "const": "CHECK_FAILED" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "const": "BLOCKED" } }, "required": ["status"] },
+          "then": {
+            "properties": {
+              "exit_code": { "const": null },
+              "reason_code": { "enum": ["WORKING_DIR_MISSING", "EXECUTABLE_MISSING"] }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "const": "SKIPPED_OPTIONAL" } }, "required": ["status"] },
+          "then": {
+            "properties": {
+              "exit_code": { "const": null },
+              "reason_code": { "enum": ["WORKING_DIR_MISSING", "EXECUTABLE_MISSING"] }
+            }
+          }
+        }
+      ]
+    },
+    "verification_completed": {
+      "allOf": [
+        { "$ref": "#/definitions/event_name" },
+        {
+          "required": ["result", "exit_code"],
+          "properties": {
+            "event": { "const": "verification_completed" },
+            "result": { "enum": ["PASS", "FAIL", "BLOCKED", "UNSUPPORTED"] },
+            "exit_code": { "type": "integer", "enum": [0, 1, 2, 3] }
+          },
+          "additionalProperties": false
+        },
+        {
+          "comment": "Terminal events must pair result with the state-model exit code (PASS=0, FAIL=1, BLOCKED=2, UNSUPPORTED=3). Cross-event ordering — exactly one terminal event per stream, emitted last — is a producer contract documented in ADR-0009 and covered by the test suites; JSON Schema cannot express ordering across array items.",
+          "if": { "properties": { "result": { "const": "PASS" } }, "required": ["result"] },
+          "then": { "properties": { "exit_code": { "const": 0 } } }
+        },
+        {
+          "if": { "properties": { "result": { "const": "FAIL" } }, "required": ["result"] },
+          "then": { "properties": { "exit_code": { "const": 1 } } }
+        },
+        {
+          "if": { "properties": { "result": { "const": "BLOCKED" } }, "required": ["result"] },
+          "then": { "properties": { "exit_code": { "const": 2 } } }
+        },
+        {
+          "if": { "properties": { "result": { "const": "UNSUPPORTED" } }, "required": ["result"] },
+          "then": { "properties": { "exit_code": { "const": 3 } } }
+        }
+      ]
+    }
+  }
+}

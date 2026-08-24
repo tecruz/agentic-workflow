@@ -1060,7 +1060,8 @@ Describe 'install.ps1' {
     # -----------------------------------------------------------------------
 
     It 'bundle end-to-end: build, then install from the bundle' {
-        $bash = Get-Command bash -ErrorAction SilentlyContinue
+        $bash = Get-Command "$env:ProgramFiles\Git\bin\bash.exe" -ErrorAction SilentlyContinue
+        if (-not $bash) { $bash = Get-Command bash -ErrorAction SilentlyContinue }
         if (-not $bash) { Set-ItResult -Skipped -Because 'bash (git-bash/WSL) is required to build the bundle' }
         $version = (Get-Content -Raw (Join-Path $repoRoot '.agentic\VERSION')).Trim()
         $dist = Join-Path $repoRoot 'dist'
@@ -1313,7 +1314,8 @@ Describe 'install.ps1' {
     # -----------------------------------------------------------------------
 
     It 'end-to-end: extract zip and install from extracted archive' {
-        $bash = Get-Command bash -ErrorAction SilentlyContinue
+        $bash = Get-Command "$env:ProgramFiles\Git\bin\bash.exe" -ErrorAction SilentlyContinue
+        if (-not $bash) { $bash = Get-Command bash -ErrorAction SilentlyContinue }
         if (-not $bash) { Set-ItResult -Skipped -Because 'bash (git-bash/WSL) is required to build the bundle' }
         $version = (Get-Content -Raw (Join-Path $repoRoot '.agentic\VERSION')).Trim()
         & $bash.Source "scripts/build-bundle.sh" *> $null
@@ -1372,7 +1374,8 @@ Describe 'install.ps1' {
     }
 
     It 'release zip does not leak development-only files' {
-        $bash = Get-Command bash -ErrorAction SilentlyContinue
+        $bash = Get-Command "$env:ProgramFiles\Git\bin\bash.exe" -ErrorAction SilentlyContinue
+        if (-not $bash) { $bash = Get-Command bash -ErrorAction SilentlyContinue }
         if (-not $bash) { Set-ItResult -Skipped -Because 'bash (git-bash/WSL) is required to build the bundle' }
         $version = (Get-Content -Raw (Join-Path $repoRoot '.agentic\VERSION')).Trim()
         & $bash.Source "scripts/build-bundle.sh" *> $null
@@ -1418,7 +1421,8 @@ Describe 'install.ps1' {
     # -----------------------------------------------------------------------
 
     It 'upgrade from v1.2.2 bundle to the current bundle preserves project state and adds v1.3.0 profiles and validators' {
-        $bash = Get-Command bash -ErrorAction SilentlyContinue
+        $bash = Get-Command "$env:ProgramFiles\Git\bin\bash.exe" -ErrorAction SilentlyContinue
+        if (-not $bash) { $bash = Get-Command bash -ErrorAction SilentlyContinue }
         if (-not $bash) { Set-ItResult -Skipped -Because 'bash (git-bash/WSL) is required to build the bundle' }
 
         # Verify the v1.2.2 tag exists and has the expected VERSION
@@ -1433,7 +1437,11 @@ Describe 'install.ps1' {
         # Extract the actual v1.2.2 source tree and build its bundle
         $v122Src = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-v122-src-' + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $v122Src -Force | Out-Null
-        & git -C $repoRoot archive v1.2.2 | tar -x -C $v122Src
+        $v122Archive = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-v122-' + [guid]::NewGuid().ToString('N') + '.tar')
+        & git -C $repoRoot archive --format=tar --output=$v122Archive v1.2.2
+        if ($LASTEXITCODE -ne 0) { throw 'git archive v1.2.2 failed' }
+        tar -xf $v122Archive -C $v122Src
+        Remove-Item -LiteralPath $v122Archive -Force
         if ($LASTEXITCODE -ne 0) { throw 'git archive v1.2.2 failed' }
         & $bash.Source (Join-Path $v122Src 'scripts/build-bundle.sh') --no-archives *> $null
         if ($LASTEXITCODE -ne 0) { throw 'v1.2.2 build-bundle.sh failed' }
@@ -1473,8 +1481,8 @@ Describe 'install.ps1' {
             & (Join-Path $currentBundle 'install.ps1') -Target $tmp -Tools all *> $null
             $LASTEXITCODE | Should -Be 0
 
-            # Step 6: Verify v1.3.0 additions and preservation
-            (Get-Content -Raw (Join-Path $tmp '.agentic\VERSION')).Trim() | Should -Be '1.3.0'
+            # Step 6: Verify post-1.2.2 additions and preservation
+            (Get-Content -Raw (Join-Path $tmp '.agentic\VERSION')).Trim() | Should -Be $version
             Test-Path (Join-Path $tmp '.agentic\profiles\README.md') | Should -Be $true
             Test-Path (Join-Path $tmp '.agentic\profiles\prototype.md') | Should -Be $true
             Test-Path (Join-Path $tmp '.agentic\profiles\standard.md') | Should -Be $true
@@ -1501,12 +1509,14 @@ Describe 'install.ps1' {
             $blockedFixture = Join-Path $repoRoot 'tests\fixtures\tasks\completed-with-pending-evidence.md'
             $invalidFixture = Join-Path $repoRoot 'tests\fixtures\tasks\unknown-profile.md'
 
-            if (Get-Command bash -ErrorAction SilentlyContinue) {
-                & bash $valSh $validFixture *> $null
+            $shBash = Get-Command "$env:ProgramFiles\Git\bin\bash.exe" -ErrorAction SilentlyContinue
+            if (-not $shBash) { $shBash = Get-Command bash -ErrorAction SilentlyContinue }
+            if ($shBash) {
+                & $shBash.Source $valSh $validFixture *> $null
                 $LASTEXITCODE | Should -Be 0
-                & bash $valSh $blockedFixture *> $null
+                & $shBash.Source $valSh $blockedFixture *> $null
                 $LASTEXITCODE | Should -Be 2
-                & bash $valSh $invalidFixture *> $null
+                & $shBash.Source $valSh $invalidFixture *> $null
                 $LASTEXITCODE | Should -Be 1
             }
 

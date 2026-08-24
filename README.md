@@ -106,6 +106,51 @@ The verifier runs the checks defined in `.agentic/checks.tsv` (project-owned,
 authoritative). If that file defines no checks, it auto-detects the stack as a
 bootstrap.
 
+### Machine-readable JSON output
+
+Both verifiers and task validators can emit versioned JSON documents for CI
+systems, dashboards, and automated agents:
+
+```bash
+# Linux / macOS
+./.agentic/scripts/verify.sh --format json
+./.agentic/scripts/validate-task.sh --format json .agentic/tasks/TASK-001.md
+
+# Windows (PowerShell 7+)
+./.agentic/scripts/verify.ps1 -Format Json
+./.agentic/scripts/validate-task.ps1 -Format Json .agentic/tasks/TASK-001.md
+```
+
+- In JSON mode stdout contains exactly one JSON document; all progress and
+  child-process output goes to stderr. Text mode remains the default and is
+  unchanged.
+- Every document pairs its `result` with its exit code (`PASS`=0, `FAIL`=1,
+  `BLOCKED`=2, `UNSUPPORTED`=3; task validation uses `VALID`=0, `INVALID`=1,
+  `BLOCKED`=2). These pairings are enforced as invariants inside the managed
+  schemas in `.agentic/schemas/`, which also enumerate the stable diagnostic
+  codes emitted by both task-validator implementations.
+- The verification summary distinguishes failure kinds: `failed` counts failed
+  **required** checks only, while `optional_failed` counts failed optional
+  checks, which never fail a run. The schemas enforce that a `PASS` document
+  ran at least one required check (`required_run >= 1`) with zero required
+  failures, so optional-check failures stay fully representable in valid
+  `PASS` results.
+- JSON diagnostics are redacted: no command lines, arguments, child output,
+  environment details, absolute user paths, or raw task lines. This applies
+  to every serialized field, including diagnostic messages.
+- The Bash validator's JSON mode requires `python3` and fails fast with a clear
+  error when it is missing; text mode has no such dependency.
+- Verifiers additionally support an opt-in JSONL event stream
+  (`--events <path>` / `-Events <path>`). The path must be relative to
+  `.agentic/runs/` (git-ignored); existing files require `--events-force` /
+  `-EventsForce`; each run ends with exactly one `verification_completed`
+  event whose `result` matches the verifier's exit code. Contract-validation
+  failures exit before the stream file is created, so no run ever leaves an
+  unterminated stream behind. **In v1.4.0, `--format json` / `-Format Json`
+  and `--events` / `-Events` cannot be used together — each output mode is
+  reliable independently.** See
+  [ADR-0009](docs/decisions/ADR-0009-machine-readable-result-contracts.md).
+
 ### The checks candidate lifecycle
 
 Stack detection never writes directly into `.agentic/checks.tsv`; it produces a
@@ -146,7 +191,7 @@ the framework's own checks, tests, CI, and docs so adopters start clean:
 
 ```bash
 bash scripts/build-bundle.sh                    # assemble + archive
-bash dist/agentic-workflow-1.3.0/install.sh /path/to/your-project
+bash dist/agentic-workflow-1.4.0/install.sh /path/to/your-project
 ```
 
 ---
@@ -225,6 +270,11 @@ least one required check actually ran:
 
 `optional` checks run when their tooling is available but never fail a run.
 
+JSON results (`--format json` / `-Format Json`) encode the same state model:
+`result` and `exit_code` are always paired per the table above, and the
+schemas in [`.agentic/schemas/`](.agentic/schemas/) enforce that pairing
+structurally so conforming documents cannot disagree with it.
+
 ---
 
 ## Supported Stacks
@@ -295,6 +345,7 @@ CI on any mismatch. Both the Bats and Pester suites run on all three platforms;
     ├── ARCHITECTURE.md            # Fill-in template describing the host project
     ├── STATUS.md                  # Index of current project state
     ├── checks.tsv                 # Authoritative check list (auto-detect fallback)
+    ├── schemas/                   # Versioned JSON contracts for verifier/validator output
     ├── rules/                     # Technology-agnostic standards
     ├── profiles/                  # Risk profiles (prototype, standard, high-assurance)
     ├── tasks/                     # One file per task
