@@ -1,6 +1,6 @@
 # Task fixture golden expectations: <fixture><TAB><expected-exit-code><TAB><expected-message>
 # 0 = VALID, 1 = INVALID, 2 = BLOCKED. Both validators must match these exactly.
-approval-early-date-invalid.md	1	INVALID: approval gate 'ag-1' has an invalid ISO date '2026-02-30'.
+approval-early-date-invalid.md	1	INVALID: approval gate has an invalid ISO date.
 approval-not-granted.md	1	INVALID: malformed approval entry in '## Approval gates': entries must be '- [ ] AG-N: <requirement>' or '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'.
 approval-plain-prose-invalid.md	1	INVALID: malformed approval entry in '## Approval gates': entries must be '- [ ] AG-N: <requirement>' or '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'.
 bare-criterion-invalid.md	1	INVALID: acceptance criteria must contain only canonical 'AC-N: <description>' list entries; identifiers may not appear in prose or non-canonical lines.
@@ -9,16 +9,16 @@ baseline-outside-verification.md	1	INVALID: missing '### baseline' subsection un
 canonical-plus-prose-ac-invalid.md	1	INVALID: acceptance criteria must contain only canonical 'AC-N: <description>' list entries; identifiers may not appear in prose or non-canonical lines.
 canonical-plus-prose-r-invalid.md	1	INVALID: high-assurance requirements must contain only canonical 'R-N: <description>' list entries; identifiers may not appear in prose or non-canonical lines.
 checked-gate-plus-pending-prose-invalid.md	1	INVALID: malformed approval entry in '## Approval gates': entries must be '- [ ] AG-N: <requirement>' or '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'.
-checked-placeholder-approval-blocked.md	1	INVALID: approval gate 'ag-1' must be in the form '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'.
-checked-punctuation-only-approver-invalid.md	1	INVALID: approval gate 'ag-1' must record a meaningful approver.
+checked-placeholder-approval-blocked.md	1	INVALID: approval gate must be in the form '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'.
+checked-punctuation-only-approver-invalid.md	1	INVALID: approval gate must record a meaningful approver.
 checked-real-approval-valid.md	0	VALID: profile=standard
-checked-underscore-only-approver-invalid.md	1	INVALID: approval gate 'ag-1' must record a meaningful approver.
-completed-with-blank-result.md	1	INVALID: required evidence row 'ac-1' has an empty result.
+checked-underscore-only-approver-invalid.md	1	INVALID: approval gate must record a meaningful approver.
+completed-with-blank-result.md	1	INVALID: row has an empty result.
 completed-with-partial-evidence.md	2	BLOCKED: task is marked complete but required evidence remains unresolved (pending, partial, blocked, missing, or not-run).
 completed-with-pending-evidence.md	2	BLOCKED: task is marked complete but required evidence remains unresolved (pending, partial, blocked, missing, or not-run).
 consecutive-empty-tables-invalid.md	1	INVALID: high-assurance section '## risk analysis' must contain real content (no headings, placeholders, or separators).
 continuation-without-id-valid.md	0	VALID: profile=standard
-criterion-bracket-placeholder-with-suffix-blocked.md	2	BLOCKED: acceptance criterion 'ac-1' has a placeholder description.
+criterion-bracket-placeholder-with-suffix-blocked.md	2	BLOCKED: entry has a placeholder description.
 criterion-id-mentioned-in-prose-invalid.md	1	INVALID: acceptance criteria must contain only canonical 'AC-N: <description>' list entries; identifiers may not appear in prose or non-canonical lines.
 done-bold-tbd-blocked.md	2	BLOCKED: completed task verification under '## Profile rationale' is still a placeholder (TBD, TODO, Pending, or similar).
 done-code-wrapped-pending-blocked.md	2	BLOCKED: completed task verification under '### Final' is still a placeholder (TBD, TODO, Pending, or similar).
@@ -28,7 +28,7 @@ done-empty-final-invalid.md	1	INVALID: completed task must record verification e
 done-empty-remaining-risks-invalid.md	1	INVALID: completed task must record verification evidence under '## Remaining risks'.
 done-none-identified-remaining-risks-valid.md	0	VALID: profile=standard
 done-pending-period-final-blocked.md	2	BLOCKED: completed task verification under '### Final' is still a placeholder (TBD, TODO, Pending, or similar).
-done-placeholder-evidence-description-blocked.md	2	BLOCKED: required evidence row 'ac-1' has a placeholder evidence description.
+done-placeholder-evidence-description-blocked.md	2	BLOCKED: row has a placeholder evidence description.
 done-placeholder-files-changed-blocked.md	2	BLOCKED: completed task verification under '## Files changed' is still a placeholder (TBD, TODO, Pending, or similar).
 done-placeholder-files-table-blocked.md	2	BLOCKED: completed task verification under '## Files changed' is still a placeholder (TBD, TODO, Pending, or similar).
 done-placeholder-final-blocked.md	2	BLOCKED: completed task verification under '### Final' is still a placeholder (TBD, TODO, Pending, or similar).
@@ -36,20 +36,20 @@ done-punctuation-only-content-blocked.md	2	BLOCKED: completed task verification 
 done-real-sentence-containing-tbd-valid.md	0	VALID: profile=standard
 done-tbd-period-everywhere-blocked.md	2	BLOCKED: completed task verification under '## Profile rationale' is still a placeholder (TBD, TODO, Pending, or similar).
 done-tbd-underscore-blocked.md	2	BLOCKED: completed task verification under '### Baseline' is still a placeholder (TBD, TODO, Pending, or similar).
-done-template-acceptance-criterion-blocked.md	2	BLOCKED: acceptance criterion 'ac-1' has a placeholder description.
+done-template-acceptance-criterion-blocked.md	2	BLOCKED: entry has a placeholder description.
 done-template-baseline-placeholder-blocked.md	2	BLOCKED: completed task verification under '### Baseline' is still a placeholder (TBD, TODO, Pending, or similar).
 done-template-final-placeholder-blocked.md	2	BLOCKED: completed task verification under '### Final' is still a placeholder (TBD, TODO, Pending, or similar).
 done-template-profile-rationale-blocked.md	2	BLOCKED: completed task verification under '## Profile rationale' is still a placeholder (TBD, TODO, Pending, or similar).
 done-underscore-only-content-blocked.md	2	BLOCKED: completed task verification under '## Profile rationale' is still a placeholder (TBD, TODO, Pending, or similar).
 duplicate-ac.md	1	INVALID: acceptance criteria declare duplicate 'AC-N' identifiers.
 duplicate-evidence-reordered.md	1	INVALID: required evidence maps a criterion more than once.
-duplicate-gate-invalid.md	1	INVALID: approval gate 'ag-1' is declared more than once.
-duplicate-profile.md	1	INVALID: task must declare exactly one 'Profile:' (found 2).
-duplicate-status.md	1	INVALID: task must declare exactly one 'Status:' (found 2).
-duplicate-updated-invalid.md	1	INVALID: task must declare exactly one 'Updated:' (found 2).
-emoji-only-approver-invalid.md	1	INVALID: approval gate 'ag-1' must record a meaningful approver.
-emoji-only-evidence-blocked.md	2	BLOCKED: required evidence row 'ac-1' has a placeholder evidence description.
-first-id-placeholder-second-id-real-blocked.md	2	BLOCKED: acceptance criterion 'ac-1' has a placeholder description.
+duplicate-gate-invalid.md	1	INVALID: approval gate is declared more than once.
+duplicate-profile.md	1	INVALID: task must declare exactly one 'Profile:'.
+duplicate-status.md	1	INVALID: task must declare exactly one 'Status:'.
+duplicate-updated-invalid.md	1	INVALID: task must declare exactly one 'Updated:'.
+emoji-only-approver-invalid.md	1	INVALID: approval gate must record a meaningful approver.
+emoji-only-evidence-blocked.md	2	BLOCKED: row has a placeholder evidence description.
+first-id-placeholder-second-id-real-blocked.md	2	BLOCKED: entry has a placeholder description.
 headings-in-fenced-code.md	1	INVALID: missing required section '## profile rationale' for profile 'standard'.
 high-assurance-bracket-placeholder-invalid.md	1	INVALID: high-assurance section '## risk analysis' must contain real content (no headings, placeholders, or separators).
 high-assurance-completed-missing-approval.md	2	BLOCKED: task is marked complete but an approval gate remains unchecked.
@@ -63,31 +63,31 @@ high-assurance-none-identified.md	1	INVALID: high-assurance tasks require explic
 high-assurance-placeholder-risk-table-invalid.md	1	INVALID: high-assurance section '## risk analysis' must contain real content (no headings, placeholders, or separators).
 high-assurance-real-risk-table-valid.md	0	VALID: profile=high-assurance
 high-assurance-reordered-matrix-valid.md	0	VALID: profile=high-assurance
-high-assurance-template-requirement-blocked.md	2	BLOCKED: high-assurance requirement 'r-1' has a placeholder description.
-high-assurance-unmapped-matrix.md	1	INVALID: approval gate 'ag-1' must be in the form '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'.
+high-assurance-template-requirement-blocked.md	2	BLOCKED: entry has a placeholder description.
+high-assurance-unmapped-matrix.md	1	INVALID: approval gate must be in the form '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'.
 high-assurance-valid.md	0	VALID: profile=high-assurance
-invalid-approval-date-invalid.md	1	INVALID: approval gate 'ag-1' has an invalid ISO date '2026-13-40'.
-invalid-updated-date.md	1	INVALID: Updated: must be a valid ISO date YYYY-MM-DD (found '2026-13-40').
-invalid-year-zero.md	1	INVALID: Updated: must be a valid ISO date YYYY-MM-DD (found '0000-01-01').
+invalid-approval-date-invalid.md	1	INVALID: approval gate has an invalid ISO date.
+invalid-updated-date.md	1	INVALID: Updated: must be a valid ISO date YYYY-MM-DD.
+invalid-year-zero.md	1	INVALID: Updated: must be a valid ISO date YYYY-MM-DD.
 lowercase-criterion-valid.md	0	VALID: profile=standard
 lowercase-identifiers-valid.md	0	VALID: profile=high-assurance
 lowercase-requirement-valid.md	0	VALID: profile=high-assurance
 malformed-approval-entry-invalid.md	1	INVALID: malformed approval entry in '## Approval gates': entries must be '- [ ] AG-N: <requirement>' or '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'.
 missing-status-section-invalid.md	1	INVALID: Status: must be declared inside '## Status'.
-missing-updated-invalid.md	1	INVALID: task must declare exactly one 'Updated:' (found 0).
+missing-updated-invalid.md	1	INVALID: task must declare exactly one 'Updated:'.
 mixed-canonical-and-bare-criteria-invalid.md	1	INVALID: acceptance criteria must contain only canonical 'AC-N: <description>' list entries; identifiers may not appear in prose or non-canonical lines.
 mixed-case-profile-status-valid.md	0	VALID: profile=standard
 multiple-ac-ids-one-line-invalid.md	1	INVALID: an acceptance criterion list entry declares more than one 'AC-N' identifier.
 multiple-r-ids-one-line-invalid.md	1	INVALID: a high-assurance requirement list entry declares more than one 'R-N' identifier.
-na-evidence-bare-invalid.md	1	INVALID: required evidence row 'ac-1' uses 'n/a' without a substantive 'N/A: <reason>' rationale.
-na-evidence-placeholder-blocked.md	2	BLOCKED: required evidence row 'ac-1' has a placeholder evidence description.
+na-evidence-bare-invalid.md	1	INVALID: row uses 'n/a' without a substantive 'N/A: <reason>' rationale.
+na-evidence-placeholder-blocked.md	2	BLOCKED: row has a placeholder evidence description.
 na-evidence-valid.md	0	VALID: profile=standard
-na-markdown-placeholder-rationale-invalid.md	1	INVALID: required evidence row 'ac-1' uses 'n/a' with a placeholder rationale.
-na-matrix-bare-invalid.md	1	INVALID: requirement-to-evidence row 'r-1' uses 'n/a' without a substantive 'N/A: <reason>' rationale.
-na-matrix-placeholder-blocked.md	2	BLOCKED: requirement-to-evidence row 'r-1' has a placeholder evidence description.
+na-markdown-placeholder-rationale-invalid.md	1	INVALID: row uses 'n/a' with a placeholder rationale.
+na-matrix-bare-invalid.md	1	INVALID: row uses 'n/a' without a substantive 'N/A: <reason>' rationale.
+na-matrix-placeholder-blocked.md	2	BLOCKED: row has a placeholder evidence description.
 na-matrix-valid.md	0	VALID: profile=high-assurance
-na-punctuation-only-rationale-invalid.md	1	INVALID: required evidence row 'ac-1' uses 'n/a' with a placeholder rationale.
-na-symbol-only-rationale-invalid.md	1	INVALID: required evidence row 'ac-1' uses 'n/a' with a placeholder rationale.
+na-punctuation-only-rationale-invalid.md	1	INVALID: row uses 'n/a' with a placeholder rationale.
+na-symbol-only-rationale-invalid.md	1	INVALID: row uses 'n/a' with a placeholder rationale.
 negated-approval.md	1	INVALID: malformed approval entry in '## Approval gates': entries must be '- [ ] AG-N: <requirement>' or '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'.
 non-ascii-criterion-evidence-valid.md	0	VALID: profile=standard
 none-identified-substring-invalid.md	1	INVALID: malformed approval entry in '## Approval gates': entries must be '- [ ] AG-N: <requirement>' or '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'.
@@ -104,7 +104,7 @@ prototype-empty-known-limitations-invalid.md	1	INVALID: completed task must reco
 prototype-empty-smoke-invalid.md	1	INVALID: completed task must record verification evidence under '## Smoke verification'.
 prototype-empty-task-goal-invalid.md	1	INVALID: completed task must record verification evidence under '## Task goal'.
 prototype-exact-declarations-valid.md	0	VALID: profile=prototype
-prototype-malformed-gate-invalid.md	1	INVALID: approval gate 'ag-1' must be in the form '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'.
+prototype-malformed-gate-invalid.md	1	INVALID: approval gate must be in the form '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'.
 prototype-missing-approval-section-invalid.md	1	INVALID: missing required section '## approval gates' for profile 'prototype'.
 prototype-missing-production-declaration.md	1	INVALID: prototype handoff must declare 'No production deployment or irreversible operation: confirmed' exactly once.
 prototype-missing-warning.md	1	INVALID: prototype handoff must state 'Production readiness: not established' exactly once.
@@ -114,22 +114,22 @@ prototype-none-identified-valid.md	0	VALID: profile=prototype
 prototype-template-smoke-placeholder-blocked.md	2	BLOCKED: completed task verification under '## Smoke verification' is still a placeholder (TBD, TODO, Pending, or similar).
 prototype-unchecked-gate-blocked.md	2	BLOCKED: task is marked complete but an approval gate remains unchecked.
 prototype-valid.md	0	VALID: profile=prototype
-punctuation-only-evidence-cell-blocked.md	2	BLOCKED: required evidence row 'ac-1' has a placeholder evidence description.
+punctuation-only-evidence-cell-blocked.md	2	BLOCKED: row has a placeholder evidence description.
 punctuation-only-table-row-blocked.md	2	BLOCKED: completed task verification under '## Files changed' is still a placeholder (TBD, TODO, Pending, or similar).
 required-evidence-empty-cell-no-leading-pipe-invalid.md	1	INVALID: required evidence table rows must begin with a leading pipe.
 required-evidence-extra-column-invalid.md	1	INVALID: required evidence table row has 4 columns (expected 3).
 required-evidence-hidden-pending-empty-cell-invalid.md	1	INVALID: required evidence table rows must begin with a leading pipe.
 required-evidence-hidden-unresolved-duplicate-invalid.md	1	INVALID: required evidence table row has 4 columns (expected 3).
-required-evidence-malformed-id-invalid.md	1	INVALID: required evidence row 'AC-1a' has an unrecognized identifier.
+required-evidence-malformed-id-invalid.md	1	INVALID: row has an unrecognized identifier.
 required-evidence-malformed-row-as-header-invalid.md	1	INVALID: required evidence table header must be '| AC ID | Evidence | Result |'.
 required-evidence-missing-column-no-leading-pipe-invalid.md	1	INVALID: required evidence table rows must begin with a leading pipe.
 required-evidence-row-without-leading-pipe-invalid.md	1	INVALID: required evidence table rows must begin with a leading pipe.
-required-evidence-unknown-id-invalid.md	1	INVALID: required evidence row 'AC-X' has an unrecognized identifier.
+required-evidence-unknown-id-invalid.md	1	INVALID: row has an unrecognized identifier.
 required-evidence-unknown-row-as-header-invalid.md	1	INVALID: required evidence table header must be '| AC ID | Evidence | Result |'.
 requirement-matrix-empty-cell-no-leading-pipe-invalid.md	1	INVALID: requirement-to-evidence table rows must begin with a leading pipe.
 requirement-matrix-extra-column-invalid.md	1	INVALID: requirement-to-evidence table row has 4 columns (expected 3).
 requirement-matrix-malformed-row-as-header-invalid.md	1	INVALID: requirement-to-evidence table header must be '| Requirement ID | Evidence | Result |'.
-requirement-matrix-unknown-id-invalid.md	1	INVALID: requirement-to-evidence row 'R-X' has an unrecognized identifier.
+requirement-matrix-unknown-id-invalid.md	1	INVALID: row has an unrecognized identifier.
 single-heading-all-words.md	1	INVALID: Profile: must be declared inside '## Risk profile'.
 split-headings.md	1	INVALID: Profile: must be declared inside '## Risk profile'.
 standard-in-progress.md	0	VALID: profile=standard
@@ -140,13 +140,13 @@ status-outside-status-section-invalid.md	1	INVALID: Status: must be declared ins
 symbol-only-risk-table-invalid.md	1	INVALID: high-assurance section '## risk analysis' must contain real content (no headings, placeholders, or separators).
 TASK-901-smoke.md	0	VALID: profile=standard
 unchecked-gate.md	2	BLOCKED: task is marked complete but an approval gate remains unchecked.
-underscore-only-evidence-cell-blocked.md	2	BLOCKED: required evidence row 'ac-1' has a placeholder evidence description.
+underscore-only-evidence-cell-blocked.md	2	BLOCKED: row has a placeholder evidence description.
 unicode-content-valid.md	0	VALID: profile=standard
 unicode-digit-content-valid.md	0	VALID: profile=standard
 unicode-letter-content-valid.md	0	VALID: profile=standard
 unicode-punctuation-only-blocked.md	2	BLOCKED: completed task verification under '### Final' is still a placeholder (TBD, TODO, Pending, or similar).
 unknown-profile.md	1	INVALID: task must declare a recognized risk profile (prototype, standard, or high-assurance).
-unknown-status.md	1	INVALID: task status must be one of: planned, in-progress, blocked, done (found 'not done').
+unknown-status.md	1	INVALID: task status is not one of the supported values.
 unmapped-evidence.md	1	INVALID: acceptance criteria and required evidence must list exactly the same 'AC-N' identifiers.
 unnumbered-criterion-invalid.md	1	INVALID: every acceptance criterion list entry must begin with exactly one 'AC-N:' identifier; explanatory prose belongs in a separate Notes section.
 unnumbered-requirement-invalid.md	1	INVALID: every high-assurance requirement list entry must begin with exactly one 'R-N:' identifier; explanatory prose belongs in a separate Notes section.
