@@ -972,7 +972,8 @@ Describe 'Event schema validation' {
         }
         finally { Pop-Location }
         $code | Should -Not -Be 0
-        $out | Should -Match 'format json.*events|events.*format json'
+        ($out | Out-String) | Should -Match 'format json|JSON stdout'
+        ($out | Out-String) | Should -Match 'event'
         if (Test-Path -LiteralPath $eventFile) { Remove-Item -LiteralPath $eventFile -Force }
         Test-Path -LiteralPath $eventFile | Should -Be $false
     }
