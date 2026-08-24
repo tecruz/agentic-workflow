@@ -117,19 +117,10 @@ function Write-VerificationEvent {
 }
 
 function Complete-Verification {
-    # Single finalization path: emits the result document (JSON mode), then
-    # exactly one terminal verification_completed event (events mode), then
-    # exits with the state-model exit code.
+    # Single finalization path: first appends terminal event to event stream,
+    # then emits JSON result (if requested), then exits with state-model code.
+    # This ensures the event stream is complete before the JSON document is exposed.
     param([string] $ResultStr, [int] $ExitCode)
-    if ($Format -eq 'Json') { 
-        try {
-            Output-VerificationJson $ResultStr $ExitCode
-        }
-        catch {
-            [Console]::Error.WriteLine("ERROR: failed to write JSON verification result.")
-            exit 1
-        }
-    }
     try {
         Write-VerificationEvent ([ordered]@{
             event     = "verification_completed"
@@ -140,6 +131,15 @@ function Complete-Verification {
     catch {
         [Console]::Error.WriteLine("ERROR: failed to finalize verification event stream.")
         exit 1
+    }
+    if ($Format -eq 'Json') { 
+        try {
+            Output-VerificationJson $ResultStr $ExitCode
+        }
+        catch {
+            [Console]::Error.WriteLine("ERROR: failed to write JSON verification result.")
+            exit 1
+        }
     }
     exit $ExitCode
 }

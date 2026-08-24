@@ -250,23 +250,25 @@ output_json_checked() {
         "$res_str" "$exit_code" "$source_value" "$summary" "$checks_json"
 }
 
-# Single finalization path: emits the result document (JSON mode), then
-# exactly one terminal verification_completed event (events mode), then
-# exits with the state-model exit code. Propagates any write failure.
+# Single finalization path: first appends terminal event to event stream,
+# then emits JSON result (if requested), then exits with state-model code.
+# This ensures the event stream is complete before the JSON document is exposed.
 complete_verification() {
     local result="$1"
     local exit_code="$2"
 
-    if [ "$FORMAT" = "json" ]; then
-        if ! output_json_checked "$result" "$exit_code"; then
-            echo "ERROR: failed to write JSON verification result." >&2
+    # First: finalize event stream if requested
+    if [ -n "$EVENTS_FILE" ]; then
+        if ! emit_verification_completed "$result" "$exit_code"; then
+            echo "ERROR: failed to finalize verification event stream." >&2
             exit 1
         fi
     fi
 
-    if [ -n "$EVENTS_FILE" ]; then
-        if ! emit_verification_completed "$result" "$exit_code"; then
-            echo "ERROR: failed to finalize verification event stream." >&2
+    # Then: emit JSON result if requested
+    if [ "$FORMAT" = "json" ]; then
+        if ! output_json_checked "$result" "$exit_code"; then
+            echo "ERROR: failed to write JSON verification result." >&2
             exit 1
         fi
     fi
@@ -482,6 +484,7 @@ run_check() {
     local reason_code="null"
     if [ "$check_ok" -eq 0 ]; then
         status="FAIL"
+        reason_code="CHECK_FAILED"
         if [ "$requirement" = "required" ]; then
             FAILED=1
         else
@@ -1022,41 +1025,40 @@ if [ -n "$EVENTS_FILE" ]; then
         echo "ERROR: events destination must be a relative path inside .agentic/runs/. '$EVENTS_FILE' is not allowed." >&2
         exit 1
     fi
-    # Use exclusive creation (O_CREAT|O_EXCL via shell noclobber + redirection)
-    # to atomically create the event file without a check-then-act race.
-    # The scratch file is created with mktemp on the same filesystem, then
-    # renamed atomically. The initial existence check under --events-force=0
-    # prevents accidental overwrites; the rename is atomic.
+    # Atomic exclusive creation using hard link (O_CREAT|O_EXCL semantics).
+    # The scratch file is created with mktemp on the same filesystem.
+    # Hard-link creation fails atomically if the destination already exists.
     if [ -e "$EVENTS_FILE" ] && [ "$EVENTS_FORCE" -ne 1 ]; then
         echo "ERROR: refusing to overwrite existing event file '$EVENTS_FILE'. Use --events-force to overwrite." >&2
         exit 1
     fi
     mkdir -p "$(dirname "$EVENTS_FILE")"
     # Build in an unpredictable scratch name beside the destination (mktemp,
-    # not $$/$RANDOM) and move into place atomically.
+    # not $$/$RANDOM) on the same filesystem.
     events_scratch="$(mktemp "$(dirname "$EVENTS_FILE")/.verify-events.XXXXXX")" || exit 1
     EVENTS_SCRATCH="$events_scratch"
     # Write the initial event; fail if the write fails.
     if ! printf '{"event":"verification_started"}\n' > "$events_scratch"; then
         echo "ERROR: failed to initialize event stream." >&2
+        rm -f "$events_scratch"
         exit 1
     fi
     if [ "$EVENTS_FORCE" -eq 1 ]; then
-        mv -f "$events_scratch" "$EVENTS_FILE"
-    else
-        # Use `mv -n` (no-clobber) if available, otherwise fall back to atomic
-        # rename after a final existence check. `mv -n` is not POSIX but is
-        # widely available (GNU coreutils, BSD). If not available, the check
-        # + rename is the best we can do without lock files.
-        if mv -n "$events_scratch" "$EVENTS_FILE" 2>/dev/null; then
-            :
-        else
-            if [ -e "$EVENTS_FILE" ]; then
-                echo "ERROR: refusing to overwrite existing event file '$EVENTS_FILE'. Use --events-force to overwrite." >&2
-                exit 1
-            fi
-            mv "$events_scratch" "$EVENTS_FILE"
+        # Force mode: use mv -f and check result
+        if ! mv -f "$events_scratch" "$EVENTS_FILE"; then
+            echo "ERROR: failed to promote event stream (forced)." >&2
+            rm -f "$events_scratch"
+            exit 1
         fi
+    else
+        # No-clobber mode: use atomic hard-link creation
+        if ! ln "$events_scratch" "$EVENTS_FILE" 2>/dev/null; then
+            echo "ERROR: refusing to overwrite existing event file '$EVENTS_FILE'. Use --events-force to overwrite." >&2
+            rm -f "$events_scratch"
+            exit 1
+        fi
+        rm -f "$events_scratch"
+        EVENTS_SCRATCH=""
     fi
 fi
 

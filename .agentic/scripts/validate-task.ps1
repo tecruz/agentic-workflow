@@ -87,6 +87,22 @@ function Output-TaskJson {
     [Console]::Out.WriteLine(($resultObject | ConvertTo-Json -Depth 10 -Compress))
 }
 
+# Path semantics must match the underlying filesystem (case-insensitive on
+# Windows, case-sensitive on Unix), so confinement and display redaction use
+# these instead of PowerShell's default case-insensitive operators.
+$script:TaskPathComparison = if ($IsWindows) {
+    [System.StringComparison]::OrdinalIgnoreCase
+}
+else {
+    [System.StringComparison]::Ordinal
+}
+$script:TaskPathComparer = if ($IsWindows) {
+    [System.StringComparer]::OrdinalIgnoreCase
+}
+else {
+    [System.StringComparer]::Ordinal
+}
+
 function Get-TaskFileDisplay {
     # Redacts the task file path for observable JSON output: passed through
     # when already relative, made project-relative under the working
@@ -110,8 +126,8 @@ function Get-TaskFileDisplay {
     catch {
         return [System.IO.Path]::GetFileName($TaskFile)
     }
-    if ($full.Equals($root, [System.StringComparison]::OrdinalIgnoreCase)) { return '.' }
-    if ($full.StartsWith($root + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
+    if ($full.Equals($root, $script:TaskPathComparison)) { return '.' }
+    if ($full.StartsWith($root + [System.IO.Path]::DirectorySeparatorChar, $script:TaskPathComparison)) {
         return './' + $full.Substring($root.Length + 1).Replace('\', '/')
     }
     return [System.IO.Path]::GetFileName($full)
