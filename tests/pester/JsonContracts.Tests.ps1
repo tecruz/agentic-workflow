@@ -479,25 +479,25 @@ Describe 'Event schema validation' {
     BeforeEach {
         $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
         $verifyPs = Join-Path $repoRoot '.agentic/scripts/verify.ps1'
+        $verifySh = Join-Path $repoRoot '.agentic/scripts/verify.sh'
         $fixtures = Join-Path $repoRoot 'tests/fixtures'
         $eventSchemaPath = Join-Path $repoRoot '.agentic/schemas/verification-events-v1.schema.json'
+        $verifySchema = Join-Path $repoRoot '.agentic/schemas/verification-result-v1.schema.json'
     }
 
     BeforeAll {
         function Test-EventSchemaValid {
             param([string]$EventFile)
             $lines = Get-Content -LiteralPath $EventFile
-            $lines.Count | Should -BeGreaterThan 2
+            $lines.Count | Should -BeGreaterThan 1
             $lines[0] | Should -Match 'verification_started'
             $lines[-1] | Should -Match 'verification_completed'
-
             $eventCount = @($lines | Where-Object { $_ -match '"event"\s*:\s*"verification_completed"' }).Count
             $eventCount | Should -Be 1
-
             foreach ($line in $lines) {
                 $event = $line | ConvertFrom-Json
                 $json = $line | ConvertTo-Json -Compress
-                $null = $json | ConvertFrom-Json # validate JSON
+                $null = $json | ConvertFrom-Json
                 $event.GetType().Name | Should -Be 'PSCustomObject'
                 $event.event | Should -Not -BeNullOrEmpty
             }
@@ -526,40 +526,343 @@ Describe 'Event schema validation' {
             }
             return 0
         }
+
+        function Assert-EventStreamInvariants {
+            param(
+                [string]$EventFile,
+                [int]$ProcessExitCode,
+                [string]$ExpectedResult,
+                [object]$JsonDoc = $null
+            )
+            $lines = Get-Content -LiteralPath $EventFile
+            $lines.Count | Should -BeGreaterThan 1 -Because "event stream must have at least started+completed"
+            $events = @()
+            foreach ($line in $lines) {
+                if ([string]::IsNullOrWhiteSpace($line)) { continue }
+                $evt = $line | ConvertFrom-Json
+                $events += $evt
+                # ensure each line is valid JSON
+                $null = $line | ConvertFrom-Json
+            }
+            # 1: verification_started is first
+            $events[0].event | Should -Be 'verification_started' -Because "first event must be verification_started"
+            # 2: exactly one verification_completed and it is last
+            $termCount = @($events | Where-Object { $_.event -eq 'verification_completed' }).Count
+            $termCount | Should -Be 1 -Because "exactly one terminal event required"
+            $events[-1].event | Should -Be 'verification_completed' -Because "terminal event must be last"
+            # 3: terminal result/exit_code matches process
+            $events[-1].result | Should -Be $ExpectedResult
+            $events[-1].exit_code | Should -Be $ProcessExitCode
+            $mapped = switch ($ExpectedResult) { 'PASS' {0} 'FAIL' {1} 'BLOCKED' {2} 'UNSUPPORTED' {3} default { -1 } }
+            $ProcessExitCode | Should -Be $mapped -Because "exit_code must match result $ExpectedResult"
+            # 4: ordering and check_started / check_completed correspondence
+            $startedMap = @{}
+            $completedList = @()
+            $seenCompleted = @{}
+            for ($i = 0; $i -lt $events.Count; $i++) {
+                $e = $events[$i]
+                if ($e.event -eq 'check_started') {
+                    $cid = $e.check_id
+                    if (-not $startedMap.ContainsKey($cid)) { $startedMap[$cid] = 0 }
+                    $startedMap[$cid]++
+                    $startedMap[$cid] | Should -Be 1 -Because "check $cid should have exactly one check_started"
+                } elseif ($e.event -eq 'check_completed') {
+                    $cid = $e.check_id
+                    $completedList += $e
+                    if (-not $seenCompleted.ContainsKey($cid)) { $seenCompleted[$cid] = 0 }
+                    $seenCompleted[$cid]++
+                    $seenCompleted[$cid] | Should -Be 1 -Because "check $cid must have exactly one check_completed"
+                    if ($e.status -in @('PASS','FAIL')) {
+                        $i | Should -BeGreaterThan 0 -Because "executed check $cid needs preceding started"
+                        $prev = $events[$i - 1]
+                        $prev.event | Should -Be 'check_started' -Because "executed check $cid must have immediate preceding check_started"
+                        $prev.check_id | Should -Be $cid
+                        $startedMap.ContainsKey($cid) | Should -Be $true
+                        $startedMap[$cid] | Should -Be 1
+                    } else {
+                        # BLOCKED / SKIPPED_OPTIONAL must have no started
+                        $hasStarted = $startedMap.ContainsKey($cid) -and $startedMap[$cid] -gt 0
+                        $hasStarted | Should -Be $false -Because "blocked/skipped $cid must have no check_started"
+                        if ($i -gt 0) {
+                            $prev = $events[$i - 1]
+                            if ($prev.event -eq 'check_started' -and $prev.check_id -eq $cid) {
+                                throw "BLOCKED/SKIPPED $cid should not have preceding check_started"
+                            }
+                        }
+                    }
+                }
+            }
+            # 5: total started == PASS+FAIL count
+            $passFailCount = @($completedList | Where-Object { $_.status -in @('PASS','FAIL') }).Count
+            $startedTotal = 0
+            foreach ($v in $startedMap.Values) { $startedTotal += $v }
+            $startedTotal | Should -Be $passFailCount -Because "started count must equal executed checks"
+            # 6: if JsonDoc provided, cross-check correspondence
+            if ($null -ne $JsonDoc) {
+                $JsonDoc.result | Should -Be $ExpectedResult
+                $JsonDoc.exit_code | Should -Be $ProcessExitCode
+                $jsonChecks = @($JsonDoc.checks)
+                # For UNSUPPORTED, jsonChecks.Count is 0 and completedList may be 0
+                $jsonChecks.Count | Should -Be $completedList.Count -Because "every result check must have exactly one check_completed"
+                foreach ($jc in $jsonChecks) {
+                    $match = @($completedList | Where-Object { $_.check_id -eq $jc.id })
+                    $match.Count | Should -Be 1 -Because "json check $($jc.id) must match one event"
+                    $match[0].status | Should -Be $jc.status
+                    if ($null -eq $jc.exit_code) {
+                        $match[0].exit_code | Should -Be $null
+                    } else {
+                        $match[0].exit_code | Should -Be $jc.exit_code
+                    }
+                    $match[0].reason_code | Should -Be $jc.reason_code
+                    $match[0].working_directory | Should -Be $jc.working_directory
+                }
+                foreach ($ce in $completedList) {
+                    $found = @($jsonChecks | Where-Object { $_.id -eq $ce.check_id })
+                    $found.Count | Should -Be 1 -Because "event $($ce.check_id) must have matching json check"
+                }
+            }
+        }
+
+        function Get-NormalizedEvents {
+            param([string]$Path)
+            $lines = Get-Content -LiteralPath $Path
+            $events = @()
+            foreach ($l in $lines) {
+                $e = $l | ConvertFrom-Json
+                if ($null -ne $e.duration_ms) { $e.duration_ms = 0 }
+                $events += $e
+            }
+            return $events
+        }
     }
 
+    # ---------- helpers for running verifier and capturing JSON + events ----------
+
     It 'event stream validates against schema (text mode, required PASS)' {
-        $fixDir = Join-Path $fixtures 'node-npm'
-        $eventFile = Join-Path $fixDir '.agentic/runs/test-event-schema.jsonl'
-        if (Test-Path -LiteralPath $eventFile) { Remove-Item -LiteralPath $eventFile -Force }
-        Push-Location $fixDir
+        $proj = Join-Path $TestDrive "ev-pass-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path (Join-Path $proj '.agentic') -Force | Out-Null
+        "required`tok`t.`tpwsh`t-NoProfile`t-Command`texit`t0" | Set-Content -LiteralPath (Join-Path $proj '.agentic\checks.tsv')
+        $eventRel = '.agentic/runs/test-event-schema-pass.jsonl'
+        $eventFile = Join-Path $proj $eventRel
+        $tmpJson = [System.IO.Path]::GetTempFileName()
+        Push-Location $proj
         try {
-            $null = & pwsh -NoProfile -File $verifyPs -Events '.agentic/runs/test-event-schema.jsonl' 2> $null
+            $outLines = & pwsh -NoProfile -File $verifyPs -Format Json 2> $null
+            $jsonExit = $LASTEXITCODE
+            [System.IO.File]::WriteAllLines($tmpJson, $outLines, [System.Text.UTF8Encoding]::new($false))
+            $jsonDoc = Get-Content -LiteralPath $tmpJson -Raw | ConvertFrom-Json
+            $null = & pwsh -NoProfile -File $verifyPs -Events $eventRel 2> $null
+            $evExit = $LASTEXITCODE
         }
         finally { Pop-Location }
+        $evExit | Should -Be 0
+        $jsonExit | Should -Be $evExit
+        $jsonDoc.result | Should -Be 'PASS'
         Test-EventSchemaValid $eventFile
         (Test-JsonLinesAgainstSchema $eventFile $eventSchemaPath) | Should -Be 0
-        Remove-Item -LiteralPath $eventFile -ErrorAction SilentlyContinue
+        Assert-EventStreamInvariants -EventFile $eventFile -ProcessExitCode $evExit -ExpectedResult 'PASS' -JsonDoc $jsonDoc
+        Remove-Item -LiteralPath $proj -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $tmpJson -ErrorAction SilentlyContinue
     }
 
     It 'event stream validates against schema (text mode, required FAIL)' {
-        $fixDir = Join-Path $fixtures 'node-fail'
-        if (-not (Test-Path -LiteralPath $fixDir)) {
-            New-Item -ItemType Directory -Path $fixDir | Out-Null
-            @(
-                '{"scripts":{"test":"node -e \\"process.exit(1)\\""}}' | Set-Content -LiteralPath (Join-Path $fixDir 'package.json')
-            )
-        }
-        $eventFile = Join-Path $fixDir '.agentic/runs/test-event-fail.jsonl'
-        if (Test-Path -LiteralPath $eventFile) { Remove-Item -LiteralPath $eventFile -Force }
-        Push-Location $fixDir
+        $proj = Join-Path $TestDrive "ev-fail-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path (Join-Path $proj '.agentic') -Force | Out-Null
+        "required`tfail`t.`tpwsh`t-NoProfile`t-Command`texit`t3" | Set-Content -LiteralPath (Join-Path $proj '.agentic\checks.tsv')
+        $eventRel = '.agentic/runs/test-event-fail.jsonl'
+        $eventFile = Join-Path $proj $eventRel
+        $tmpJson = [System.IO.Path]::GetTempFileName()
+        Push-Location $proj
         try {
-            $null = & pwsh -NoProfile -File $verifyPs -Events '.agentic/runs/test-event-fail.jsonl' 2> $null
+            $outLines = & pwsh -NoProfile -File $verifyPs -Format Json 2> $null
+            $jsonExit = $LASTEXITCODE
+            [System.IO.File]::WriteAllLines($tmpJson, $outLines, [System.Text.UTF8Encoding]::new($false))
+            $jsonDoc = Get-Content -LiteralPath $tmpJson -Raw | ConvertFrom-Json
+            $null = & pwsh -NoProfile -File $verifyPs -Events $eventRel 2> $null
+            $evExit = $LASTEXITCODE
         }
         finally { Pop-Location }
+        $evExit | Should -Be 1
+        $jsonExit | Should -Be $evExit
+        $jsonDoc.result | Should -Be 'FAIL'
         Test-EventSchemaValid $eventFile
         (Test-JsonLinesAgainstSchema $eventFile $eventSchemaPath) | Should -Be 0
-        Remove-Item -LiteralPath $eventFile -ErrorAction SilentlyContinue
+        Assert-EventStreamInvariants -EventFile $eventFile -ProcessExitCode $evExit -ExpectedResult 'FAIL' -JsonDoc $jsonDoc
+        Remove-Item -LiteralPath $proj -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $tmpJson -ErrorAction SilentlyContinue
+    }
+
+    It 'event stream validates against schema (text mode, required BLOCKED)' {
+        $proj = Join-Path $TestDrive "ev-blocked-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path (Join-Path $proj '.agentic') -Force | Out-Null
+        @(
+            "required`tok`t.`tpwsh`t-NoProfile`t-Command`texit`t0",
+            "required`tblocked`t.`tdefinitely-not-a-real-tool`t--version"
+        ) | Set-Content -LiteralPath (Join-Path $proj '.agentic\checks.tsv')
+        $eventRel = '.agentic/runs/test-event-blocked.jsonl'
+        $eventFile = Join-Path $proj $eventRel
+        $tmpJson = [System.IO.Path]::GetTempFileName()
+        Push-Location $proj
+        try {
+            $outLines = & pwsh -NoProfile -File $verifyPs -Format Json 2> $null
+            $jsonExit = $LASTEXITCODE
+            [System.IO.File]::WriteAllLines($tmpJson, $outLines, [System.Text.UTF8Encoding]::new($false))
+            $jsonDoc = Get-Content -LiteralPath $tmpJson -Raw | ConvertFrom-Json
+            $null = & pwsh -NoProfile -File $verifyPs -Events $eventRel 2> $null
+            $evExit = $LASTEXITCODE
+        }
+        finally { Pop-Location }
+        $evExit | Should -Be 2
+        $jsonExit | Should -Be $evExit
+        $jsonDoc.result | Should -Be 'BLOCKED'
+        $jsonDoc.summary.blocked | Should -Be 1
+        Test-EventSchemaValid $eventFile
+        (Test-JsonLinesAgainstSchema $eventFile $eventSchemaPath) | Should -Be 0
+        Assert-EventStreamInvariants -EventFile $eventFile -ProcessExitCode $evExit -ExpectedResult 'BLOCKED' -JsonDoc $jsonDoc
+        # blocked check must not have check_started, executed one must
+        $evLines = Get-Content -LiteralPath $eventFile | ForEach-Object { $_ | ConvertFrom-Json }
+        $blocked = @($evLines | Where-Object { $_.event -eq 'check_completed' -and $_.status -eq 'BLOCKED' })
+        $blocked.Count | Should -Be 1
+        $startedBlocked = @($evLines | Where-Object { $_.event -eq 'check_started' -and $_.check_id -eq $blocked[0].check_id })
+        $startedBlocked.Count | Should -Be 0
+        Remove-Item -LiteralPath $proj -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $tmpJson -ErrorAction SilentlyContinue
+    }
+
+    It 'event stream validates against schema (text mode, optional FAIL - PASS with optional_failed)' {
+        $proj = Join-Path $TestDrive "ev-optfail-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path (Join-Path $proj '.agentic') -Force | Out-Null
+        @(
+            "required`tok`t.`tpwsh`t-NoProfile`t-Command`texit`t0",
+            "optional`topt-fails`t.`tpwsh`t-NoProfile`t-Command`texit`t5"
+        ) | Set-Content -LiteralPath (Join-Path $proj '.agentic\checks.tsv')
+        $eventRel = '.agentic/runs/test-event-optfail.jsonl'
+        $eventFile = Join-Path $proj $eventRel
+        $tmpJson = [System.IO.Path]::GetTempFileName()
+        Push-Location $proj
+        try {
+            $outLines = & pwsh -NoProfile -File $verifyPs -Format Json 2> $null
+            $jsonExit = $LASTEXITCODE
+            [System.IO.File]::WriteAllLines($tmpJson, $outLines, [System.Text.UTF8Encoding]::new($false))
+            $jsonDoc = Get-Content -LiteralPath $tmpJson -Raw | ConvertFrom-Json
+            $null = & pwsh -NoProfile -File $verifyPs -Events $eventRel 2> $null
+            $evExit = $LASTEXITCODE
+        }
+        finally { Pop-Location }
+        $evExit | Should -Be 0
+        $jsonExit | Should -Be $evExit
+        $jsonDoc.result | Should -Be 'PASS'
+        $jsonDoc.summary.optional_failed | Should -Be 1
+        (Test-JsonLinesAgainstSchema $eventFile $eventSchemaPath) | Should -Be 0
+        Assert-EventStreamInvariants -EventFile $eventFile -ProcessExitCode $evExit -ExpectedResult 'PASS' -JsonDoc $jsonDoc
+        # both checks are executed, so both have started
+        $evLines = Get-Content -LiteralPath $eventFile | ForEach-Object { $_ | ConvertFrom-Json }
+        $startedCount = @($evLines | Where-Object { $_.event -eq 'check_started' }).Count
+        $startedCount | Should -Be 2
+        Remove-Item -LiteralPath $proj -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $tmpJson -ErrorAction SilentlyContinue
+    }
+
+    It 'event stream validates against schema (text mode, optional SKIPPED_OPTIONAL)' {
+        $proj = Join-Path $TestDrive "opt-skip-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path (Join-Path $proj '.agentic') -Force | Out-Null
+        @(
+            "required`tok`t.`tpwsh`t-NoProfile`t-Command`texit`t0",
+            "optional`tmissing-tool`t.`tno-such-tool-xyz`tcheck"
+        ) | Set-Content -LiteralPath (Join-Path $proj '.agentic\checks.tsv')
+        $eventRel = '.agentic/runs/ev-skip.jsonl'
+        $eventFile = Join-Path $proj $eventRel
+        $tmpJson = [System.IO.Path]::GetTempFileName()
+        Push-Location $proj
+        try {
+            $outLines = & pwsh -NoProfile -File $verifyPs -Format Json 2> $null
+            $jsonExit = $LASTEXITCODE
+            [System.IO.File]::WriteAllLines($tmpJson, $outLines, [System.Text.UTF8Encoding]::new($false))
+            $jsonDoc = Get-Content -LiteralPath $tmpJson -Raw | ConvertFrom-Json
+            $null = & pwsh -NoProfile -File $verifyPs -Events $eventRel 2> $null
+            $evExit = $LASTEXITCODE
+        }
+        finally { Pop-Location }
+        $evExit | Should -Be 0
+        $jsonExit | Should -Be $evExit
+        $jsonDoc.result | Should -Be 'PASS'
+        $jsonDoc.summary.optional_skipped | Should -Be 1
+        (Test-JsonLinesAgainstSchema $eventFile $eventSchemaPath) | Should -Be 0
+        Assert-EventStreamInvariants -EventFile $eventFile -ProcessExitCode $evExit -ExpectedResult 'PASS' -JsonDoc $jsonDoc
+        $evLines = Get-Content -LiteralPath $eventFile | ForEach-Object { $_ | ConvertFrom-Json }
+        $skipped = @($evLines | Where-Object { $_.event -eq 'check_completed' -and $_.status -eq 'SKIPPED_OPTIONAL' })
+        $skipped.Count | Should -Be 1
+        $startedSkipped = @($evLines | Where-Object { $_.event -eq 'check_started' -and $_.check_id -eq $skipped[0].check_id })
+        $startedSkipped.Count | Should -Be 0
+        Remove-Item -LiteralPath $proj -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $tmpJson -ErrorAction SilentlyContinue
+    }
+
+    It 'event stream validates against schema (text mode, UNSUPPORTED)' {
+        $proj = Join-Path $TestDrive "unsupported-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $proj -Force | Out-Null
+        # ensure no package.json, no checks.tsv, nothing detectable
+        $eventRel = '.agentic/runs/ev-unsup.jsonl'
+        $eventFile = Join-Path $proj $eventRel
+        $tmpJson = [System.IO.Path]::GetTempFileName()
+        Push-Location $proj
+        try {
+            $outLines = & pwsh -NoProfile -File $verifyPs -Format Json 2> $null
+            $jsonExit = $LASTEXITCODE
+            [System.IO.File]::WriteAllLines($tmpJson, $outLines, [System.Text.UTF8Encoding]::new($false))
+            $jsonDoc = Get-Content -LiteralPath $tmpJson -Raw | ConvertFrom-Json
+            $null = & pwsh -NoProfile -File $verifyPs -Events $eventRel 2> $null
+            $evExit = $LASTEXITCODE
+        }
+        finally { Pop-Location }
+        $evExit | Should -Be 3
+        $jsonExit | Should -Be $evExit
+        $jsonDoc.result | Should -Be 'UNSUPPORTED'
+        (Test-JsonLinesAgainstSchema $eventFile $eventSchemaPath) | Should -Be 0
+        Assert-EventStreamInvariants -EventFile $eventFile -ProcessExitCode $evExit -ExpectedResult 'UNSUPPORTED' -JsonDoc $jsonDoc
+        $evLines = Get-Content -LiteralPath $eventFile | ForEach-Object { $_ | ConvertFrom-Json }
+        $evLines.Count | Should -Be 2
+        $evLines[0].event | Should -Be 'verification_started'
+        $evLines[1].event | Should -Be 'verification_completed'
+        Remove-Item -LiteralPath $proj -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $tmpJson -ErrorAction SilentlyContinue
+    }
+
+    It 'Bash and PowerShell event streams are semantically equivalent after normalizing durations' {
+        if ($IsWindows) { return }
+        if (-not (Get-Command bash -ErrorAction SilentlyContinue)) { return }
+        $proj = Join-Path $TestDrive "cmp-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path (Join-Path $proj '.agentic') -Force | Out-Null
+        @(
+            "required`tok`t.`tpwsh`t-NoProfile`t-Command`texit`t0",
+            "optional`topt-fails`t.`tpwsh`t-NoProfile`t-Command`texit`t5"
+        ) | Set-Content -LiteralPath (Join-Path $proj '.agentic\checks.tsv')
+        $psEventRel = '.agentic/runs/cmp-ps.jsonl'
+        $shEventRel = '.agentic/runs/cmp-sh.jsonl'
+        $psEventFile = Join-Path $proj $psEventRel
+        $shEventFile = Join-Path $proj $shEventRel
+        Push-Location $proj
+        try {
+            $null = & pwsh -NoProfile -File $verifyPs -Events $psEventRel 2> $null
+            $psExit = $LASTEXITCODE
+            $null = & bash $verifySh --events $shEventRel 2> $null
+            $shExit = $LASTEXITCODE
+        }
+        finally { Pop-Location }
+        $psExit | Should -Be $shExit
+        Test-Path -LiteralPath $psEventFile | Should -Be $true
+        Test-Path -LiteralPath $shEventFile | Should -Be $true
+        (Test-JsonLinesAgainstSchema $psEventFile $eventSchemaPath) | Should -Be 0
+        (Test-JsonLinesAgainstSchema $shEventFile $eventSchemaPath) | Should -Be 0
+        $psEvents = Get-NormalizedEvents -Path $psEventFile
+        $shEvents = Get-NormalizedEvents -Path $shEventFile
+        $psEvents.Count | Should -Be $shEvents.Count
+        for ($i = 0; $i -lt $psEvents.Count; $i++) {
+            $a = $psEvents[$i] | ConvertTo-Json -Compress -Depth 10
+            $b = $shEvents[$i] | ConvertTo-Json -Compress -Depth 10
+            $a | Should -Be $b -Because "Bash and PS event $i should match after duration normalization"
+        }
+        Remove-Item -LiteralPath $proj -Recurse -Force -ErrorAction SilentlyContinue
     }
 
     It 'event schema rejects PASS with non-zero exit_code' {
@@ -659,22 +962,23 @@ Describe 'Event schema validation' {
 
     It 'Bash verify.sh rejects combined --format json and --events' {
         if ($IsWindows) { return }
-        $fixDir = Join-Path $fixtures 'node-npm'
-        $eventFile = Join-Path $fixDir '.agentic/runs/combined-reject.jsonl'
+        $fixDir = Join-Path $fixtures 'checks-tsv-pass'
+        $eventFile = Join-Path $fixDir '.agentic/runs/combined-reject-sh.jsonl'
         if (Test-Path -LiteralPath $eventFile) { Remove-Item -LiteralPath $eventFile -Force }
         Push-Location $fixDir
         try {
-            $out = & bash -c "bash '$verifySh' --format json --events '.agentic/runs/combined-reject.jsonl'" 2>&1
+            $out = & bash -c "bash '$verifySh' --format json --events '.agentic/runs/combined-reject-sh.jsonl'" 2>&1
             $code = $LASTEXITCODE
         }
         finally { Pop-Location }
         $code | Should -Not -Be 0
         $out | Should -Match 'format json.*events|events.*format json'
         if (Test-Path -LiteralPath $eventFile) { Remove-Item -LiteralPath $eventFile -Force }
+        Test-Path -LiteralPath $eventFile | Should -Be $false
     }
 
     It 'PowerShell verify.ps1 rejects combined -Format Json and -Events' {
-        $fixDir = Join-Path $fixtures 'node-npm'
+        $fixDir = Join-Path $fixtures 'checks-tsv-pass'
         $eventFile = Join-Path $fixDir '.agentic/runs/combined-reject-ps.jsonl'
         if (Test-Path -LiteralPath $eventFile) { Remove-Item -LiteralPath $eventFile -Force }
         Push-Location $fixDir
@@ -687,5 +991,59 @@ Describe 'Event schema validation' {
         $out | Should -Match 'JSON stdout'
         $out | Should -Match 'event stream'
         if (Test-Path -LiteralPath $eventFile) { Remove-Item -LiteralPath $eventFile -Force }
+        Test-Path -LiteralPath $eventFile | Should -Be $false
+    }
+
+    It 'PowerShell -EventsForce promotion failure cleans up scratch file' {
+        $proj = Join-Path $TestDrive "force-fail-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path (Join-Path $proj '.agentic') -Force | Out-Null
+        "required`tok`t.`tpwsh`t-NoProfile`t-Command`texit`t0" | Set-Content -LiteralPath (Join-Path $proj '.agentic\checks.tsv')
+        $eventRel = '.agentic/runs/force-fail.jsonl'
+        $eventFile = Join-Path $proj $eventRel
+        # Create a directory at the destination path so Move-Item promotion fails
+        New-Item -ItemType Directory -Path $eventFile -Force | Out-Null
+        Push-Location $proj
+        try {
+            $out = (& pwsh -NoProfile -File $verifyPs -Events $eventRel -EventsForce 2>&1 | Out-String)
+            $code = $LASTEXITCODE
+        }
+        finally { Pop-Location }
+        $code | Should -Not -Be 0
+        $out | Should -Match 'failed to initialize|failed to promote|ERROR'
+        # Destination should still be a directory, not a file
+        (Test-Path -LiteralPath $eventFile -PathType Container) | Should -Be $true
+        # No scratch files leaked beside the destination
+        $runsDir = Join-Path $proj '.agentic/runs'
+        $scratchLeft = @(Get-ChildItem -LiteralPath $runsDir -Filter '.verify-events.*' -ErrorAction SilentlyContinue)
+        $scratchLeft.Count | Should -Be 0 -Because "scratch file must be cleaned up after failed promotion"
+        Remove-Item -LiteralPath $proj -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'PowerShell -Events without force refuses to overwrite and cleans up scratch' {
+        $proj = Join-Path $TestDrive "no-clobber-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path (Join-Path $proj '.agentic') -Force | Out-Null
+        "required`tok`t.`tpwsh`t-NoProfile`t-Command`texit`t0" | Set-Content -LiteralPath (Join-Path $proj '.agentic\checks.tsv')
+        $eventRel = '.agentic/runs/no-clobber.jsonl'
+        $eventFile = Join-Path $proj $eventRel
+        Push-Location $proj
+        try {
+            $null = & pwsh -NoProfile -File $verifyPs -Events $eventRel 2> $null
+            $firstExit = $LASTEXITCODE
+            $firstExit | Should -Be 0
+            Test-Path -LiteralPath $eventFile | Should -Be $true
+            $firstContent = Get-Content -LiteralPath $eventFile -Raw
+            $out = (& pwsh -NoProfile -File $verifyPs -Events $eventRel 2>&1 | Out-String)
+            $secondExit = $LASTEXITCODE
+            $secondExit | Should -Not -Be 0
+            $out | Should -Match 'refusing to overwrite'
+            # file should be unchanged
+            $secondContent = Get-Content -LiteralPath $eventFile -Raw
+            $secondContent | Should -Be $firstContent
+        }
+        finally { Pop-Location }
+        $runsDir = Join-Path $proj '.agentic/runs'
+        $scratchLeft = @(Get-ChildItem -LiteralPath $runsDir -Filter '.verify-events.*' -ErrorAction SilentlyContinue)
+        $scratchLeft.Count | Should -Be 0
+        Remove-Item -LiteralPath $proj -Recurse -Force -ErrorAction SilentlyContinue
     }
 }

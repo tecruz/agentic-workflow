@@ -70,16 +70,16 @@ Amended decisions:
      rejected after lexical and physical containment checks.
    - The stream file is created atomically after argument parsing and
      project-contract validation succeed; contract failures therefore never
-     leave a truncated or unterminated stream behind. In no-force mode the
-     destination is created with an exclusive hard link (`ln`); in force mode
-     the destination is overwritten after a checked `mv -f` / `Move-Item -Force`.
+     leave a truncated or unterminated stream behind:
+     - **Bash no-force:** scratch file (`mktemp` beside destination, same filesystem) + atomic exclusive hard-link creation (`ln` without `-f`; fails with `EEXIST` if destination exists).
+     - **Bash force:** scratch file (`mktemp` beside destination) + checked replacement rename (`mv -f`); failure cleans up scratch and exits non-zero.
+     - **PowerShell:** scratch file (`.verify-events.` + `GetRandomFileName()` beside destination, absolute via `Get-Location`) + checked `Move-Item` promotion (`-Force` only when `-EventsForce`); both modes use `-ErrorAction Stop` with `try/catch/finally` scratch cleanup and post-move leaf verification.
    - Existing event files are refused unless `--events-force` /
      `-EventsForce` is given.
    - Each run emits exactly one terminal `verification_completed` event as the
      final line, pairing `result` with the verifier exit code; single-event
-     pairing is schema-enforced, and ordering/single-terminal coverage lives in
-     the Pester and fixture suites (JSON Schema cannot express cross-item
-     ordering).
+     pairing is schema-enforced (`exit_code` enum per result), while
+     cross-event ordering (exactly one terminal event last, `check_started` before `check_completed` for executed checks, no `check_started` for `BLOCKED`/`SKIPPED_OPTIONAL`, one-to-one result/check correspondence, and Bash/PS semantic parity after duration normalization) is covered by Pester (`JsonContracts.Tests.ps1`) and Bats (`verify_test.bats`) suites — JSON Schema cannot express ordering across JSONL lines.
    - Events carry check identifiers, statuses, durations, and redacted
      working-directory labels only — never command lines, arguments, child
      output, environment details, or absolute user paths.
