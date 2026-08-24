@@ -54,9 +54,47 @@
             "exit_code": { "type": ["integer", "null"] },
             "duration_ms": { "type": "integer", "minimum": 0 },
             "working_directory": { "type": "string" },
-            "reason_code": { "type": ["string", "null"] }
+            "reason_code": { "enum": ["CHECK_FAILED", "WORKING_DIR_MISSING", "EXECUTABLE_MISSING", null] }
           },
           "additionalProperties": false
+        }
+      ],
+      "anyOf": [
+        {
+          "if": { "properties": { "status": { "const": "PASS" } }, "required": ["status"] },
+          "then": {
+            "properties": {
+              "exit_code": { "const": 0 },
+              "reason_code": { "const": null }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "const": "FAIL" } }, "required": ["status"] },
+          "then": {
+            "properties": {
+              "exit_code": { "type": "integer", "minimum": 1 },
+              "reason_code": { "const": "CHECK_FAILED" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "const": "BLOCKED" } }, "required": ["status"] },
+          "then": {
+            "properties": {
+              "exit_code": { "const": null },
+              "reason_code": { "enum": ["WORKING_DIR_MISSING", "EXECUTABLE_MISSING"] }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "const": "SKIPPED_OPTIONAL" } }, "required": ["status"] },
+          "then": {
+            "properties": {
+              "exit_code": { "const": null },
+              "reason_code": { "enum": ["WORKING_DIR_MISSING", "EXECUTABLE_MISSING"] }
+            }
+          }
         }
       ]
     },

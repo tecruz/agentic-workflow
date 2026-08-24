@@ -85,6 +85,15 @@ case "$(printf '%s' "$FORMAT" | tr '[:upper:]' '[:lower:]')" in
         ;;
 esac
 
+# v1.4.0: simultaneous JSON stdout and event stream is not supported.
+# Each output is reliable independently; combined use could produce
+# contradictory terminal event vs process exit. Reject at parse time.
+if [ "$FORMAT" = "json" ] && [ -n "$EVENTS_FILE" ]; then
+    echo "ERROR: --format json and --events cannot be used together in v1.4.0." >&2
+    echo "Use JSON stdout OR an event stream, not both." >&2
+    exit 1
+fi
+
 RESULTS_TMP="$(mktemp)"
 EVENTS_SCRATCH=""
 cleanup_verify() {

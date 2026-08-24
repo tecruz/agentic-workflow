@@ -76,13 +76,13 @@ Describe 'v1.4.0 JSON result contracts and schema validation' {
         Remove-Item -LiteralPath $tmpOut -ErrorAction SilentlyContinue
     }
 
-    It 'optional JSONL run events stream is produced correctly with -Events' {
+    It 'optional JSONL run events stream is produced correctly with -Events (text mode)' {
         $fixDir = Join-Path $fixtures 'node-npm'
         $eventFile = Join-Path $fixDir '.agentic/runs/test-event.jsonl'
         if (Test-Path -LiteralPath $eventFile) { Remove-Item -LiteralPath $eventFile -Force }
         Push-Location $fixDir
         try {
-            $null = & pwsh -NoProfile -File $verifyPs -Format Json -Events '.agentic/runs/test-event.jsonl' 2> $null
+            $null = & pwsh -NoProfile -File $verifyPs -Events '.agentic/runs/test-event.jsonl' 2> $null
         }
         finally { Pop-Location }
         Test-Path -LiteralPath $eventFile | Should -Be $true

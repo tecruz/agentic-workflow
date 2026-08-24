@@ -49,6 +49,15 @@ param(
     [switch] $EventsForce
 )
 
+# v1.4.0: simultaneous JSON stdout and event stream is not supported.
+# Each output is reliable independently; combined use could produce
+# contradictory terminal event vs process exit. Reject at parse time.
+if ($Format -eq 'Json' -and $Events) {
+    [Console]::Error.WriteLine("ERROR: -Format Json and -Events cannot be used together in v1.4.0.")
+    [Console]::Error.WriteLine("Use JSON stdout OR an event stream, not both.")
+    exit 1
+}
+
 $script:Failed = $false
 $script:Ran = 0
 $script:RanRequired = $false
@@ -688,11 +697,25 @@ function Initialize-EventsStream {
     $scratchAbsolute = Join-Path (Get-Location).Path (Join-Path $eventDir ('.verify-events.' + [System.IO.Path]::GetRandomFileName()))
     $startLine = ([ordered]@{ event = "verification_started" } | ConvertTo-Json -Compress) + "`n"
     [System.IO.File]::WriteAllText($scratchAbsolute, $startLine, [System.Text.UTF8Encoding]::new($false))
-    if ($EventsForce) {
-        Move-Item -LiteralPath $scratchAbsolute -Destination $Events -Force
+    try {
+        if ($EventsForce) {
+            Move-Item -LiteralPath $scratchAbsolute -Destination $Events -Force -ErrorAction Stop
+        }
+        else {
+            Move-Item -LiteralPath $scratchAbsolute -Destination $Events -ErrorAction Stop
+        }
+        if (-not (Test-Path -LiteralPath $Events -PathType Leaf)) {
+            throw "Event stream promotion produced no destination file."
+        }
     }
-    else {
-        Move-Item -LiteralPath $scratchAbsolute -Destination $Events -ErrorAction Stop
+    catch {
+        [Console]::Error.WriteLine("ERROR: failed to initialize event stream.")
+        exit 1
+    }
+    finally {
+        if (Test-Path -LiteralPath $scratchAbsolute) {
+            Remove-Item -LiteralPath $scratchAbsolute -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 
