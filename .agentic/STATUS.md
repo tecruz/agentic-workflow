@@ -38,6 +38,7 @@
   PowerShell parse OK on `install.ps1` and `.agentic/scripts/verify.ps1`;
   Bats 123 total / 0 failures / 1 CI-only skip (pwsh parity); Pester 106
   passed / 0 failed / 2 platform skips.
+- **TASK-003 (PR #9 review blockers) completed 2026-08-24**: all 4 merge blockers fixed (optional-failure PASS schema validity, nested cwd labels, task-path redaction, format validation), schema updated to 1.4.0 with `optional_failed` and PASS invariant, tests added (Bats + Pester), docs updated (README, CHANGELOG, ADR-0009). Ready for CI gate.
 - Adopters: replace the placeholders above with links to real task and decision
   files as they are created. Keep this file brief; the per-task and per-decision
   files hold the detail.

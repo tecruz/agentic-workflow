@@ -93,7 +93,14 @@ function Get-TaskFileDisplay {
     # directory, degraded to its basename otherwise, so an absolute user-home
     # path can never leak into machine-readable results.
     $rawNorm = ($TaskFile -replace '\\', '/')
-    if ($rawNorm -notmatch '^(/|[A-Za-z]:)') {
+    if ($rawNorm -match '^[A-Za-z]:') {
+        # A drive-letter path can only be a real absolute path on Windows; on
+        # any other host it is a foreign path form that must degrade to its
+        # basename instead of being resolved against the working directory
+        # (where it would masquerade as a project-relative label).
+        if (-not $IsWindows) { return [System.IO.Path]::GetFileName($rawNorm) }
+    }
+    elseif ($rawNorm -notmatch '^/') {
         return ($rawNorm -replace '^\./', '')
     }
     $root = [System.IO.Path]::GetFullPath((Get-Location).Path).TrimEnd('\', '/')
@@ -140,7 +147,10 @@ function Write-Blocked {
 
 if (-not (Test-Path -LiteralPath $TaskFile -PathType Leaf)) {
     if ($Format -eq 'Json') {
-        Output-TaskJson 'INVALID' 1 "Error: task file not found: $TaskFile" 'TASK_FILE_NOT_FOUND'
+        # The diagnostic message carries only the redacted display value: the
+        # raw input path must never leak into serialized JSON through a
+        # message when its structured field is redacted.
+        Output-TaskJson 'INVALID' 1 "Task file was not found: $(Get-TaskFileDisplay)" 'TASK_FILE_NOT_FOUND'
     }
     else {
         [Console]::Error.WriteLine("Error: task file not found: $TaskFile")

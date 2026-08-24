@@ -80,6 +80,7 @@ expect_code checks-tsv         2
 if check_exe checks-tsv-pass; then expect_code checks-tsv-pass 0; else expect_code checks-tsv-pass 2; fi
 if check_exe checks-tsv-fail;  then expect_code checks-tsv-fail 1; else expect_code checks-tsv-fail 2; fi
 if check_exe checks-tsv-optional; then expect_code checks-tsv-optional 0; else expect_code checks-tsv-optional 2; fi
+if check_exe checks-tsv-nested-cwd; then expect_code checks-tsv-nested-cwd 0; else expect_code checks-tsv-nested-cwd 2; fi
 expect_code unsupported        3
 if has npm; then expect_code node-npm 0; else expect_code node-npm 2; fi
 if has npm; then expect_code node-npm-fail 1; else expect_code node-npm-fail 2; fi

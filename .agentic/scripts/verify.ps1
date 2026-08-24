@@ -69,7 +69,11 @@ function Write-Log {
 function Output-VerificationJson {
     param([string] $ResultStr, [int] $ExitCode)
     $passedCount = @($script:CheckResults | Where-Object { $_.status -eq 'PASS' }).Count
-    $failedCount = @($script:CheckResults | Where-Object { $_.status -eq 'FAIL' }).Count
+    # failed counts failed REQUIRED checks only; optional failures are reported
+    # separately in optional_failed so a PASS run with a failing optional check
+    # stays schema-valid (exit 0 requires failed = 0).
+    $failedCount = @($script:CheckResults | Where-Object { $_.status -eq 'FAIL' -and $_.requirement -eq 'required' }).Count
+    $optionalFailedCount = @($script:CheckResults | Where-Object { $_.status -eq 'FAIL' -and $_.requirement -eq 'optional' }).Count
     $blockedCount = @($script:CheckResults | Where-Object { $_.status -eq 'BLOCKED' }).Count
     $optionalSkipped = @($script:CheckResults | Where-Object { $_.status -eq 'SKIPPED_OPTIONAL' }).Count
     $requiredRun = @($script:CheckResults | Where-Object { $_.requirement -eq 'required' -and $_.status -in @('PASS', 'FAIL') }).Count
@@ -88,6 +92,7 @@ function Output-VerificationJson {
             required_run     = $requiredRun
             passed           = $passedCount
             failed           = $failedCount
+            optional_failed  = $optionalFailedCount
             blocked          = $blockedCount
             optional_skipped = $optionalSkipped
         }

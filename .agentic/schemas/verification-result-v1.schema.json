@@ -13,13 +13,14 @@
     "source": { "type": "string", "enum": ["checks_tsv", "auto_detected"] },
     "summary": {
       "type": "object",
-      "required": ["checks_defined", "checks_run", "required_run", "passed", "failed", "blocked", "optional_skipped"],
+      "required": ["checks_defined", "checks_run", "required_run", "passed", "failed", "optional_failed", "blocked", "optional_skipped"],
       "properties": {
         "checks_defined": { "type": "integer", "minimum": 0 },
         "checks_run": { "type": "integer", "minimum": 0 },
         "required_run": { "type": "integer", "minimum": 0 },
         "passed": { "type": "integer", "minimum": 0 },
-        "failed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0, "description": "Number of failed required checks. Optional failures are counted separately in optional_failed and never affect the result." },
+        "optional_failed": { "type": "integer", "minimum": 0, "description": "Number of failed optional checks. Optional failures never fail a run." },
         "blocked": { "type": "integer", "minimum": 0 },
         "optional_skipped": { "type": "integer", "minimum": 0 }
       }
@@ -46,6 +47,20 @@
     {
       "if": { "properties": { "result": { "const": "PASS" } }, "required": ["result"] },
       "then": { "properties": { "exit_code": { "const": 0 } } }
+    },
+    {
+      "if": { "properties": { "result": { "const": "PASS" } }, "required": ["result"] },
+      "then": {
+        "properties": {
+          "summary": {
+            "properties": {
+              "required_run": { "minimum": 1 },
+              "failed": { "const": 0 },
+              "blocked": { "const": 0 }
+            }
+          }
+        }
+      }
     },
     {
       "if": { "properties": { "result": { "const": "FAIL" } }, "required": ["result"] },

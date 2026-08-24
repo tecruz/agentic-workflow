@@ -88,3 +88,18 @@ Amended decisions:
    it is absent; text mode has no such dependency. Serializer failures are
    propagated as nonzero exits rather than emitting empty or malformed
    documents.
+
+5. **Summary semantics distinguish required from optional failures**: the
+   verification `summary.failed` field counts failed *required* checks only,
+   while failed optional checks are reported in `summary.optional_failed` and
+   never affect the result or exit code. This keeps a run whose optional check
+   failed schema-valid as `PASS`. The schema additionally requires any `PASS`
+   document to have run at least one required check (`required_run >= 1`) with
+   zero required failures and zero blocked checks, encoding the ADR-0002
+   invariant that PASS is impossible unless a required check actually ran.
+
+6. **Output format is strict in both languages**: unknown or missing
+   `--format` values are rejected with a clear error by both verifiers and
+   both task validators (PowerShell via ValidateSet, Bash via explicit
+   post-parse validation), so the versioned CLI contract cannot silently
+   degrade to text mode.

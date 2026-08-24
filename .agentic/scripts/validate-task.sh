@@ -66,7 +66,12 @@ EOF
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --format) FORMAT="$2"; shift 2 ;;
+        --format)
+            if [ $# -lt 2 ]; then
+                echo "ERROR: --format requires a value ('text' or 'json')." >&2
+                exit 1
+            fi
+            FORMAT="$2"; shift 2 ;;
         --format=*) FORMAT="${1#*=}"; shift ;;
         --handoff) HANDOFF=1; shift ;;
         -h|--help) usage; exit 0 ;;
@@ -81,6 +86,19 @@ while [ $# -gt 0 ]; do
             ;;
     esac
 done
+
+# The output format is a versioned CLI contract: unknown or missing values are
+# rejected exactly like the PowerShell ValidateSet rejects them instead of
+# silently degrading to text mode. Comparison is case-insensitive so Bash and
+# PowerShell accept the same spellings.
+case "$(printf '%s' "$FORMAT" | tr '[:upper:]' '[:lower:]')" in
+    text) FORMAT="text" ;;
+    json) FORMAT="json" ;;
+    *)
+        echo "ERROR: --format must be 'text' or 'json'." >&2
+        exit 1
+        ;;
+esac
 
 if [ -z "$TASK_FILE" ]; then
     usage >&2
@@ -172,7 +190,10 @@ print(json.dumps(doc))
 
 if [ ! -f "$TASK_FILE" ]; then
     if [ "$FORMAT" = "json" ]; then
-        output_task_json "INVALID" 1 "Error: task file not found: $TASK_FILE" "TASK_FILE_NOT_FOUND"
+        # The diagnostic message carries only the redacted display value: the
+        # raw input path must never leak into serialized JSON through a
+        # message when its structured field is redacted.
+        output_task_json "INVALID" 1 "Task file was not found: $(display_path "$TASK_FILE")" "TASK_FILE_NOT_FOUND"
     else
         echo "Error: task file not found: $TASK_FILE" >&2
     fi

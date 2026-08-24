@@ -226,4 +226,224 @@ Describe 'v1.4.0 JSON result contracts and schema validation' {
             Remove-Item -LiteralPath $eventFile -ErrorAction SilentlyContinue
         }
     }
+
+    # -----------------------------------------------------------------------
+    # PR #9 review regression coverage: optional-failure PASS documents,
+    # nested working-directory labels, JSON-wide path redaction, and strict
+    # --format parsing. The Bash legs mirror the dedicated Bats cases and run
+    # on the Linux/macOS CI jobs.
+    # -----------------------------------------------------------------------
+
+    It 'PASS with a failing optional check is schema-valid and separates failure counts (Bash)' {
+        if ($IsWindows) { return }
+        $fixDir = Join-Path $fixtures 'checks-tsv-optional'
+        $tmpOut = [System.IO.Path]::GetTempFileName()
+        Push-Location $fixDir
+        try {
+            $outLines = & bash $verifySh --format json 2> $null
+            $code = $LASTEXITCODE
+            [System.IO.File]::WriteAllLines($tmpOut, $outLines, [System.Text.UTF8Encoding]::new($false))
+            # Parse and schema-check while the temp file still exists.
+            $doc = Get-Content -LiteralPath $tmpOut -Raw | ConvertFrom-Json
+            $script:schemaExit = Test-JsonValid $tmpOut $verifySchema
+        }
+        finally {
+            Remove-Item -LiteralPath $tmpOut -ErrorAction SilentlyContinue
+            Pop-Location
+        }
+        $code | Should -Be 0
+        $script:schemaExit | Should -Be 0
+        $doc.result | Should -Be 'PASS'
+        $doc.summary.failed | Should -Be 0
+        $doc.summary.optional_failed | Should -Be 1
+        $doc.summary.required_run | Should -Be 1
+    }
+
+    It 'PASS with a failing optional check is schema-valid and separates failure counts (PowerShell)' {
+        if (-not (Get-Command sh -ErrorAction SilentlyContinue)) { return }
+        $fixDir = Join-Path $fixtures 'checks-tsv-optional'
+        $tmpOut = [System.IO.Path]::GetTempFileName()
+        Push-Location $fixDir
+        try {
+            $outLines = & pwsh -NoProfile -File $verifyPs -Format Json 2> $null
+            $code = $LASTEXITCODE
+            [System.IO.File]::WriteAllLines($tmpOut, $outLines, [System.Text.UTF8Encoding]::new($false))
+            $doc = Get-Content -LiteralPath $tmpOut -Raw | ConvertFrom-Json
+            $script:schemaExit = Test-JsonValid $tmpOut $verifySchema
+        }
+        finally {
+            Remove-Item -LiteralPath $tmpOut -ErrorAction SilentlyContinue
+            Pop-Location
+        }
+        $code | Should -Be 0
+        $script:schemaExit | Should -Be 0
+        $doc.result | Should -Be 'PASS'
+        $doc.summary.failed | Should -Be 0
+        $doc.summary.optional_failed | Should -Be 1
+        $doc.summary.required_run | Should -Be 1
+    }
+
+    It 'PASS with a skipped optional check is schema-valid (PowerShell)' {
+        $proj = Join-Path $TestDrive "optional-skipped-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path (Join-Path $proj '.agentic') -Force | Out-Null
+        @(
+            "required`tok`t.`tpwsh`t-NoProfile`t-Command`texit`t0",
+            "optional`tmissing-tool`t.`tno-such-tool-xyz`tcheck"
+        ) | Set-Content -LiteralPath (Join-Path $proj '.agentic\checks.tsv')
+        $tmpOut = [System.IO.Path]::GetTempFileName()
+        Push-Location $proj
+        try {
+            $outLines = & pwsh -NoProfile -File $verifyPs -Format Json 2> $null
+            $code = $LASTEXITCODE
+            [System.IO.File]::WriteAllLines($tmpOut, $outLines, [System.Text.UTF8Encoding]::new($false))
+            $doc = Get-Content -LiteralPath $tmpOut -Raw | ConvertFrom-Json
+        }
+        finally {
+            Pop-Location
+            Remove-Item -LiteralPath $tmpOut -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $proj -Recurse -Force
+        }
+        $code | Should -Be 0
+        $doc.result | Should -Be 'PASS'
+        $doc.summary.failed | Should -Be 0
+        $doc.summary.optional_skipped | Should -Be 1
+    }
+
+    It 'required failure plus passing optional check yields FAIL/1 with schema-valid JSON (Bash)' {
+        if ($IsWindows) { return }
+        $proj = Join-Path $TestDrive "required-fail-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path (Join-Path $proj '.agentic') -Force | Out-Null
+        @(
+            "required`tbroken`t.`tsh`t-c`texit`t3",
+            "optional`tfine`t.`tsh`t-c`ttrue"
+        ) | Set-Content -LiteralPath (Join-Path $proj '.agentic/checks.tsv')
+        $tmpOut = [System.IO.Path]::GetTempFileName()
+        Push-Location $proj
+        try {
+            $outLines = & bash $verifySh --format json 2> $null
+            $code = $LASTEXITCODE
+            [System.IO.File]::WriteAllLines($tmpOut, $outLines, [System.Text.UTF8Encoding]::new($false))
+            $doc = Get-Content -LiteralPath $tmpOut -Raw | ConvertFrom-Json
+            $script:schemaExit = Test-JsonValid $tmpOut $verifySchema
+        }
+        finally {
+            Pop-Location
+            Remove-Item -LiteralPath $tmpOut -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $proj -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        $code | Should -Be 1
+        $script:schemaExit | Should -Be 0
+        $doc.result | Should -Be 'FAIL'
+        $doc.summary.failed | Should -Be 1
+        $doc.summary.optional_failed | Should -Be 0
+    }
+
+    It 'nested working directories keep full project-relative labels in both implementations' {
+        $fixDir = Join-Path $fixtures 'checks-tsv-nested-cwd'
+        $expectedLabels = @('./apps/api', './services/api', './packages/shared')
+
+        $tmpOut = [System.IO.Path]::GetTempFileName()
+        Push-Location $fixDir
+        try {
+            $outLines = & pwsh -NoProfile -File $verifyPs -Format Json 2> $null
+            $code = $LASTEXITCODE
+            [System.IO.File]::WriteAllLines($tmpOut, $outLines, [System.Text.UTF8Encoding]::new($false))
+            $psDoc = Get-Content -LiteralPath $tmpOut -Raw | ConvertFrom-Json
+        }
+        finally { Pop-Location }
+        Remove-Item -LiteralPath $tmpOut -ErrorAction SilentlyContinue
+        $code | Should -Be 0
+        @($psDoc.checks.working_directory) | Should -Be $expectedLabels
+
+        if (-not $IsWindows) {
+            $tmpOut = [System.IO.Path]::GetTempFileName()
+            Push-Location $fixDir
+            try {
+                $outLines = & bash $verifySh --format json 2> $null
+                $code = $LASTEXITCODE
+                [System.IO.File]::WriteAllLines($tmpOut, $outLines, [System.Text.UTF8Encoding]::new($false))
+                $bashDoc = Get-Content -LiteralPath $tmpOut -Raw | ConvertFrom-Json
+            }
+            finally {
+                Remove-Item -LiteralPath $tmpOut -ErrorAction SilentlyContinue
+                Pop-Location
+            }
+            $code | Should -Be 0
+            @($bashDoc.checks.working_directory) | Should -Be $expectedLabels
+        }
+    }
+
+    It 'task-validator JSON redacts absolute task paths from every serialized field (PowerShell)' {
+        # Both foreign-path shapes are exercised on both platform families:
+        # the native absolute form and the other platform's absolute form.
+        $paths = @(
+            'C:\Users\Alice\private-project\TASK.md',
+            '/home/alice/private-project/TASK.md'
+        )
+        foreach ($p in $paths) {
+            $tmpOut = [System.IO.Path]::GetTempFileName()
+            $outLines = & pwsh -NoProfile -File $validatePs -Format Json $p 2> $null
+            $code = $LASTEXITCODE
+            [System.IO.File]::WriteAllLines($tmpOut, $outLines, [System.Text.UTF8Encoding]::new($false))
+            $raw = Get-Content -LiteralPath $tmpOut -Raw
+            Remove-Item -LiteralPath $tmpOut -ErrorAction SilentlyContinue
+            $code | Should -Be 1
+            $parsed = $raw | ConvertFrom-Json
+            $parsed.task_file | Should -Be 'TASK.md'
+            $parsed.diagnostics[0].code | Should -Be 'TASK_FILE_NOT_FOUND'
+            # Whole-document redaction: no user or secret-looking segment may
+            # appear anywhere in the serialized JSON, not only in task_file.
+            $raw | Should -Not -Match '(?i)alice|private-project|Users\\|Users/|home/'
+        }
+    }
+
+    It 'task-validator JSON redacts absolute task paths from every serialized field (Bash)' {
+        if ($IsWindows) { return }
+        $paths = @(
+            '/home/alice/private-project/TASK.md',
+            'C:\Users\Alice\private-project\TASK.md'
+        )
+        foreach ($p in $paths) {
+            $tmpOut = [System.IO.Path]::GetTempFileName()
+            $outLines = & bash $validateSh --format json $p 2> $null
+            $code = $LASTEXITCODE
+            [System.IO.File]::WriteAllLines($tmpOut, $outLines, [System.Text.UTF8Encoding]::new($false))
+            $raw = Get-Content -LiteralPath $tmpOut -Raw
+            Remove-Item -LiteralPath $tmpOut -ErrorAction SilentlyContinue
+            $code | Should -Be 1
+            $parsed = $raw | ConvertFrom-Json
+            $parsed.task_file | Should -Be 'TASK.md'
+            $parsed.diagnostics[0].code | Should -Be 'TASK_FILE_NOT_FOUND'
+            $raw | Should -Not -Match '(?i)alice|private-project|Users\\|Users/|home/'
+        }
+    }
+
+    It 'verify.ps1 rejects unsupported output formats like the Bash verifier' {
+        foreach ($bad in @('Yaml', 'banana')) {
+            $out = & pwsh -NoProfile -File $verifyPs -Format $bad 2>&1
+            $LASTEXITCODE | Should -Not -Be 0
+            ($out | Out-String) | Should -Match 'Format'
+        }
+    }
+
+    It 'validate-task.ps1 rejects unsupported output formats like the Bash validator' {
+        $out = & pwsh -NoProfile -File $validatePs -Format banana (Join-Path $tasksFixtures 'standard-valid.md') 2>&1
+        $LASTEXITCODE | Should -Not -Be 0
+        ($out | Out-String) | Should -Match 'Format'
+    }
+
+    It 'Bash entry points reject unsupported and missing --format values' {
+        if ($IsWindows) { return }
+        foreach ($argSpec in @('--format yaml', '--format', "--format=banana")) {
+            $out = & bash -c "cd '$fixtures/node-npm' && bash '$verifySh' $argSpec" 2>&1
+            $LASTEXITCODE | Should -Be 1
+            ($out | Out-String) | Should -Match "--format"
+        }
+        $out = & bash -c "bash '$validateSh' --format banana" 2>&1
+        $LASTEXITCODE | Should -Be 1
+        ($out | Out-String) | Should -Match "--format must be 'text' or 'json'"
+        $out = & bash -c "bash '$validateSh' --format" 2>&1
+        $LASTEXITCODE | Should -Be 1
+        ($out | Out-String) | Should -Match "--format requires a value"
+    }
 }

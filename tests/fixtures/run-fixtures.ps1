@@ -58,6 +58,7 @@ Expect-Code "checks-tsv" 2
 if (Check-Exe "checks-tsv-pass") { Expect-Code "checks-tsv-pass" 0 } else { Expect-Code "checks-tsv-pass" 2 }
 if (Check-Exe "checks-tsv-fail") { Expect-Code "checks-tsv-fail" 1 } else { Expect-Code "checks-tsv-fail" 2 }
 if (Check-Exe "checks-tsv-optional") { Expect-Code "checks-tsv-optional" 0 } else { Expect-Code "checks-tsv-optional" 2 }
+if (Check-Exe "checks-tsv-nested-cwd") { Expect-Code "checks-tsv-nested-cwd" 0 } else { Expect-Code "checks-tsv-nested-cwd" 2 }
 Expect-Code "unsupported" 3
 if (has npm) { Expect-Code "node-npm" 0 } else { Expect-Code "node-npm" 2 }
 if (has npm) { Expect-Code "node-npm-fail" 1 } else { Expect-Code "node-npm-fail" 2 }

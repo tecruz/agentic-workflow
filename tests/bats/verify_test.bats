@@ -367,6 +367,112 @@ run_checks_in_tmp() {  # run_checks_in_tmp <line>...
     rm -rf "$TMPD"
 }
 
+# ---------------------------------------------------------------------------
+# PR #9 review regression tests: JSON summary semantics, nested working-
+# directory labels, strict --format parsing, and event-stream promotion.
+# ---------------------------------------------------------------------------
+
+@test "optional check failure keeps PASS/0 and reports optional_failed in JSON" {
+    have sh || skip "sh not available"
+    run bash -c "cd '$FIX/checks-tsv-optional' && bash '$VERIFY' --format json 2>/dev/null"
+    [ "$status" -eq 0 ]
+    printf '%s' "$output" | grep -q '"result":"PASS"'
+    printf '%s' "$output" | grep -q '"required_run":1'
+    printf '%s' "$output" | grep -q '"failed":0'
+    printf '%s' "$output" | grep -q '"optional_failed":1'
+}
+
+@test "optional missing tool keeps PASS/0 and reports optional_skipped in JSON" {
+    have sh || skip "sh not available"
+    TMPD="$(mktemp -d)"
+    mkdir -p "$TMPD/.agentic"
+    printf '%s\n' \
+        'required	ok	.	sh	-c	true' \
+        'optional	lint	.	no-such-tool-xyz	check' \
+        > "$TMPD/.agentic/checks.tsv"
+    run bash -c "cd '$TMPD' && bash '$VERIFY' --format json 2>/dev/null"
+    rm -rf "$TMPD"
+    [ "$status" -eq 0 ]
+    printf '%s' "$output" | grep -q '"result":"PASS"'
+    printf '%s' "$output" | grep -q '"failed":0'
+    printf '%s' "$output" | grep -q '"optional_skipped":1'
+}
+
+@test "required check failure reports failed=1 and optional_failed=0 in JSON" {
+    have sh || skip "sh not available"
+    TMPD="$(mktemp -d)"
+    mkdir -p "$TMPD/.agentic"
+    printf '%s\n' \
+        'required	broken	.	sh	-c	exit 3' \
+        'optional	fine	.	sh	-c	true' \
+        > "$TMPD/.agentic/checks.tsv"
+    run bash -c "cd '$TMPD' && bash '$VERIFY' --format json 2>/dev/null"
+    rm -rf "$TMPD"
+    [ "$status" -eq 1 ]
+    printf '%s' "$output" | grep -q '"result":"FAIL"'
+    printf '%s' "$output" | grep -q '"failed":1'
+    printf '%s' "$output" | grep -q '"optional_failed":0'
+}
+
+@test "JSON working_directory preserves nested project-relative paths" {
+    have pwsh || skip "pwsh not available"
+    run bash -c "cd '$FIX/checks-tsv-nested-cwd' && bash '$VERIFY' --format json 2>/dev/null"
+    [ "$status" -eq 0 ]
+    printf '%s' "$output" | grep -q '"working_directory":"./apps/api"'
+    printf '%s' "$output" | grep -q '"working_directory":"./services/api"'
+    printf '%s' "$output" | grep -q '"working_directory":"./packages/shared"'
+}
+
+@test "--format rejects unsupported values like the PowerShell ValidateSet" {
+    run bash -c "cd '$FIX/unsupported' && bash '$VERIFY' --format yaml 2>&1"
+    [ "$status" -eq 1 ]
+    printf '%s' "$output" | grep -q -- "--format must be 'text' or 'json'"
+}
+
+@test "--format with a missing value fails cleanly (no unbound variable)" {
+    run bash -c "cd '$FIX/unsupported' && bash '$VERIFY' --format 2>&1"
+    [ "$status" -eq 1 ]
+    printf '%s' "$output" | grep -q -- "--format requires a value"
+}
+
+@test "--format accepts case-insensitive spellings like PowerShell" {
+    run bash -c "cd '$FIX/unsupported' && bash '$VERIFY' --format JSON 2>&1"
+    # Reaching the normal state model (UNSUPPORTED for an empty fixture)
+    # proves the value was accepted, not silently degraded.
+    [ "$status" -eq 3 ]
+    printf '%s' "$output" | grep -q '"result":"UNSUPPORTED"'
+}
+
+@test "validate-task.sh --format rejects unsupported values" {
+    run bash -c "bash '$REPO_ROOT/.agentic/scripts/validate-task.sh' --format banana 2>&1"
+    [ "$status" -eq 1 ]
+    printf '%s' "$output" | grep -q -- "--format must be 'text' or 'json'"
+}
+
+@test "validate-task.sh --format with a missing value fails cleanly" {
+    run bash -c "bash '$REPO_ROOT/.agentic/scripts/validate-task.sh' --format 2>&1"
+    [ "$status" -eq 1 ]
+    printf '%s' "$output" | grep -q -- "--format requires a value"
+}
+
+@test "--events stream is created atomically and never overwritten without force" {
+    have sh || skip "sh not available"
+    TMPD="$(mktemp -d)"
+    mkdir -p "$TMPD/.agentic"
+    printf 'required	ok	.	sh	-c	true\n' > "$TMPD/.agentic/checks.tsv"
+    run bash -c "cd '$TMPD' && bash '$VERIFY' --events .agentic/runs/events.jsonl >/dev/null 2>&1"
+    [ "$status" -eq 0 ]
+    [ -f "$TMPD/.agentic/runs/events.jsonl" ]
+    head -n 1 "$TMPD/.agentic/runs/events.jsonl" | grep -q 'verification_started'
+    tail -n 1 "$TMPD/.agentic/runs/events.jsonl" | grep -q 'verification_completed'
+    # A second run must refuse to clobber the existing stream.
+    run bash -c "cd '$TMPD' && bash '$VERIFY' --events .agentic/runs/events.jsonl >/dev/null 2>&1"
+    [ "$status" -eq 1 ]
+    # No scratch files may be left behind by either promotion or refusal.
+    [ -z "$(find "$TMPD/.agentic/runs" -name '.verify-events.*' -print -quit)" ]
+    rm -rf "$TMPD"
+}
+
 # The detected-checks contract for a fixture, sorted and comment-free. Used by
 # both the golden-output tests and the Bash/PowerShell parity test.
 detected_lines() {  # detected_lines <fixture-dir>

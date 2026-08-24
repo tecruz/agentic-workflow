@@ -129,8 +129,15 @@ systems, dashboards, and automated agents:
   `BLOCKED`=2). These pairings are enforced as invariants inside the managed
   schemas in `.agentic/schemas/`, which also enumerate the stable diagnostic
   codes emitted by both task-validator implementations.
+- The verification summary distinguishes failure kinds: `failed` counts failed
+  **required** checks only, while `optional_failed` counts failed optional
+  checks, which never fail a run. The schemas enforce that a `PASS` document
+  ran at least one required check (`required_run >= 1`) with zero required
+  failures, so optional-check failures stay fully representable in valid
+  `PASS` results.
 - JSON diagnostics are redacted: no command lines, arguments, child output,
-  environment details, absolute user paths, or raw task lines.
+  environment details, absolute user paths, or raw task lines. This applies
+  to every serialized field, including diagnostic messages.
 - The Bash validator's JSON mode requires `python3` and fails fast with a clear
   error when it is missing; text mode has no such dependency.
 - Verifiers additionally support an opt-in JSONL event stream
@@ -182,7 +189,7 @@ the framework's own checks, tests, CI, and docs so adopters start clean:
 
 ```bash
 bash scripts/build-bundle.sh                    # assemble + archive
-bash dist/agentic-workflow-1.3.0/install.sh /path/to/your-project
+bash dist/agentic-workflow-1.4.0/install.sh /path/to/your-project
 ```
 
 ---

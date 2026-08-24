@@ -39,6 +39,10 @@ EVENTS_FORCE=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --format)
+            if [ $# -lt 2 ]; then
+                echo "ERROR: --format requires a value ('text' or 'json')." >&2
+                exit 1
+            fi
             FORMAT="$2"
             shift 2
             ;;
@@ -47,6 +51,10 @@ while [ $# -gt 0 ]; do
             shift
             ;;
         --events)
+            if [ $# -lt 2 ]; then
+                echo "ERROR: --events requires a file path." >&2
+                exit 1
+            fi
             EVENTS_FILE="$2"
             shift 2
             ;;
@@ -64,9 +72,26 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+# The output format is a versioned CLI contract: unknown or missing values are
+# rejected exactly like the PowerShell ValidateSet rejects them instead of
+# silently degrading to text mode. Comparison is case-insensitive so Bash and
+# PowerShell accept the same spellings.
+case "$(printf '%s' "$FORMAT" | tr '[:upper:]' '[:lower:]')" in
+    text) FORMAT="text" ;;
+    json) FORMAT="json" ;;
+    *)
+        echo "ERROR: --format must be 'text' or 'json'." >&2
+        exit 1
+        ;;
+esac
+
 RESULTS_TMP="$(mktemp)"
+EVENTS_SCRATCH=""
 cleanup_verify() {
     rm -f "$RESULTS_TMP" 2>/dev/null || true
+    if [ -n "$EVENTS_SCRATCH" ]; then
+        rm -f "$EVENTS_SCRATCH" 2>/dev/null || true
+    fi
 }
 trap cleanup_verify EXIT
 
@@ -128,6 +153,34 @@ event_escape() {
     printf '%s' "$payload" >> "$EVENTS_FILE"
 }
 
+# Lexically normalizes an already-validated project-relative path so JSON
+# working_directory labels are canonical and stable: './' prefixes collapse,
+# '.' segments drop, and '..' pops the previous segment (validate_checks_tsv
+# guarantees '..' can never pop above the project root). Prints '.' for an
+# empty result; non-empty results are prefixed with './'. Nested labels keep
+# their full shape ('apps/api' -> './apps/api'), matching PowerShell labels.
+normalize_project_rel() {
+    local p="${1#./}" seg out=""
+    local -a segs=()
+    IFS='/' read -r -a segs <<< "$p"
+    # Guarded expansion: bash 3.2 (macOS) treats expanding an empty array
+    # under `set -u` as an unbound variable.
+    if [ "${#segs[@]}" -gt 0 ]; then
+        for seg in "${segs[@]}"; do
+            case "$seg" in
+                ''|.) ;;
+                ..) out="${out%/*}" ;;
+                *) out="$out/$seg" ;;
+            esac
+        done
+    fi
+    if [ -n "$out" ]; then
+        printf '%s' "./${out#/}"
+    else
+        printf '%s' "."
+    fi
+}
+
 output_json() {
     local res_str="$1" exit_code="$2"
     local source_type="checks_tsv"
@@ -140,7 +193,7 @@ output_json() {
     # JSON document to stdout. All progress and child-output goes to stderr
     # via the log() function; stdout carries only this single JSON document.
     local checks_json="" summary=""
-    local passed=0 failed=0 blocked=0 opt_skipped=0 checks_run=0 required_run=0 checks_defined=0
+    local passed=0 failed=0 opt_failed=0 blocked=0 opt_skipped=0 checks_run=0 required_run=0 checks_defined=0
 
     # Read and parse RESULTS_TMP
     while IFS= read -r line || [ -n "$line" ]; do
@@ -160,26 +213,51 @@ output_json() {
 
         checks_defined=$((checks_defined + 1))
 
-        # Count status
+        # Count status. `failed` counts failed REQUIRED checks only; optional
+        # failures are reported separately in `optional_failed` so a PASS run
+        # with a failing optional check stays schema-valid (exit 0 requires
+        # failed = 0).
         case "$status" in
             PASS)  passed=$((passed + 1)); checks_run=$((checks_run + 1)); [ "$req" = "required" ] && required_run=$((required_run + 1)) ;;
-            FAIL)  failed=$((failed + 1)); checks_run=$((checks_run + 1)); [ "$req" = "required" ] && required_run=$((required_run + 1)) ;;
+            FAIL)
+                checks_run=$((checks_run + 1))
+                if [ "$req" = "required" ]; then
+                    failed=$((failed + 1))
+                    required_run=$((required_run + 1))
+                else
+                    opt_failed=$((opt_failed + 1))
+                fi
+                ;;
             BLOCKED) blocked=$((blocked + 1)) ;;
             SKIPPED_OPTIONAL) opt_skipped=$((opt_skipped + 1)) ;;
         esac
 
-        # Convert cwd to project-relative path for redaction (suppress absolute
-# user-home paths). If cwd is under the project root, strip the prefix;
-# otherwise keep the basename so no secret path appears.
-local cwd_rel="$cwd"
-if [ "$cwd" = "$PROJECT_ROOT" ]; then
-    cwd_rel="."
-elif [[ "$cwd" == "$PROJECT_ROOT/"* ]]; then
-    cwd_rel="./${cwd#$PROJECT_ROOT/}"
-else
-    # Not under project root (should not happen given confinement, but be safe):
-    cwd_rel="$(basename "$cwd")"
-fi
+        # Convert cwd to a project-relative label for observable output so no
+        # absolute user-home path can leak into JSON. Relative paths (already
+        # validated to stay inside the project root) are preserved in full and
+        # normalized lexically; absolute paths under the project root lose
+        # their prefix; anything else degrades to its basename as a defensive
+        # fallback.
+        local cwd_rel
+        case "$cwd" in
+            .)
+                cwd_rel="."
+                ;;
+            /*)
+                if [ "$cwd" = "$PROJECT_ROOT" ]; then
+                    cwd_rel="."
+                elif [[ "$cwd" == "$PROJECT_ROOT/"* ]]; then
+                    cwd_rel="./${cwd#"$PROJECT_ROOT"/}"
+                else
+                    # Not under project root (should not happen given
+                    # confinement, but be safe).
+                    cwd_rel="$(basename "$cwd")"
+                fi
+                ;;
+            *)
+                cwd_rel="$(normalize_project_rel "$cwd")"
+                ;;
+        esac
 local esc_cwd
 esc_cwd="$(json_escape "$cwd_rel")"
         # reason_code: JSON null if empty or literal "null"; otherwise a
@@ -202,7 +280,7 @@ esc_cwd="$(json_escape "$cwd_rel")"
     done < "$RESULTS_TMP"
 
     # Build summary object
-    summary="{\"checks_defined\":$checks_defined,\"checks_run\":$checks_run,\"required_run\":$required_run,\"passed\":$passed,\"failed\":$failed,\"blocked\":$blocked,\"optional_skipped\":$opt_skipped}"
+    summary="{\"checks_defined\":$checks_defined,\"checks_run\":$checks_run,\"required_run\":$required_run,\"passed\":$passed,\"failed\":$failed,\"optional_failed\":$opt_failed,\"blocked\":$blocked,\"optional_skipped\":$opt_skipped}"
 
     # Determine source value
     local source_value
@@ -860,14 +938,21 @@ if [ -n "$EVENTS_FILE" ]; then
         exit 1
     fi
     mkdir -p "$(dirname "$EVENTS_FILE")"
-    # Build in an unpredictable scratch name beside the destination and move
-    # into place atomically, so a crashed run can never truncate an existing
-    # event stream before its replacement is complete.
-    events_scratch="$(dirname "$EVENTS_FILE")/.verify-events.$$.$RANDOM"
+    # Build in an unpredictable scratch name beside the destination (mktemp,
+    # not $$/$RANDOM) and move into place atomically, rechecking no-clobber
+    # immediately before promotion so a file created concurrently after the
+    # first check cannot be clobbered by the rename. A crashed run can never
+    # truncate an existing event stream before its replacement is complete.
+    events_scratch="$(mktemp "$(dirname "$EVENTS_FILE")/.verify-events.XXXXXX")" || exit 1
+    EVENTS_SCRATCH="$events_scratch"
     printf '{"event":"verification_started"}\n' > "$events_scratch"
     if [ "$EVENTS_FORCE" -eq 1 ]; then
         mv -f "$events_scratch" "$EVENTS_FILE"
     else
+        if [ -e "$EVENTS_FILE" ]; then
+            echo "ERROR: refusing to overwrite existing event file '$EVENTS_FILE'. Use --events-force to overwrite." >&2
+            exit 1
+        fi
         mv "$events_scratch" "$EVENTS_FILE"
     fi
 fi

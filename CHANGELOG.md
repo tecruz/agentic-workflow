@@ -30,8 +30,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Strengthened JSON schemas with `additionalProperties: false`, integer bounds on summary counts/durations, and protocol_version constraining to "1.4.0".
 - Strengthened schemas further with draft-07 `if/then` invariants pairing every `result` with its exit code and requiring diagnostics on task-validation failures; the stable diagnostic codes are now a closed set enumerated in the schema.
 - Diagnostic code helpers take explicit `<code> <section> <identifier> <message>` arguments at every call site; message-keyword inference removed from both validators.
+- Verification summaries separate failure kinds: `failed` counts failed required checks only and a new `optional_failed` field counts failed optional checks, which never fail a run. The verification schema additionally requires any PASS document to have run at least one required check (`required_run >= 1`) with zero required failures.
+- Output format is strict in both languages: unknown or missing `--format` values are rejected with a clear error instead of silently degrading to text mode (PowerShell via ValidateSet, Bash via explicit validation).
 
 ### Fixed
+- Optional check failures no longer produce schema-invalid `PASS` documents.
+- Bash JSON preserves full project-relative working-directory labels for nested monorepo paths (`apps/api` becomes `./apps/api`, never a bare basename), matching PowerShell labels exactly; relative labels are normalized lexically like the validated checks.tsv contract.
+- Task-validator not-found diagnostics no longer leak absolute task paths into serialized JSON: the message carries only the redacted display value, and Windows-drive-style paths degrade to their basename on non-Windows hosts.
+- Bash event streams are built under an unpredictable `mktemp` scratch name beside the destination and promoted with a no-clobber recheck immediately before the atomic rename; failed promotions clean up the scratch file.
 - Bash `--events` initialization ordering (function hoisting).
 - Bash JSON stdout contamination (all messages routed through `log()`).
 - Bash serialization failure propagation (`|| exit 1` on python3 failure).
