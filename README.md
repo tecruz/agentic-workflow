@@ -141,12 +141,14 @@ systems, dashboards, and automated agents:
 - The Bash validator's JSON mode requires `python3` and fails fast with a clear
   error when it is missing; text mode has no such dependency.
 - Verifiers additionally support an opt-in JSONL event stream
-  (`--events <path>` / `-Events <path>`, independent of `--format`). The path
-  must be relative to `.agentic/runs/` (git-ignored); existing files require
-  `--events-force` / `-EventsForce`; each run ends with exactly one
-  `verification_completed` event whose `result` matches the verifier's exit
-  code. Contract-validation failures exit before the stream file is created,
-  so no run ever leaves an unterminated stream behind. See
+  (`--events <path>` / `-Events <path>`). The path must be relative to
+  `.agentic/runs/` (git-ignored); existing files require `--events-force` /
+  `-EventsForce`; each run ends with exactly one `verification_completed`
+  event whose `result` matches the verifier's exit code. Contract-validation
+  failures exit before the stream file is created, so no run ever leaves an
+  unterminated stream behind. **In v1.4.0, `--format json` / `-Format Json`
+  and `--events` / `-Events` cannot be used together — each output mode is
+  reliable independently.** See
   [ADR-0009](docs/decisions/ADR-0009-machine-readable-result-contracts.md).
 
 ### The checks candidate lifecycle

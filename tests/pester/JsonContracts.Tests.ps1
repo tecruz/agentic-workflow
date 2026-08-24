@@ -1,5 +1,32 @@
 # JsonContracts.Tests.ps1 — JSON result contracts and schema validation tests (Pester 5).
 
+# Helper functions at script level for use in all Describe blocks
+function Test-EventSchemaValid {
+    param([string]$EventFile)
+    $lines = Get-Content -LiteralPath $EventFile
+    $lines.Count | Should -BeGreaterThan 2
+    $lines[0] | Should -Match 'verification_started'
+    $lines[-1] | Should -Match 'verification_completed'
+
+    $eventCount = @($lines | Where-Object { $_ -match '"event"\s*:\s*"verification_completed"' }).Count
+    $eventCount | Should -Be 1
+
+    foreach ($line in $lines) {
+        $event = $line | ConvertFrom-Json
+        $json = $line | ConvertTo-Json -Compress
+        $null = $json | ConvertFrom-Json # validate JSON
+        $event.GetType().Name | Should -Be 'PSCustomObject'
+        $event.event | Should -Not -BeNullOrEmpty
+    }
+}
+
+function Test-JsonAgainstSchema {
+    param([string]$JsonPath, [string]$SchemaPath)
+    $cmd = "import json, jsonschema, sys; jsonschema.validate(instance=json.load(open(sys.argv[1], encoding='utf-8')), schema=json.load(open(sys.argv[2], encoding='utf-8')))"
+    python -c $cmd $JsonPath $SchemaPath 2>&1
+    return $LASTEXITCODE
+}
+
 Describe 'v1.4.0 JSON result contracts and schema validation' {
 
     BeforeEach {
@@ -445,5 +472,220 @@ Describe 'v1.4.0 JSON result contracts and schema validation' {
         $out = & bash -c "bash '$validateSh' --format" 2>&1
         $LASTEXITCODE | Should -Be 1
         ($out | Out-String) | Should -Match "--format requires a value"
+    }
+}
+
+Describe 'Event schema validation' {
+    BeforeEach {
+        $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+        $verifyPs = Join-Path $repoRoot '.agentic/scripts/verify.ps1'
+        $fixtures = Join-Path $repoRoot 'tests/fixtures'
+        $eventSchemaPath = Join-Path $repoRoot '.agentic/schemas/verification-events-v1.schema.json'
+    }
+
+    BeforeAll {
+        function Test-EventSchemaValid {
+            param([string]$EventFile)
+            $lines = Get-Content -LiteralPath $EventFile
+            $lines.Count | Should -BeGreaterThan 2
+            $lines[0] | Should -Match 'verification_started'
+            $lines[-1] | Should -Match 'verification_completed'
+
+            $eventCount = @($lines | Where-Object { $_ -match '"event"\s*:\s*"verification_completed"' }).Count
+            $eventCount | Should -Be 1
+
+            foreach ($line in $lines) {
+                $event = $line | ConvertFrom-Json
+                $json = $line | ConvertTo-Json -Compress
+                $null = $json | ConvertFrom-Json # validate JSON
+                $event.GetType().Name | Should -Be 'PSCustomObject'
+                $event.event | Should -Not -BeNullOrEmpty
+            }
+        }
+
+        function Test-JsonAgainstSchema {
+            param([string]$JsonPath, [string]$SchemaPath)
+            $cmd = "import json, jsonschema, sys; jsonschema.validate(instance=json.load(open(sys.argv[1], encoding='utf-8')), schema=json.load(open(sys.argv[2], encoding='utf-8')))"
+            python -c $cmd $JsonPath $SchemaPath 2>&1
+            return $LASTEXITCODE
+        }
+
+        function Test-JsonLinesAgainstSchema {
+            param([string]$JsonLinesPath, [string]$SchemaPath)
+            $lines = Get-Content -LiteralPath $JsonLinesPath
+            foreach ($line in $lines) {
+                if (-not [string]::IsNullOrWhiteSpace($line)) {
+                    $tmpJson = [System.IO.Path]::GetTempFileName()
+                    $line | Set-Content -LiteralPath $tmpJson -Encoding UTF8
+                    $cmd = "import json, jsonschema, sys; jsonschema.validate(instance=json.load(open(sys.argv[1], encoding='utf-8')), schema=json.load(open(sys.argv[2], encoding='utf-8')))"
+                    python -c $cmd $tmpJson $SchemaPath 2>&1
+                    $code = $LASTEXITCODE
+                    Remove-Item -LiteralPath $tmpJson -ErrorAction SilentlyContinue
+                    if ($code -ne 0) { return $code }
+                }
+            }
+            return 0
+        }
+    }
+
+    It 'event stream validates against schema (text mode, required PASS)' {
+        $fixDir = Join-Path $fixtures 'node-npm'
+        $eventFile = Join-Path $fixDir '.agentic/runs/test-event-schema.jsonl'
+        if (Test-Path -LiteralPath $eventFile) { Remove-Item -LiteralPath $eventFile -Force }
+        Push-Location $fixDir
+        try {
+            $null = & pwsh -NoProfile -File $verifyPs -Events '.agentic/runs/test-event-schema.jsonl' 2> $null
+        }
+        finally { Pop-Location }
+        Test-EventSchemaValid $eventFile
+        (Test-JsonLinesAgainstSchema $eventFile $eventSchemaPath) | Should -Be 0
+        Remove-Item -LiteralPath $eventFile -ErrorAction SilentlyContinue
+    }
+
+    It 'event stream validates against schema (text mode, required FAIL)' {
+        $fixDir = Join-Path $fixtures 'node-fail'
+        if (-not (Test-Path -LiteralPath $fixDir)) {
+            New-Item -ItemType Directory -Path $fixDir | Out-Null
+            @(
+                '{"scripts":{"test":"node -e \\"process.exit(1)\\""}}' | Set-Content -LiteralPath (Join-Path $fixDir 'package.json')
+            )
+        }
+        $eventFile = Join-Path $fixDir '.agentic/runs/test-event-fail.jsonl'
+        if (Test-Path -LiteralPath $eventFile) { Remove-Item -LiteralPath $eventFile -Force }
+        Push-Location $fixDir
+        try {
+            $null = & pwsh -NoProfile -File $verifyPs -Events '.agentic/runs/test-event-fail.jsonl' 2> $null
+        }
+        finally { Pop-Location }
+        Test-EventSchemaValid $eventFile
+        (Test-JsonLinesAgainstSchema $eventFile $eventSchemaPath) | Should -Be 0
+        Remove-Item -LiteralPath $eventFile -ErrorAction SilentlyContinue
+    }
+
+    It 'event schema rejects PASS with non-zero exit_code' {
+        $badEvent = @{
+            event = 'check_completed'
+            check_id = 'test'
+            status = 'PASS'
+            exit_code = 17
+            duration_ms = 1
+            working_directory = '.'
+            reason_code = 'CHECK_FAILED'
+        }
+        $tmpJson = [System.IO.Path]::GetTempFileName()
+        $badEvent | ConvertTo-Json -Compress | Set-Content -LiteralPath $tmpJson -Encoding UTF8
+        (Test-JsonAgainstSchema $tmpJson $eventSchemaPath) | Should -Not -Be 0
+        Remove-Item -LiteralPath $tmpJson -ErrorAction SilentlyContinue
+    }
+
+    It 'event schema rejects FAIL with exit_code 0' {
+        $badEvent = @{
+            event = 'check_completed'
+            check_id = 'test'
+            status = 'FAIL'
+            exit_code = 0
+            duration_ms = 1
+            working_directory = '.'
+            reason_code = $null
+        }
+        $tmpJson = [System.IO.Path]::GetTempFileName()
+        $badEvent | ConvertTo-Json -Compress | Set-Content -LiteralPath $tmpJson -Encoding UTF8
+        (Test-JsonAgainstSchema $tmpJson $eventSchemaPath) | Should -Not -Be 0
+        Remove-Item -LiteralPath $tmpJson -ErrorAction SilentlyContinue
+    }
+
+    It 'event schema rejects BLOCKED with non-null exit_code' {
+        $badEvent = @{
+            event = 'check_completed'
+            check_id = 'test'
+            status = 'BLOCKED'
+            exit_code = 99
+            duration_ms = 0
+            working_directory = '.'
+            reason_code = 'CHECK_FAILED'
+        }
+        $tmpJson = [System.IO.Path]::GetTempFileName()
+        $badEvent | ConvertTo-Json -Compress | Set-Content -LiteralPath $tmpJson -Encoding UTF8
+        (Test-JsonAgainstSchema $tmpJson $eventSchemaPath) | Should -Not -Be 0
+        Remove-Item -LiteralPath $tmpJson -ErrorAction SilentlyContinue
+    }
+
+    It 'event schema rejects SKIPPED_OPTIONAL with CHECK_FAILED reason' {
+        $badEvent = @{
+            event = 'check_completed'
+            check_id = 'test'
+            status = 'SKIPPED_OPTIONAL'
+            exit_code = $null
+            duration_ms = 0
+            working_directory = '.'
+            reason_code = 'CHECK_FAILED'
+        }
+        $tmpJson = [System.IO.Path]::GetTempFileName()
+        $badEvent | ConvertTo-Json -Compress | Set-Content -LiteralPath $tmpJson -Encoding UTF8
+        (Test-JsonAgainstSchema $tmpJson $eventSchemaPath) | Should -Not -Be 0
+        Remove-Item -LiteralPath $tmpJson -ErrorAction SilentlyContinue
+    }
+
+    It 'event schema rejects PASS with non-null reason_code' {
+        $badEvent = @{
+            event = 'check_completed'
+            check_id = 'test'
+            status = 'PASS'
+            exit_code = 0
+            duration_ms = 1
+            working_directory = '.'
+            reason_code = 'WORKING_DIR_MISSING'
+        }
+        $tmpJson = [System.IO.Path]::GetTempFileName()
+        $badEvent | ConvertTo-Json -Compress | Set-Content -LiteralPath $tmpJson -Encoding UTF8
+        (Test-JsonAgainstSchema $tmpJson $eventSchemaPath) | Should -Not -Be 0
+        Remove-Item -LiteralPath $tmpJson -ErrorAction SilentlyContinue
+    }
+
+    It 'event schema accepts valid PASS, FAIL, BLOCKED, SKIPPED_OPTIONAL' {
+        $validEvents = @(
+            @{ event = 'check_completed'; check_id = 't1'; status = 'PASS'; exit_code = 0; duration_ms = 1; working_directory = '.'; reason_code = $null },
+            @{ event = 'check_completed'; check_id = 't2'; status = 'FAIL'; exit_code = 1; duration_ms = 1; working_directory = '.'; reason_code = 'CHECK_FAILED' },
+            @{ event = 'check_completed'; check_id = 't3'; status = 'BLOCKED'; exit_code = $null; duration_ms = 0; working_directory = '.'; reason_code = 'WORKING_DIR_MISSING' },
+            @{ event = 'check_completed'; check_id = 't4'; status = 'SKIPPED_OPTIONAL'; exit_code = $null; duration_ms = 0; working_directory = '.'; reason_code = 'EXECUTABLE_MISSING' }
+        )
+        foreach ($e in $validEvents) {
+            $tmpJson = [System.IO.Path]::GetTempFileName()
+            $e | ConvertTo-Json -Compress | Set-Content -LiteralPath $tmpJson -Encoding UTF8
+            (Test-JsonAgainstSchema $tmpJson $eventSchemaPath) | Should -Be 0
+            Remove-Item -LiteralPath $tmpJson -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'Bash verify.sh rejects combined --format json and --events' {
+        if ($IsWindows) { return }
+        $fixDir = Join-Path $fixtures 'node-npm'
+        $eventFile = Join-Path $fixDir '.agentic/runs/combined-reject.jsonl'
+        if (Test-Path -LiteralPath $eventFile) { Remove-Item -LiteralPath $eventFile -Force }
+        Push-Location $fixDir
+        try {
+            $out = & bash -c "bash '$verifySh' --format json --events '.agentic/runs/combined-reject.jsonl'" 2>&1
+            $code = $LASTEXITCODE
+        }
+        finally { Pop-Location }
+        $code | Should -Not -Be 0
+        $out | Should -Match 'format json.*events|events.*format json'
+        if (Test-Path -LiteralPath $eventFile) { Remove-Item -LiteralPath $eventFile -Force }
+    }
+
+    It 'PowerShell verify.ps1 rejects combined -Format Json and -Events' {
+        $fixDir = Join-Path $fixtures 'node-npm'
+        $eventFile = Join-Path $fixDir '.agentic/runs/combined-reject-ps.jsonl'
+        if (Test-Path -LiteralPath $eventFile) { Remove-Item -LiteralPath $eventFile -Force }
+        Push-Location $fixDir
+        try {
+            $out = (& pwsh -NoProfile -File $verifyPs -Format Json -Events '.agentic/runs/combined-reject-ps.jsonl' 2>&1 | Out-String)
+            $code = $LASTEXITCODE
+        }
+        finally { Pop-Location }
+        $code | Should -Not -Be 0
+        $out | Should -Match 'JSON stdout'
+        $out | Should -Match 'event stream'
+        if (Test-Path -LiteralPath $eventFile) { Remove-Item -LiteralPath $eventFile -Force }
     }
 }

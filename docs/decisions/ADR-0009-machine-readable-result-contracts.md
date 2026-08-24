@@ -68,10 +68,11 @@ Amended decisions:
    - The destination must be a relative path under `.agentic/runs/`
      (git-ignored); absolute paths and traversal outside the runs directory are
      rejected after lexical and physical containment checks.
-   - The stream file is created atomically (unpredictable scratch name plus
-     rename) and only after argument parsing and project-contract validation
-     succeed; contract failures therefore never leave a truncated or
-     unterminated stream behind.
+   - The stream file is created atomically after argument parsing and
+     project-contract validation succeed; contract failures therefore never
+     leave a truncated or unterminated stream behind. In no-force mode the
+     destination is created with an exclusive hard link (`ln`); in force mode
+     the destination is overwritten after a checked `mv -f` / `Move-Item -Force`.
    - Existing event files are refused unless `--events-force` /
      `-EventsForce` is given.
    - Each run emits exactly one terminal `verification_completed` event as the
@@ -82,6 +83,9 @@ Amended decisions:
    - Events carry check identifiers, statuses, durations, and redacted
      working-directory labels only — never command lines, arguments, child
      output, environment details, or absolute user paths.
+   - **Combined mode rejection**: `--format json` / `-Format Json` and
+     `--events` / `-Events` cannot be used together; each output mode is
+     reliable independently.
 
 4. **Task-validator JSON mode requires Python 3**: the Bash validator's
    `--format json` mode needs `python3` and fails fast with a clear error when

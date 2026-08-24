@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Nullable profile/task_status in task validation JSON.
   - Restricted event destination to `.agentic/runs/` with overwrite protection.
   - Real JSON encoding for events (ConvertTo-Json in PowerShell, `json_escape` in Bash).
-  - Terminal verification_completed event emitted in both text and JSON modes.
+  - Terminal verification_completed event emitted in text mode; `--format json` / `-Format Json` and `--events` / `-Events` cannot be combined.
   - Versioned event schema (`verification-events-v1.schema.json`).
 
 ### Changed

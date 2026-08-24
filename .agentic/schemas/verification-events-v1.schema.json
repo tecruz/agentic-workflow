@@ -57,9 +57,7 @@
             "reason_code": { "enum": ["CHECK_FAILED", "WORKING_DIR_MISSING", "EXECUTABLE_MISSING", null] }
           },
           "additionalProperties": false
-        }
-      ],
-      "anyOf": [
+        },
         {
           "if": { "properties": { "status": { "const": "PASS" } }, "required": ["status"] },
           "then": {
