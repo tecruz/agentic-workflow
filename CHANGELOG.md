@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-08-24
+
+### Added
+- **Portable context modules and offline behavioral evaluations (PR #10).**
+  Specialist knowledge moves out of the always-loaded protocol into an
+  on-demand registry that agents consult during DISCOVER.
+  - `.agentic/context/` ships five portable modules — `security-review`,
+    `database-migrations`, `dependency-changes`, `infrastructure-change`, and
+    `public-api-change` — each declaring ID, version, load triggers, minimum
+    risk profile, required context, approval gates, required evidence, and
+    prohibited shortcuts, indexed by `.agentic/context/INDEX.md`.
+  - The task contract records selections under `## Context modules`:
+    known module ID, recognized version, a `loaded` confirmation, and a real
+    rationale; the `None selected` sentinel covers untriggered work. A
+    module's minimum risk profile is a floor for the task's profile.
+  - New structural validators `.agentic/scripts/validate-context.sh` /
+    `validate-context.ps1` (exit codes: 0 VALID, 1 INVALID, 2 BLOCKED) reject
+    unknown (`MODULE_UNKNOWN`), duplicate (`MODULE_DUPLICATE`),
+    rationale-missing (`MODULE_RATIONALE_MISSING`), version-unsupported
+    (`MODULE_VERSION_UNSUPPORTED`), profile-incompatible
+    (`MODULE_PROFILE_TOO_LOW`), unresolved (`MODULE_SELECTION_UNRESOLVED`),
+    and section-less (`CONTEXT_SECTION_MISSING`) selections; both
+    implementations are held to identical classifications by shared fixtures,
+    and JSON output follows the v1.4.0 result-contract principles validated by
+    `.agentic/schemas/context-selection-v1.schema.json`.
+  - Offline deterministic behavioral evaluations under `evals/`: scenario
+    schema, evaluation-result schema, eight scenarios covering expected and
+    forbidden observable behavior (authentication change, database migration,
+    dependency bump, infrastructure change, public API change,
+    documentation-only edit, untrusted issue instruction, test-weakening
+    attempt), and cross-platform runners (`run-evals.sh` / `run-evals.ps1`).
+    No scenario calls an external model; no API keys are required.
+  - Adopter bundles ship the registry, validators, and schema but exclude the
+    evaluation harness: `evals/` is enforced as a leak in `build-bundle.sh`
+    and the release workflow's bundle gate.
+  - New ADR-0010 records file categories, schema fields, and migration rules.
+
 ## [1.4.0] - 2026-08-24
 
 ### Added

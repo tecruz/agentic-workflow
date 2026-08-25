@@ -24,7 +24,7 @@ All tasks follow the 5-Phase Agentic Development Loop. Full details: `.agentic/W
 DISCOVER → CLASSIFY RISK → PLAN → IMPLEMENT → VERIFY → HANDOFF
 ```
 
-1. **Discover**: Read `AGENTS.md`, `.agentic/STATUS.md`, relevant files in `.agentic/tasks/`, and package manifests. Map existing patterns and dependencies before writing code.
+1. **Discover**: Read `AGENTS.md`, `.agentic/STATUS.md`, relevant files in `.agentic/tasks/`, and package manifests. Inspect `.agentic/context/INDEX.md` and select every triggered context module (recorded in the task file) before planning. Map existing patterns and dependencies before writing code.
 2. **Classify Risk**: Select the task's risk profile per `.agentic/profiles/README.md`. The default is `standard`; escalate to `high-assurance` for authentication, payments, secrets, data migrations, production infrastructure, irreversible operations, public API compatibility, privacy, or safety-critical behavior. Use `prototype` only for user-requested experiments with no production impact. Never downgrade silently.
 3. **Plan**: Decompose the request into atomic, verifiable steps. Create or update a task file in `.agentic/tasks/` using `.agentic/templates/task.md`, declaring the profile and its required evidence. Ask before destructive or ambiguous actions.
 4. **Implement**: Make minimal, style-matching changes per `.agentic/rules/`. Comments explain *why*, not *what*.
@@ -79,6 +79,15 @@ Every task declares a **risk profile** (`.agentic/profiles/`) that determines th
 - **`prototype`** — user-requested experiments and spikes only; production readiness must be stated as *not established*.
 
 The default is `standard`. Escalate automatically when escalation signals apply; never downgrade silently. Profile validation (`.agentic/scripts/validate-task.sh` / `validate-task.ps1`) is separate from and complementary to code verification (`.agentic/checks.tsv`): it checks the task file's structural evidence contract only.
+
+## 5.2 Context Modules
+
+Specialist knowledge lives in portable, on-demand modules under `.agentic/context/` — not in this always-loaded protocol:
+
+- During **DISCOVER**, inspect `.agentic/context/INDEX.md`; select every module whose *Load when* triggers match the task, and record each selection under `## Context modules` in the task file before planning.
+- Load only triggered modules; do **not** import every module into every session.
+- A selection records: known module ID, recognized version, a `loaded` confirmation, and a real rationale. Duplicates are rejected; a module's minimum risk profile is a floor for the task's profile.
+- Selections are validated by `.agentic/scripts/validate-context.sh` / `validate-context.ps1` (exit codes: 0 VALID, 1 INVALID, 2 BLOCKED).
 
 ---
 

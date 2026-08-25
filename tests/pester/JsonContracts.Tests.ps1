@@ -475,6 +475,77 @@ Describe 'v1.4.0 JSON result contracts and schema validation' {
     }
 }
 
+Describe 'Context selection JSON contracts and schema validation' {
+
+    BeforeAll {
+        $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+        $contextSchema = Join-Path $repoRoot '.agentic/schemas/context-selection-v1.schema.json'
+        $contextValidatePs = Join-Path $repoRoot '.agentic/scripts/validate-context.ps1'
+        $contextValidateSh = Join-Path $repoRoot '.agentic/scripts/validate-context.sh'
+        $contextFixtures = Join-Path $repoRoot 'tests/fixtures/context-tasks'
+
+        # Self-contained: Pester 5 It-blocks cannot call helpers defined at
+        # other scopes, so this mirrors Test-JsonAgainstSchema locally and
+        # returns the python exit code.
+        function Test-ContextSchemaValid([string]$JsonPath, [string]$SchemaPath) {
+            $cmd = "import json, jsonschema, sys; jsonschema.validate(instance=json.load(open(sys.argv[1], encoding='utf-8')), schema=json.load(open(sys.argv[2], encoding='utf-8')))"
+            $null = python -c $cmd $JsonPath $SchemaPath 2>&1
+            return $LASTEXITCODE
+        }
+
+        function Test-ContextJsonContract([string]$fixture, [int]$expectedExit) {
+            $tmpOut = [System.IO.Path]::GetTempFileName()
+            try {
+                $outLines = & pwsh -NoProfile -File $contextValidatePs -Format Json (Join-Path $contextFixtures $fixture) 2> $null
+                $code = $LASTEXITCODE
+                [System.IO.File]::WriteAllLines($tmpOut, @($outLines), [System.Text.UTF8Encoding]::new($false))
+                $code | Should -Be $expectedExit
+                (Test-ContextSchemaValid -JsonPath $tmpOut -SchemaPath $contextSchema) | Should -Be 0
+                return (Get-Content -LiteralPath $tmpOut -Raw | ConvertFrom-Json)
+            }
+            finally { Remove-Item -LiteralPath $tmpOut -ErrorAction SilentlyContinue }
+        }
+    }
+
+    It 'context validation result JSON validates against context-selection-v1.schema.json (PowerShell, valid)' {
+        $doc = Test-ContextJsonContract 'context-valid-single.md' 0
+        $doc.kind | Should -Be 'context_validation_result'
+        $doc.result | Should -Be 'VALID'
+        @($doc.selected_modules).Count | Should -Be 1
+        $doc.selected_modules[0].id | Should -Be 'security-review'
+    }
+
+    It 'context validation result JSON validates against context-selection-v1.schema.json (PowerShell, invalid)' {
+        $doc = Test-ContextJsonContract 'context-unknown-module.md' 1
+        $doc.result | Should -Be 'INVALID'
+        @($doc.diagnostics).Count | Should -BeGreaterThan 0
+        $doc.diagnostics[0].code | Should -Be 'MODULE_UNKNOWN'
+    }
+
+    It 'context validation result JSON validates against context-selection-v1.schema.json (Bash, valid)' {
+        if ($IsWindows) { return }
+        # CI runs this leg on Linux where the checkout path is already POSIX.
+        $taskPath = (Join-Path $contextFixtures 'context-valid-single.md') -replace '\\', '/'
+        $outLines = & bash $contextValidateSh --format json $taskPath 2> $null
+        $code = $LASTEXITCODE
+        $code | Should -Be 0
+        $doc = (@($outLines) -join "`n") | ConvertFrom-Json
+        $doc.kind | Should -Be 'context_validation_result'
+        $doc.result | Should -Be 'VALID'
+    }
+
+    It 'context validation result JSON validates against context-selection-v1.schema.json (Bash, invalid)' {
+        if ($IsWindows) { return }
+        $taskPath = (Join-Path $contextFixtures 'context-unknown-module.md') -replace '\\', '/'
+        $outLines = & bash $contextValidateSh --format json $taskPath 2> $null
+        $code = $LASTEXITCODE
+        $code | Should -Be 1
+        $doc = (@($outLines) -join "`n") | ConvertFrom-Json
+        $doc.diagnostics.Count | Should -BeGreaterThan 0
+        $doc.diagnostics[0].code | Should -Be 'MODULE_UNKNOWN'
+    }
+}
+
 Describe 'Event schema validation' {
     BeforeEach {
         $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)

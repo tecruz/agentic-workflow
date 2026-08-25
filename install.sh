@@ -181,6 +181,15 @@ MANAGED_FILES=(
     ".agentic/schemas/verification-result-v1.schema.json"
     ".agentic/schemas/task-validation-result-v1.schema.json"
     ".agentic/schemas/verification-events-v1.schema.json"
+    ".agentic/schemas/context-selection-v1.schema.json"
+    ".agentic/context/INDEX.md"
+    ".agentic/context/security-review/MODULE.md"
+    ".agentic/context/database-migrations/MODULE.md"
+    ".agentic/context/dependency-changes/MODULE.md"
+    ".agentic/context/infrastructure-change/MODULE.md"
+    ".agentic/context/public-api-change/MODULE.md"
+    ".agentic/scripts/validate-context.sh"
+    ".agentic/scripts/validate-context.ps1"
 )
 
 # Seed-once, project-owned: never overwritten after creation.

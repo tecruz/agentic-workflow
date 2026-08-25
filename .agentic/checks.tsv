@@ -8,7 +8,10 @@
 required	sh-syntax-install	.	bash	-n	install.sh
 required	sh-syntax-verify	.	bash	-n	.agentic/scripts/verify.sh
 required	sh-syntax-validate-task	.	bash	-n	.agentic/scripts/validate-task.sh
-required	ps-syntax	.	pwsh	-NoProfile	-Command	$err = $false; foreach ($f in @('install.ps1', '.agentic/scripts/verify.ps1', '.agentic/scripts/validate-task.ps1')) { try { [scriptblock]::Create((Get-Content -Raw -LiteralPath $f)) | Out-Null } catch { Write-Error $_.Exception.Message; $err = $true } }; if ($err) { exit 1 }
+required	sh-syntax-validate-context	.	bash	-n	.agentic/scripts/validate-context.sh
+required	ps-syntax	.	pwsh	-NoProfile	-Command	$err = $false; foreach ($f in @('install.ps1', '.agentic/scripts/verify.ps1', '.agentic/scripts/validate-task.ps1', '.agentic/scripts/validate-context.ps1')) { try { [scriptblock]::Create((Get-Content -Raw -LiteralPath $f)) | Out-Null } catch { Write-Error $_.Exception.Message; $err = $true } }; if ($err) { exit 1 }
 required	bats	.	bats	tests/bats
 required	pester	.	pwsh	-NoProfile	-Command	Import-Module Pester -MinimumVersion 5.0; $r = Invoke-Pester -Script 'tests/pester' -PassThru; if ($r.FailedCount -gt 0) { exit 1 }
+required	evals-sh	.	bash	evals/run-evals.sh
+required	evals-ps	.	pwsh	-NoProfile	-File	evals/run-evals.ps1
 optional	shellcheck	.	shellcheck	install.sh	.agentic/scripts/verify.sh	.agentic/scripts/validate-task.sh

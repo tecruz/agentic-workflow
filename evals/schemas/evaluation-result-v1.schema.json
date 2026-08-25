@@ -1,0 +1,66 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "BehavioralEvaluationResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "protocol_version", "kind", "result", "exit_code", "summary", "checks"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "protocol_version": { "type": "string", "const": "1.5.0" },
+    "kind": { "type": "string", "const": "behavioral_evaluation_result" },
+    "mode": { "type": "string", "enum": ["offline-fixture"] },
+    "result": { "type": "string", "enum": ["PASS", "FAIL"] },
+    "exit_code": { "type": "integer", "enum": [0, 1] },
+    "scenario_id": { "type": ["string", "null"] },
+    "fixture_expected_result": { "enum": ["PASS", "FAIL", "null"] },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "passed", "failed"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "passed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "passed"],
+        "properties": {
+          "id": { "type": "string" },
+          "detail": { "type": "string" },
+          "passed": { "type": "boolean" }
+        }
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "message"],
+        "properties": {
+          "code": { "type": "string" },
+          "message": { "type": "string" }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "result": { "const": "PASS" } }, "required": ["result"] },
+      "then": { "properties": { "exit_code": { "const": 0 } } }
+    },
+    {
+      "if": { "properties": { "result": { "const": "FAIL" } }, "required": ["result"] },
+      "then": { "properties": { "exit_code": { "const": 1 }, "summary": { "properties": { "failed": { "type": "integer", "minimum": 1 } } } } }
+    },
+    {
+      "if": { "properties": { "exit_code": { "const": 0 } }, "required": ["exit_code"] },
+      "then": { "properties": { "diagnostics": { "type": "array", "maxItems": 0 } } }
+    }
+  ]
+}

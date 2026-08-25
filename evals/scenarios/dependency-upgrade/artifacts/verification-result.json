@@ -1,0 +1,17 @@
+{
+  "working_directory": "./evals/scenarios/dependency-upgrade",
+  "result": "PASS",
+  "kind": "verification_result",
+  "schema_version": 1,
+  "exit_code": 0,
+  "checks": [],
+  "protocol_version": "1.5.0",
+  "summary": {
+    "required_run": 2,
+    "optional_failed": 0,
+    "total": 2,
+    "failed": 0,
+    "skipped": 0,
+    "passed": 2
+  }
+}

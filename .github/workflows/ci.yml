@@ -65,7 +65,7 @@ jobs:
           # known false positive here, and the two intentional dead assignments
           # carry inline SC2034 directives. Severity is capped at warning so
           # informational/style findings cannot block.
-          shellcheck -e SC1087 -S warning install.sh .agentic/scripts/verify.sh .agentic/scripts/validate-task.sh
+          shellcheck -e SC1087 -S warning install.sh .agentic/scripts/verify.sh .agentic/scripts/validate-task.sh .agentic/scripts/validate-context.sh
 
   # ── Bash fast (Ubuntu) ─────────────────────────────────────────────────
   bash-fast:
@@ -85,6 +85,10 @@ jobs:
           bash -n install.sh
           bash -n .agentic/scripts/verify.sh
           bash -n .agentic/scripts/validate-task.sh
+          bash -n .agentic/scripts/validate-context.sh
+
+      - name: Run offline behavioral evaluations
+        run: bash evals/run-evals.sh
 
       - name: Validate the completed task in handoff mode
         run: bash .agentic/scripts/validate-task.sh --handoff .agentic/tasks/TASK-002-risk-profiles-and-evidence-contracts.md
@@ -115,7 +119,7 @@ jobs:
         shell: pwsh
         run: |
           $err = $false
-          foreach ($f in @('install.ps1', '.agentic/scripts/verify.ps1', '.agentic/scripts/validate-task.ps1')) {
+          foreach ($f in @('install.ps1', '.agentic/scripts/verify.ps1', '.agentic/scripts/validate-task.ps1', '.agentic/scripts/validate-context.ps1')) {
             try { [scriptblock]::Create((Get-Content -Raw -LiteralPath $f)) | Out-Null }
             catch { Write-Error $_.Exception.Message; $err = $true }
           }
@@ -125,7 +129,7 @@ jobs:
         shell: pwsh
         run: |
           $results = @()
-          foreach ($f in @('install.ps1', '.agentic/scripts/verify.ps1', '.agentic/scripts/validate-task.ps1')) {
+          foreach ($f in @('install.ps1', '.agentic/scripts/verify.ps1', '.agentic/scripts/validate-task.ps1', '.agentic/scripts/validate-context.ps1')) {
             $results += Invoke-ScriptAnalyzer -Path $f -Severity Error
           }
           $results | Format-Table -AutoSize
@@ -138,6 +142,10 @@ jobs:
       - name: Run fixture smoke harness
         shell: pwsh
         run: pwsh -NoProfile -File tests/fixtures/run-fixtures.ps1 .agentic/scripts/verify.ps1
+
+      - name: Run offline behavioral evaluations
+        shell: pwsh
+        run: pwsh -NoProfile -File evals/run-evals.ps1
 
   # ── macOS compatibility ────────────────────────────────────────────────
   macos-compat:
@@ -157,6 +165,7 @@ jobs:
           bash -n install.sh
           bash -n .agentic/scripts/verify.sh
           bash -n .agentic/scripts/validate-task.sh
+          bash -n .agentic/scripts/validate-context.sh
 
       - name: Run fixture smoke harness
         run: bash tests/fixtures/run-fixtures.sh .agentic/scripts/verify.sh

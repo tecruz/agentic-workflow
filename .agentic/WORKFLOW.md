@@ -20,6 +20,7 @@ DISCOVER → CLASSIFY RISK → PLAN → IMPLEMENT → VERIFY → HANDOFF
    - Inspect `AGENTS.md`, `.agentic/STATUS.md`, and active task files in `.agentic/tasks/`.
    - Inspect package configuration (`package.json`, `Cargo.toml`, `pyproject.toml`, `go.mod`, etc.).
    - Inspect `.agentic/checks.tsv` — it is the project's authoritative definition of done.
+   - Inspect `.agentic/context/INDEX.md` — select every context module whose *Load when* triggers match the task, and record each selection in the task file under `## Context modules` before planning. Load only triggered modules, never all of them.
 2. **Search First**:
    - Search existing patterns before writing new utilities.
    - Respect established naming conventions, linting rules, and directory structure.

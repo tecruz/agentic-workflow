@@ -49,11 +49,11 @@ param(
     [switch] $EventsForce
 )
 
-# v1.4.0: simultaneous JSON stdout and event stream is not supported.
+# JSON stdout and event streams are mutually exclusive output modes.
 # Each output is reliable independently; combined use could produce
 # contradictory terminal event vs process exit. Reject at parse time.
 if ($Format -eq 'Json' -and $Events) {
-    [Console]::Error.WriteLine("ERROR: -Format Json and -Events cannot be used together in v1.4.0.")
+    [Console]::Error.WriteLine("ERROR: -Format Json and -Events cannot be used together.")
     [Console]::Error.WriteLine("Use JSON stdout OR an event stream, not both.")
     exit 1
 }
@@ -90,7 +90,7 @@ function Output-VerificationJson {
 
     $resultObject = [ordered]@{
         schema_version   = 1
-        protocol_version = "1.4.0"
+        protocol_version = "1.5.0"
         kind             = "verification_result"
         result           = $ResultStr
         exit_code        = $ExitCode

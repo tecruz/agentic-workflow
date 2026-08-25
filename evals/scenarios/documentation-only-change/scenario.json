@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "id": "documentation-only-change",
+  "description": "Documentation-only edits trigger no specialist module.",
+  "input": {
+    "task": "Fix a typo in the contributing guide.",
+    "changed_paths": [
+      "CONTRIBUTING.md"
+    ]
+  },
+  "expected": {
+    "minimum_profile": "standard",
+    "required_modules": [],
+    "required_approval_gates": [],
+    "required_evidence": []
+  }
+}

@@ -43,6 +43,19 @@ Profile: standard
 
 - None selected
 
+<!-- Inspect .agentic/context/INDEX.md during DISCOVER. For each module whose
+"Load when" triggers match this task, record one bullet BEFORE planning:
+
+- security-review v1 loaded — task changes session/authorization behavior
+
+The line must carry: known module ID, recognized version (v<N> matching the
+module), the loaded confirmation token, and a real rationale. Duplicate
+modules are rejected. The task's profile must satisfy every selected module's
+minimum risk profile. When no module applies use exactly:
+
+- None selected — <optional: why no module applies>
+-->
+
 ## Files changed
 
 - [paths]

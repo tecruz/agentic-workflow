@@ -256,6 +256,37 @@ carry, the verification depth, the handoff contents, and the approval gates:
 
 ---
 
+## Context Modules
+
+Specialist knowledge lives in portable, on-demand modules under
+`.agentic/context/` instead of the always-loaded protocol:
+
+| Module | Minimum profile | Load when |
+| :--- | :--- | :--- |
+| `security-review` | `high-assurance` | authentication, authorization, secrets, sessions, permissions, cryptography |
+| `database-migrations` | `high-assurance` | schema changes, migration files, backfills, destructive data operations |
+| `dependency-changes` | `standard` | manifest/lockfile changes, dependency upgrades, supply-chain implications |
+| `infrastructure-change` | `high-assurance` | CI/CD, Terraform/OpenTofu, Kubernetes, cloud resources, deployment config |
+| `public-api-change` | `standard` | public endpoints, published interfaces, SDK contracts, backward compatibility |
+
+- During **DISCOVER** agents inspect `.agentic/context/INDEX.md`, select every
+  module whose *Load when* triggers match the task, and record each selection
+  under `## Context modules` in the task file — known ID, recognized version,
+  a `loaded` confirmation, and a real rationale.
+- Only triggered modules are loaded; nothing imports every module into every
+  session. Documentation-only work records `- None selected`.
+- A module's minimum risk profile is a floor for the task's profile: selecting
+  `security-review` on a `standard` task fails validation.
+- `.agentic/scripts/validate-context.sh` / `validate-context.ps1` structurally
+  validate selections (exit `0` VALID, `1` INVALID, `2` BLOCKED) with stable
+  diagnostic codes (`MODULE_UNKNOWN`, `MODULE_DUPLICATE`,
+  `MODULE_RATIONALE_MISSING`, `MODULE_VERSION_UNSUPPORTED`,
+  `MODULE_PROFILE_TOO_LOW`, `MODULE_SELECTION_UNRESOLVED`,
+  `CONTEXT_SECTION_MISSING`) and JSON output validated by
+  `.agentic/schemas/context-selection-v1.schema.json`.
+
+---
+
 ## Verification State Model
 
 The verifier reports one of four states and never reports `PASS` unless at
@@ -334,6 +365,7 @@ CI on any mismatch. Both the Bats and Pester suites run on all three platforms;
 ├── install.sh / install.ps1       # Non-destructive cross-platform installers
 ├── scripts/
 │   └── build-bundle.sh            # Packages the clean adopter distribution
+├── evals/                         # Offline behavioral evaluations (dev-repo only, never bundled)
 ├── tests/
 │   ├── bats/                      # Bats suites (verify.sh + install.sh + validate-task.sh)
 │   ├── pester/                    # Pester suites (verify.ps1 + install.ps1 + validate-task.ps1)
@@ -348,6 +380,7 @@ CI on any mismatch. Both the Bats and Pester suites run on all three platforms;
     ├── schemas/                   # Versioned JSON contracts for verifier/validator output
     ├── rules/                     # Technology-agnostic standards
     ├── profiles/                  # Risk profiles (prototype, standard, high-assurance)
+    ├── context/                   # Portable, on-demand specialist modules + INDEX
     ├── tasks/                     # One file per task
     ├── decisions/                 # Immutable Architecture Decision Records
     ├── templates/                 # Feature spec, bug report, refactor plan, task file
@@ -355,7 +388,9 @@ CI on any mismatch. Both the Bats and Pester suites run on all three platforms;
         ├── verify.sh              # Verifier (Linux/macOS)
         ├── verify.ps1             # Verifier (Windows)
         ├── validate-task.sh       # Task-file validator (Linux/macOS)
-        └── validate-task.ps1      # Task-file validator (Windows)
+        ├── validate-task.ps1      # Task-file validator (Windows)
+        ├── validate-context.sh    # Context-selection validator (Linux/macOS)
+        └── validate-context.ps1   # Context-selection validator (Windows)
 ```
 
 ---

@@ -85,11 +85,11 @@ case "$(printf '%s' "$FORMAT" | tr '[:upper:]' '[:lower:]')" in
         ;;
 esac
 
-# v1.4.0: simultaneous JSON stdout and event stream is not supported.
+# JSON stdout and event streams are mutually exclusive output modes.
 # Each output is reliable independently; combined use could produce
 # contradictory terminal event vs process exit. Reject at parse time.
 if [ "$FORMAT" = "json" ] && [ -n "$EVENTS_FILE" ]; then
-    echo "ERROR: --format json and --events cannot be used together in v1.4.0." >&2
+    echo "ERROR: --format json and --events cannot be used together." >&2
     echo "Use JSON stdout OR an event stream, not both." >&2
     exit 1
 fi
@@ -255,7 +255,7 @@ output_json_checked() {
         source_value="\"source\":\"checks_tsv\""
     fi
 
-    printf '{"schema_version":1,"protocol_version":"1.4.0","kind":"verification_result","result":"%s","exit_code":%d,%s,"summary":%s,"checks":[%s]}\n' \
+    printf '{"schema_version":1,"protocol_version":"1.5.0","kind":"verification_result","result":"%s","exit_code":%d,%s,"summary":%s,"checks":[%s]}\n' \
         "$res_str" "$exit_code" "$source_value" "$summary" "$checks_json"
 }
 

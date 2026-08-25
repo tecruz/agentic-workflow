@@ -64,6 +64,38 @@ configure_test_git_identity() {
     grep -q $'\.agentic/templates/task\.md\tmanaged' .agentic/install-manifest.tsv
 }
 
+@test "fresh install creates the context registry and context validators" {
+    bash "$INSTALL" . >/dev/null 2>&1
+    [ -f .agentic/context/INDEX.md ]
+    for mod in security-review database-migrations dependency-changes infrastructure-change public-api-change; do
+        [ -f ".agentic/context/$mod/MODULE.md" ]
+    done
+    [ -f .agentic/scripts/validate-context.sh ]
+    [ -f .agentic/scripts/validate-context.ps1 ]
+    [ -f .agentic/schemas/context-selection-v1.schema.json ]
+    grep -q $'\.agentic/context/INDEX\.md\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/context/security-review/MODULE\.md\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/scripts/validate-context\.sh\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/schemas/context-selection-v1\.schema\.json\tmanaged' .agentic/install-manifest.tsv
+}
+
+@test "installed context validator keeps its executable bit and runs directly" {
+    bash "$INSTALL" . >/dev/null 2>&1
+    [ -x .agentic/scripts/validate-context.sh ]
+    printf '# TASK-T: t\n\n## Status\n\nStatus: done\nUpdated: 2026-08-24\n\n## Risk profile\n\nProfile: high-assurance\n\n## Context modules\n\n- security-review v1 loaded — smoke\n' > TASK-SMOKE.md
+    run ./.agentic/scripts/validate-context.sh TASK-SMOKE.md
+    [ "$status" -eq 0 ]
+}
+
+@test "uninstall removes the context registry but leaves adopter tasks" {
+    bash "$INSTALL" . >/dev/null 2>&1
+    mkdir -p .agentic/tasks
+    printf 'adopter evidence\n' > .agentic/tasks/TASK-900-adopter.md
+    bash "$INSTALL" . --uninstall >/dev/null 2>&1
+    [ ! -d .agentic/context ]
+    [ -f .agentic/tasks/TASK-900-adopter.md ]
+}
+
 @test "adopter task files in .agentic/tasks are never overwritten" {
     mkdir -p .agentic/tasks
     printf '# TASK-900: adopter task\nkeep me\n' > .agentic/tasks/TASK-900-adopter.md
