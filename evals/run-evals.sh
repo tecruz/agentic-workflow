@@ -125,6 +125,7 @@ exec python3 - <<'PYEOF'
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -135,6 +136,36 @@ context_validator = os.path.abspath(os.environ["AGENTIC_EVAL_CONTEXT_VALIDATOR"]
 scenario_schema_path = os.path.abspath(os.environ["AGENTIC_EVAL_SCENARIO_SCHEMA"])
 result_schema_path = os.path.abspath(os.environ["AGENTIC_EVAL_RESULT_SCHEMA"])
 verification_schema_path = os.path.abspath(os.environ["AGENTIC_EVAL_VERIFICATION_SCHEMA"])
+
+# The runner may execute under git-bash (MSYS) or WSL bash on Windows hosts,
+# and the `bash` resolved from THIS process's PATH is not guaranteed to be
+# the same flavor as the one that started us. Detect the child flavor once
+# and convert drive-letter paths into the form THAT bash understands; pin
+# the resolved binary so probe and validators share one interpreter.
+BASH_BIN = shutil.which("bash") or "bash"
+_probe = subprocess.run(
+    [BASH_BIN, "-c", "uname -s"],
+    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+)
+_uname = _probe.stdout.decode("utf-8", errors="replace")
+if os.name == "nt":
+    CHILD_FLAVOR = "wsl" if "Linux" in _uname else "msys"
+else:
+    CHILD_FLAVOR = "posix"
+
+_DRIVE_RE = re.compile(r"^([A-Za-z]):/(.*)$")
+
+
+def bash_path(path):
+    """Path form acceptable to the child bash (POSIX hosts: unchanged)."""
+    p = path.replace(os.sep, "/") if os.sep != "/" else path
+    m = _DRIVE_RE.match(p)
+    if not m or CHILD_FLAVOR == "posix":
+        return p
+    drive, rest = m.group(1).lower(), m.group(2)
+    if CHILD_FLAVOR == "wsl":
+        return "/mnt/%s/%s" % (drive, rest)
+    return "%s:/%s" % (drive, rest)
 
 PROFILE_RANK = {"prototype": 0, "standard": 1, "high-assurance": 2}
 CHECK_ORDER = [
@@ -266,15 +297,6 @@ def read_task_text(path):
         return fh.read()
 
 
-def bash_path(path):
-    """Native path with POSIX separators for anything handed to bash.
-
-    On Windows the runner executes under git-bash, where backslash paths
-    break the validators' `[ -f ]` checks; forward slashes work everywhere.
-    """
-    return path.replace(os.sep, "/") if os.sep != "/" else path
-
-
 def authoritative_lines(task_text):
     """Task lines minus fenced code blocks, HTML comments, and blockquotes.
 
@@ -351,7 +373,7 @@ def artifact_files(artifacts_dir):
 
 def run_task_validator(task_path):
     proc = subprocess.run(
-        ["bash", bash_path(task_validator), "--handoff", bash_path(task_path)],
+        [BASH_BIN, bash_path(task_validator), "--handoff", bash_path(task_path)],
         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
     )
     detail = ""
@@ -363,18 +385,20 @@ def run_task_validator(task_path):
 
 def run_context_validator(task_path):
     proc = subprocess.run(
-        ["bash", bash_path(context_validator), "--handoff", "--format", "json", bash_path(task_path)],
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        [BASH_BIN, bash_path(context_validator), "--handoff", "--format", "json", bash_path(task_path)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
     profile = None
     ids = []
+    detail = ""
     try:
         doc = json.loads(proc.stdout.decode("utf-8", errors="replace"))
         profile = doc.get("profile")
         ids = [m.get("id") for m in doc.get("selected_modules", []) if isinstance(m, dict)]
     except ValueError:
-        pass
-    return proc.returncode == 0, profile, ids
+        first = proc.stderr.decode("utf-8", errors="replace").strip().splitlines()
+        detail = first[0] if first else "validate-context produced no result document (exit %d)" % proc.returncode
+    return proc.returncode == 0, profile, ids, detail
 
 
 SUMMARY_FIELDS = ("checks_defined", "checks_run", "required_run",
@@ -445,9 +469,9 @@ def evaluate_scenario(scenario_path):
         task_ok, task_detail = run_task_validator(task_path)
         record("TASK_CONTRACT_VALID", task_ok, "" if task_ok else task_detail)
 
-        ctx_ok, profile, module_ids = run_context_validator(task_path)
+        ctx_ok, profile, module_ids, ctx_detail = run_context_validator(task_path)
         record("CONTEXT_CONTRACT_VALID", ctx_ok,
-               "" if ctx_ok else "validate-context --handoff rejected the artifact task file")
+               "" if ctx_ok else (ctx_detail or "validate-context --handoff rejected the artifact task file"))
 
         min_profile = expected.get("minimum_profile")
         prof_rank = PROFILE_RANK.get(profile, -1)
@@ -592,7 +616,11 @@ for spath in scenario_files:
     if fmt == "json":
         print(json.dumps(doc, separators=(",", ":")))
     else:
-        failed_checks = [c["id"] for c in doc["checks"] if not c["passed"]]
+        failed_checks = []
+        for c in doc["checks"]:
+            if not c["passed"]:
+                d = c.get("detail", "").strip()
+                failed_checks.append(c["id"] + (("[" + d[:140] + "]") if d else ""))
         suffix = (" failed=%s" % ",".join(failed_checks)) if failed_checks else ""
         print("%-28s observed=%-4s expected=%-4s harness=%-4s%s" % (
             doc["scenario_id"], doc["observed_result"], doc["expected_result"],
