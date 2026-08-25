@@ -102,13 +102,24 @@ if [ ! -f "$TASK_VALIDATOR" ] || [ ! -f "$CONTEXT_VALIDATOR" ]; then
     CONTEXT_VALIDATOR="$SCRIPT_DIR/../../.agentic/scripts/validate-context.sh"
 fi
 
-export AGENTIC_EVAL_TASK_VALIDATOR="$TASK_VALIDATOR"
-export AGENTIC_EVAL_CONTEXT_VALIDATOR="$CONTEXT_VALIDATOR"
-export AGENTIC_EVAL_SCENARIO_SCHEMA="$SCRIPT_DIR/schemas/scenario-v1.schema.json"
-export AGENTIC_EVAL_RESULT_SCHEMA="$SCRIPT_DIR/schemas/evaluation-result-v1.schema.json"
-export AGENTIC_EVAL_VERIFICATION_SCHEMA="$SCRIPT_DIR/../.agentic/schemas/verification-result-v1.schema.json"
+# Under git-bash (Windows full-CI leg), $PWD-derived paths are MSYS-style
+# (/d/...), which a native python3 cannot resolve. Convert every exported
+# path to mixed form (C:/...) when cygpath exists; identity elsewhere.
+_to_native() {
+    if command -v cygpath >/dev/null 2>&1; then
+        cygpath -m "$1" 2>/dev/null || printf '%s' "$1"
+    else
+        printf '%s' "$1"
+    fi
+}
+
+export AGENTIC_EVAL_TASK_VALIDATOR="$(_to_native "$TASK_VALIDATOR")"
+export AGENTIC_EVAL_CONTEXT_VALIDATOR="$(_to_native "$CONTEXT_VALIDATOR")"
+export AGENTIC_EVAL_SCENARIO_SCHEMA="$(_to_native "$SCRIPT_DIR/schemas/scenario-v1.schema.json")"
+export AGENTIC_EVAL_RESULT_SCHEMA="$(_to_native "$SCRIPT_DIR/schemas/evaluation-result-v1.schema.json")"
+export AGENTIC_EVAL_VERIFICATION_SCHEMA="$(_to_native "$SCRIPT_DIR/../.agentic/schemas/verification-result-v1.schema.json")"
 export AGENTIC_EVAL_FORMAT="$FORMAT"
-export AGENTIC_EVAL_SCENARIOS_DIR="$SCENARIOS_DIR"
+export AGENTIC_EVAL_SCENARIOS_DIR="$(_to_native "$SCENARIOS_DIR")"
 
 exec python3 - <<'PYEOF'
 import json
@@ -255,6 +266,15 @@ def read_task_text(path):
         return fh.read()
 
 
+def bash_path(path):
+    """Native path with POSIX separators for anything handed to bash.
+
+    On Windows the runner executes under git-bash, where backslash paths
+    break the validators' `[ -f ]` checks; forward slashes work everywhere.
+    """
+    return path.replace(os.sep, "/") if os.sep != "/" else path
+
+
 def authoritative_lines(task_text):
     """Task lines minus fenced code blocks, HTML comments, and blockquotes.
 
@@ -331,7 +351,7 @@ def artifact_files(artifacts_dir):
 
 def run_task_validator(task_path):
     proc = subprocess.run(
-        ["bash", task_validator, "--handoff", task_path],
+        ["bash", bash_path(task_validator), "--handoff", bash_path(task_path)],
         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
     )
     detail = ""
@@ -343,7 +363,7 @@ def run_task_validator(task_path):
 
 def run_context_validator(task_path):
     proc = subprocess.run(
-        ["bash", context_validator, "--handoff", "--format", "json", task_path],
+        ["bash", bash_path(context_validator), "--handoff", "--format", "json", bash_path(task_path)],
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
     )
     profile = None

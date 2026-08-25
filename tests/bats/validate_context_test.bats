@@ -262,7 +262,9 @@ register_duplicate_heading()  {
 }
 register_empty_doc_section()  {
     make_module "$1" empty-docs some-id 1 standard
-    sed -i '/^- trigger line$/d' "$1/empty-docs/MODULE.md"
+    # No `sed -i`: BSD sed requires an argument to -i while GNU does not.
+    grep -v '^- trigger line$' "$1/empty-docs/MODULE.md" > "$1/empty-docs/MODULE.md.tmp"
+    mv "$1/empty-docs/MODULE.md.tmp" "$1/empty-docs/MODULE.md"
 }
 register_valid_minimal()      { make_module "$1" some-other-module some-other-module 1 standard; }
 
@@ -370,8 +372,8 @@ assert doc["exit_code"] == 0, doc
     stub="$(mktemp -d)"
     printf '#!/bin/sh\nexit 3\n' > "$stub/python3"
     chmod +x "$stub/python3"
-    out="$(PATH="$stub:$PATH" bash "$VALIDATE" --format json "$FIXTURES/context-valid-single.md" 2>&1)"
-    code=$?
+    code=0
+    out="$(PATH="$stub:$PATH" bash "$VALIDATE" --format json "$FIXTURES/context-valid-single.md" 2>&1)" || code=$?
     rm -rf "$stub"
     [ "$code" -eq 1 ]
     printf '%s' "$out" | grep -q "failed to serialize JSON result"
