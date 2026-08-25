@@ -505,15 +505,21 @@ fi
 check_profile_floor
 
 if [ "$FORMAT" = "json" ]; then
-    output_context_json_valid() {
-        python3 -c '
-import json, sys
+    # Selected modules travel through an environment variable so no unquoted
+    # expansion ever word-splits ids or versions (ShellCheck-clean by design).
+    SELECTED_PAYLOAD=""
+    _i=0
+    while [ "$_i" -lt "${#SELECTED_IDS[@]}" ]; do
+        SELECTED_PAYLOAD="$SELECTED_PAYLOAD ${SELECTED_IDS[$_i]}:${SELECTED_VERSIONS[$_i]}"
+        _i=$((_i + 1))
+    done
+    AGENTIC_SELECTED="$SELECTED_PAYLOAD" python3 -c '
+import json, os, sys
 task_file = sys.argv[1]
 profile = sys.argv[2] if sys.argv[2] in ("prototype", "standard", "high-assurance") else None
 mode = sys.argv[3]
-ids = sys.argv[4:]
 selected = []
-for chunk in ids:
+for chunk in os.environ.get("AGENTIC_SELECTED", "").split():
     mid, _, mver = chunk.partition(":")
     selected.append({"id": mid, "version": int(mver)})
 doc = {
@@ -529,9 +535,7 @@ doc = {
     "diagnostics": [],
 }
 print(json.dumps(doc))
-' "$(display_path "$TASK_FILE")" "${PROFILE:-}" "$( [ "$HANDOFF" -eq 1 ] && echo handoff || echo standard )" $(for i in "${!SELECTED_IDS[@]}"; do printf '%s:%s ' "${SELECTED_IDS[$i]}" "${SELECTED_VERSIONS[$i]}"; done)
-    }
-    output_context_json_valid
+' "$(display_path "$TASK_FILE")" "${PROFILE:-}" "$( [ "$HANDOFF" -eq 1 ] && echo handoff || echo standard )"
 else
     echo "VALID: context selections ok ($( [ "$NONE_SENTINEL_SEEN" -eq 1 ] && echo 'none selected' || { printf '%s' "${SELECTED_IDS[*]}"; } ))"
 fi
