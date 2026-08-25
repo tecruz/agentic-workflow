@@ -2,25 +2,46 @@
 #
 # run-evals.sh — offline deterministic runner for behavioral evaluations.
 #
-# Evaluates observable behavior recorded in saved fixture artifacts (final task
-# files, context-module selections, risk profiles, approvals, verification
-# results). It never inspects hidden reasoning, never calls an external model,
-# and requires no network access or API keys.
+# Evaluates observable behavior recorded in saved fixture artifacts by running
+# the REAL production contracts against them:
 #
-# A scenario classifies PASS when every check passes. Scenarios may declare
-# "fixture_expected_result": "FAIL" as a negative control: the embedded policy
-# violation must be detected, so the harness fails unless the classification
-# is FAIL.
+#   - scenario.json          validated against evals/schemas/scenario-v1.schema.json
+#   - artifacts/task.md      validated by validate-task --handoff and
+#                            validate-context --handoff (the actual gates)
+#   - verification-result.json
+#                            validated against the managed
+#                            verification-result-v1.schema.json, including
+#                            summary/checks-array agreement
+#   - approvals and evidence parsed ONLY from authoritative sections
+#                            (fenced code, HTML comments, and blockquotes are
+#                            ignored, mirroring the production validators)
+#
+# It never inspects hidden reasoning, never calls an external model, and
+# requires no network access or API keys.
+#
+# A scenario's artifacts classify observed_result=PASS when every check passes.
+# Scenarios may declare "fixture_expected_result": "FAIL" as a negative
+# control: the embedded policy violation must be detected, so observed_result
+# must come out FAIL for the harness itself to pass.
+#
+# Every emitted behavioral_evaluation_result document carries the three-way
+# split required by evaluation-result-v1.schema.json:
+#   observed_result       classification of the fixture artifacts
+#   expected_result       what the scenario demands
+#   expectation_matched   whether the harness classified correctly
+#   result / exit_code    HARNESS verdict (PASS/0 when the expectation matched)
+# Each document is validated against that managed schema before it may be
+# emitted; a document that violates its own schema aborts the run.
 #
 # Exit codes:
-#   0  every scenario classified as expected
-#   1  any mismatch, structural error, or unreadable scenario
+#   0  every scenario classified as expected and every document schema-valid
+#   1  any mismatch, structural error, unreadable scenario, or invalid document
 #
 # Usage:
 #   bash evals/run-evals.sh [--format text|json] [scenarios-dir]
 #
-# Requirements: bash, python3 (scenario parsing + JSON serialization), and the
-# sibling `.agentic/scripts/validate-context.sh` validator.
+# Requirements: bash, python3 (schema validation, contract invocation, and
+# JSON serialization), and the sibling .agentic/scripts validators.
 
 set -uo pipefail
 
@@ -40,7 +61,7 @@ Options:
 
 Exit codes:
   0  all scenarios classified as expected
-  1  at least one mismatch or structural error
+  1  at least one mismatch, structural error, or invalid document
 EOF
 }
 
@@ -74,12 +95,18 @@ fi
 
 command -v python3 >/dev/null 2>&1 || { echo "ERROR: Python 3 is required for run-evals.sh" >&2; exit 1; }
 
+TASK_VALIDATOR="$SCRIPT_DIR/../.agentic/scripts/validate-task.sh"
 CONTEXT_VALIDATOR="$SCRIPT_DIR/../.agentic/scripts/validate-context.sh"
-if [ ! -f "$CONTEXT_VALIDATOR" ]; then
+if [ ! -f "$TASK_VALIDATOR" ] || [ ! -f "$CONTEXT_VALIDATOR" ]; then
+    TASK_VALIDATOR="$SCRIPT_DIR/../../.agentic/scripts/validate-task.sh"
     CONTEXT_VALIDATOR="$SCRIPT_DIR/../../.agentic/scripts/validate-context.sh"
 fi
 
+export AGENTIC_EVAL_TASK_VALIDATOR="$TASK_VALIDATOR"
 export AGENTIC_EVAL_CONTEXT_VALIDATOR="$CONTEXT_VALIDATOR"
+export AGENTIC_EVAL_SCENARIO_SCHEMA="$SCRIPT_DIR/schemas/scenario-v1.schema.json"
+export AGENTIC_EVAL_RESULT_SCHEMA="$SCRIPT_DIR/schemas/evaluation-result-v1.schema.json"
+export AGENTIC_EVAL_VERIFICATION_SCHEMA="$SCRIPT_DIR/../.agentic/schemas/verification-result-v1.schema.json"
 export AGENTIC_EVAL_FORMAT="$FORMAT"
 export AGENTIC_EVAL_SCENARIOS_DIR="$SCENARIOS_DIR"
 
@@ -92,19 +119,24 @@ import sys
 
 scenarios_dir = os.environ["AGENTIC_EVAL_SCENARIOS_DIR"]
 fmt = os.environ["AGENTIC_EVAL_FORMAT"]
-validator = os.path.abspath(os.environ["AGENTIC_EVAL_CONTEXT_VALIDATOR"])
+task_validator = os.path.abspath(os.environ["AGENTIC_EVAL_TASK_VALIDATOR"])
+context_validator = os.path.abspath(os.environ["AGENTIC_EVAL_CONTEXT_VALIDATOR"])
+scenario_schema_path = os.path.abspath(os.environ["AGENTIC_EVAL_SCENARIO_SCHEMA"])
+result_schema_path = os.path.abspath(os.environ["AGENTIC_EVAL_RESULT_SCHEMA"])
+verification_schema_path = os.path.abspath(os.environ["AGENTIC_EVAL_VERIFICATION_SCHEMA"])
 
 PROFILE_RANK = {"prototype": 0, "standard": 1, "high-assurance": 2}
 CHECK_ORDER = [
-    "SCENARIO_SCHEMA_OK",
+    "SCENARIO_SCHEMA_VALID",
     "TASK_ARTIFACT_PRESENT",
+    "TASK_CONTRACT_VALID",
     "CONTEXT_CONTRACT_VALID",
+    "VERIFICATION_SCHEMA_VALID",
     "PROFILE_FLOOR_RESPECTED",
     "REQUIRED_MODULES_SELECTED",
     "FORBIDDEN_MODULES_AVOIDED",
     "APPROVALS_DECLARED",
     "EVIDENCE_PRESENT",
-    "VERIFICATION_PASSED",
     "FORBIDDEN_PATHS_AVOIDED",
     "FORBIDDEN_ACTIONS_ABSENT",
 ]
@@ -115,35 +147,107 @@ def fail_fast(message):
     sys.exit(1)
 
 
-def load_scenario(path):
+def load_json(path):
     with open(path, "r", encoding="utf-8") as fh:
         return json.load(fh)
 
 
-def scenario_structurally_valid(doc):
-    """Minimal structural validation mirroring scenario-v1.schema.json."""
-    if not isinstance(doc, dict):
+# ---------------------------------------------------------------------------
+# Minimal offline draft-07 subset interpreter. Supports exactly the keywords
+# used by the managed schemas: type, const, enum, pattern, required,
+# properties, additionalProperties:false, items, minimum, minItems, maxItems,
+# allOf, if/then. Validating against the real schema files (not a hand-mirrored
+# subset) keeps the runners honest when the schemas evolve.
+# ---------------------------------------------------------------------------
+
+_TYPES = {
+    "object": dict,
+    "array": list,
+    "string": str,
+    "boolean": bool,
+    "null": type(None),
+}
+
+
+def _type_ok(value, name):
+    if name == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if name == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if name == "boolean":
+        return isinstance(value, bool)
+    pytype = _TYPES.get(name)
+    if pytype is None:
+        return True
+    if pytype is str and isinstance(value, bool):
         return False
-    if doc.get("schema_version") != 1:
-        return False
-    if not isinstance(doc.get("id"), str) or not re.match(r"^[a-z0-9][a-z0-9-]*$", doc["id"]):
-        return False
-    inp = doc.get("input")
-    if not isinstance(inp, dict) or not isinstance(inp.get("task"), str):
-        return False
-    if not isinstance(inp.get("changed_paths"), list):
-        return False
-    exp = doc.get("expected")
-    if not isinstance(exp, dict):
-        return False
-    if exp.get("minimum_profile") not in PROFILE_RANK:
-        return False
-    if not isinstance(exp.get("required_modules"), list):
-        return False
-    forbidden = doc.get("forbidden", {})
-    if not isinstance(forbidden, dict):
-        return False
-    return True
+    return isinstance(value, pytype)
+
+
+def schema_errors(instance, schema, path="$"):
+    """Returns a list of human-readable violation descriptions."""
+    errors = []
+    if not isinstance(schema, dict):
+        return errors
+
+    if "type" in schema:
+        names = schema["type"]
+        if isinstance(names, str):
+            names = [names]
+        if not any(_type_ok(instance, n) for n in names):
+            errors.append("%s: expected type %s" % (path, "/".join(names)))
+            return errors
+
+    if "const" in schema and instance != schema["const"]:
+        errors.append("%s: must equal %r" % (path, schema["const"]))
+
+    if "enum" in schema and instance not in schema["enum"]:
+        errors.append("%s: %r not in enum %r" % (path, instance, schema["enum"]))
+
+    if "pattern" in schema and isinstance(instance, str):
+        if not re.search(schema["pattern"], instance):
+            errors.append("%s: %r does not match %r" % (path, instance, schema["pattern"]))
+
+    if "minimum" in schema and isinstance(instance, (int, float)) and not isinstance(instance, bool):
+        if instance < schema["minimum"]:
+            errors.append("%s: %r below minimum %r" % (path, instance, schema["minimum"]))
+
+    if isinstance(instance, list):
+        if "minItems" in schema and len(instance) < schema["minItems"]:
+            errors.append("%s: fewer than %d items" % (path, schema["minItems"]))
+        if "maxItems" in schema and len(instance) > schema["maxItems"]:
+            errors.append("%s: more than %d items" % (path, schema["maxItems"]))
+        if "items" in schema:
+            for i, item in enumerate(instance):
+                errors.extend(schema_errors(item, schema["items"], "%s[%d]" % (path, i)))
+
+    if isinstance(instance, dict):
+        for prop in schema.get("required", []):
+            if prop not in instance:
+                errors.append("%s: missing required property %r" % (path, prop))
+        props = schema.get("properties", {})
+        for key, value in instance.items():
+            if key in props:
+                errors.extend(schema_errors(value, props[key], "%s.%s" % (path, key)))
+            elif schema.get("additionalProperties") is False:
+                errors.append("%s: unexpected property %r" % (path, key))
+
+    for sub in schema.get("allOf", []):
+        errors.extend(schema_errors(instance, sub, path))
+
+    if "if" in schema:
+        if not schema_errors(instance, schema["if"], path):
+            if "then" in schema:
+                errors.extend(schema_errors(instance, schema["then"], path))
+
+    return errors
+
+
+def validate_or_fail(instance, schema, schema_name, source):
+    errors = schema_errors(instance, schema)
+    if errors:
+        fail_fast("emitted document violates %s for %s: %s"
+                  % (schema_name, source, "; ".join(errors[:5])))
 
 
 def read_task_text(path):
@@ -151,42 +255,55 @@ def read_task_text(path):
         return fh.read()
 
 
-def parse_task_field(task_text, field):
-    match = re.search(r"^%s:\s*(\S+)" % field, task_text, re.MULTILINE | re.IGNORECASE)
-    return match.group(1) if match else None
+def authoritative_lines(task_text):
+    """Task lines minus fenced code blocks, HTML comments, and blockquotes.
+
+    Mirrors the authoritative-content scan performed by the production
+    validators, so approvals and evidence can only be satisfied by content
+    those validators themselves consider authoritative.
+    """
+    out = []
+    in_fence = False
+    in_comment = False
+    for raw in task_text.splitlines():
+        line = raw.rstrip("\r")
+        stripped = line.strip()
+        if in_fence:
+            if stripped.startswith("```"):
+                in_fence = False
+            continue
+        if stripped.startswith("```"):
+            in_fence = True
+            continue
+        if in_comment:
+            if "-->" in stripped:
+                in_comment = False
+            continue
+        if "<!--" in stripped:
+            if "-->" not in stripped:
+                in_comment = True
+            continue
+        if stripped.startswith(">"):
+            continue
+        out.append(line)
+    return out
 
 
-def selected_module_ids(task_path):
-    """Runs validate-context in JSON mode and returns (ok, profile, ids)."""
-    env = dict(os.environ)
-    proc = subprocess.run(
-        ["bash", validator, "--format", "json", task_path],
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-        env=env,
-    )
-    try:
-        doc = json.loads(proc.stdout.decode("utf-8", errors="replace"))
-    except ValueError:
-        return False, None, []
-    ok = proc.returncode == 0 and doc.get("result") == "VALID"
-    profile = doc.get("profile")
-    ids = [m.get("id") for m in doc.get("selected_modules", []) if isinstance(m, dict)]
-    return ok, profile, ids
+APPROVAL_PATTERN = re.compile(r"^\s*[-*]\s*\[x\]\s*AG-\d+:", re.IGNORECASE)
 
 
-def approvals_declare(task_lines, token):
-    pattern = re.compile(r"^\s*[-*]\s*\[x\]\s*AG-\d+:", re.IGNORECASE)
+def approvals_declare(lines, token):
     wanted = re.sub(r"[-_]+", " ", token).lower()
-    for line in task_lines:
-        if pattern.match(line):
+    for line in lines:
+        if APPROVAL_PATTERN.match(line):
             candidate = re.sub(r"[-_]+", " ", line).lower()
             if wanted in candidate:
                 return True
     return False
 
 
-def evidence_contains(task_lines, token):
-    for line in task_lines:
+def evidence_contains(lines, token):
+    for line in lines:
         stripped = line.strip()
         if stripped.startswith("|") and stripped.count("|") >= 4:
             if token.lower() in line.lower():
@@ -212,6 +329,58 @@ def artifact_files(artifacts_dir):
     return sorted(found)
 
 
+def run_task_validator(task_path):
+    proc = subprocess.run(
+        ["bash", task_validator, "--handoff", task_path],
+        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+    )
+    detail = ""
+    if proc.returncode != 0:
+        first = proc.stderr.decode("utf-8", errors="replace").strip().splitlines()
+        detail = first[0] if first else "validate-task --handoff rejected the artifact (exit %d)" % proc.returncode
+    return proc.returncode == 0, detail
+
+
+def run_context_validator(task_path):
+    proc = subprocess.run(
+        ["bash", context_validator, "--handoff", "--format", "json", task_path],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+    )
+    profile = None
+    ids = []
+    try:
+        doc = json.loads(proc.stdout.decode("utf-8", errors="replace"))
+        profile = doc.get("profile")
+        ids = [m.get("id") for m in doc.get("selected_modules", []) if isinstance(m, dict)]
+    except ValueError:
+        pass
+    return proc.returncode == 0, profile, ids
+
+
+SUMMARY_FIELDS = ("checks_defined", "checks_run", "required_run",
+                  "passed", "failed", "optional_failed", "blocked",
+                  "optional_skipped")
+
+
+def verification_agrees(vdoc):
+    """Summary counts must be derivable from the actual checks array."""
+    summary = vdoc.get("summary", {})
+    checks = vdoc.get("checks", [])
+    executed = [c for c in checks if c.get("status") in ("PASS", "FAIL")]
+    derived = {
+        "checks_defined": len(checks),
+        "checks_run": len(executed),
+        "required_run": sum(1 for c in executed if c.get("requirement") == "required"),
+        "passed": sum(1 for c in checks if c.get("status") == "PASS"),
+        "failed": sum(1 for c in checks if c.get("requirement") == "required" and c.get("status") == "FAIL"),
+        "optional_failed": sum(1 for c in checks if c.get("requirement") == "optional" and c.get("status") == "FAIL"),
+        "blocked": sum(1 for c in checks if c.get("status") == "BLOCKED"),
+        "optional_skipped": sum(1 for c in checks if c.get("status") == "SKIPPED_OPTIONAL"),
+    }
+    mismatched = [f for f in SUMMARY_FIELDS if summary.get(f) != derived[f]]
+    return mismatched
+
+
 def evaluate_scenario(scenario_path):
     checks = {}
     details = {}
@@ -221,73 +390,96 @@ def evaluate_scenario(scenario_path):
         if detail:
             details[cid] = detail
 
+    scenario = None
+    schema_ok = False
     try:
-        scenario = load_scenario(scenario_path)
-        schema_ok = scenario_structurally_valid(scenario)
+        scenario = load_json(scenario_path)
     except (ValueError, OSError) as exc:
-        record("SCENARIO_SCHEMA_OK", False, "unreadable or malformed scenario.json: %s" % exc)
-        return finalize(None, scenario_path)
+        record("SCENARIO_SCHEMA_VALID", False, "unreadable or malformed scenario.json: %s" % exc)
 
-    sid = scenario.get("id") if schema_ok else os.path.basename(os.path.dirname(scenario_path))
-    if schema_ok:
-        record("SCENARIO_SCHEMA_OK", True)
+    if scenario is not None:
+        try:
+            sschema = load_json(scenario_schema_path)
+        except (ValueError, OSError) as exc:
+            fail_fast("cannot load scenario schema: %s" % exc)
+        errs = schema_errors(scenario, sschema)
+        schema_ok = not errs
+        record("SCENARIO_SCHEMA_VALID", schema_ok,
+               "" if schema_ok else "scenario.json violates scenario-v1: %s" % "; ".join(errs[:3]))
+
+    sid = scenario.get("id") if isinstance(scenario, dict) and schema_ok else \
+        os.path.basename(os.path.dirname(scenario_path))
 
     artifacts_dir = os.path.join(os.path.dirname(scenario_path), "artifacts")
     task_path = os.path.join(artifacts_dir, "task.md")
 
-    expected = scenario.get("expected", {})
-    forbidden = scenario.get("forbidden", {}) if schema_ok else {}
+    expected = scenario.get("expected", {}) if isinstance(scenario, dict) else {}
+    forbidden = scenario.get("forbidden", {}) if isinstance(scenario, dict) else {}
     required_modules = expected.get("required_modules", []) if schema_ok else []
     required_gates = expected.get("required_approval_gates", []) if schema_ok else []
     required_evidence = expected.get("required_evidence", []) if schema_ok else []
 
     if schema_ok and os.path.isfile(task_path) and os.path.getsize(task_path) > 0:
         record("TASK_ARTIFACT_PRESENT", True)
-        task_text = read_task_text(task_path)
-        task_lines = task_text.splitlines()
-        ctx_ok, profile, module_ids = selected_module_ids(task_path)
-        record("CONTEXT_CONTRACT_VALID", ctx_ok, "" if ctx_ok else "validate-context rejected the artifact task file")
+
+        task_ok, task_detail = run_task_validator(task_path)
+        record("TASK_CONTRACT_VALID", task_ok, "" if task_ok else task_detail)
+
+        ctx_ok, profile, module_ids = run_context_validator(task_path)
+        record("CONTEXT_CONTRACT_VALID", ctx_ok,
+               "" if ctx_ok else "validate-context --handoff rejected the artifact task file")
+
         min_profile = expected.get("minimum_profile")
         prof_rank = PROFILE_RANK.get(profile, -1)
         need_rank = PROFILE_RANK.get(min_profile, 99)
         record("PROFILE_FLOOR_RESPECTED", prof_rank >= need_rank,
                "task profile '%s' vs minimum '%s'" % (profile, min_profile))
+
         missing = [m for m in required_modules if m not in module_ids]
         record("REQUIRED_MODULES_SELECTED", not missing,
                "" if not missing else "missing: %s" % ", ".join(missing))
-        forbidden_modules = forbidden.get("modules", [])
+
+        forbidden_modules = forbidden.get("modules", []) if isinstance(forbidden, dict) else []
         used = [m for m in module_ids if m in forbidden_modules]
         record("FORBIDDEN_MODULES_AVOIDED", not used,
                "" if not used else "forbidden modules selected: %s" % ", ".join(used))
-        gate_missing = [g for g in required_gates if not approvals_declare(task_lines, g)]
+
+        auth_lines = authoritative_lines(read_task_text(task_path))
+        gate_missing = [g for g in required_gates if not approvals_declare(auth_lines, g)]
         record("APPROVALS_DECLARED", not gate_missing,
                "" if not gate_missing else "no approval record for: %s" % ", ".join(gate_missing))
-        ev_missing = [e for e in required_evidence if not evidence_contains(task_lines, e)]
+
+        ev_missing = [e for e in required_evidence if not evidence_contains(auth_lines, e)]
         record("EVIDENCE_PRESENT", not ev_missing,
                "" if not ev_missing else "evidence table lacks: %s" % ", ".join(ev_missing))
 
         verification_path = os.path.join(artifacts_dir, "verification-result.json")
         ver_ok = False
+        ver_detail = "artifact verification-result.json must be a schema-valid PASS verification_result"
         if os.path.isfile(verification_path):
             try:
-                with open(verification_path, "r", encoding="utf-8") as fh:
-                    vdoc = json.load(fh)
-                ver_ok = (
-                    vdoc.get("kind") == "verification_result"
-                    and vdoc.get("result") == "PASS"
-                    and vdoc.get("exit_code") == 0
-                )
-            except (ValueError, OSError):
-                ver_ok = False
-        record("VERIFICATION_PASSED", ver_ok,
-               "" if ver_ok else "artifact verification-result.json must be a PASS verification_result")
+                vdoc = load_json(verification_path)
+                vschema = load_json(verification_schema_path)
+                errs = schema_errors(vdoc, vschema)
+                mismatched = verification_agrees(vdoc)
+                if errs:
+                    ver_detail = "violates verification-result-v1: %s" % "; ".join(errs[:3])
+                elif mismatched:
+                    ver_detail = "summary disagrees with checks array: %s" % ", ".join(mismatched)
+                elif vdoc.get("result") != "PASS":
+                    ver_detail = "verification result is %r, not PASS" % vdoc.get("result")
+                else:
+                    ver_ok = True
+            except (ValueError, OSError) as exc:
+                ver_detail = "unreadable verification-result.json: %s" % exc
+        record("VERIFICATION_SCHEMA_VALID", ver_ok, "" if ver_ok else ver_detail)
 
         changed = scenario["input"]["changed_paths"] if schema_ok else []
-        bad_paths = path_forbidden(changed, forbidden.get("paths", []))
+        bad_paths = path_forbidden(changed, forbidden.get("paths", []) if isinstance(forbidden, dict) else [])
         record("FORBIDDEN_PATHS_AVOIDED", not bad_paths,
                "" if not bad_paths else "a changed path matches a forbidden path")
 
-        tokens = [t.lower() for t in forbidden.get("actions", [])]
+        tokens = [t.lower() for t in (forbidden.get("actions", []) if isinstance(forbidden, dict) else [])]
         hit = None
         if tokens:
             for af in artifact_files(artifacts_dir):
@@ -308,10 +500,10 @@ def evaluate_scenario(scenario_path):
         if schema_ok:
             record("TASK_ARTIFACT_PRESENT", False, "artifacts/task.md is missing or empty")
 
-    return finalize(sid, scenario_path, checks, details)
+    return finalize(sid, scenario_path, scenario, checks, details)
 
 
-def finalize(sid, scenario_path, checks=None, details=None):
+def finalize(sid, scenario_path, scenario, checks=None, details=None):
     checks = checks or {}
     details = details or {}
     ordered = []
@@ -320,22 +512,18 @@ def finalize(sid, scenario_path, checks=None, details=None):
             ordered.append({"id": cid, "detail": details.get(cid, ""), "passed": checks[cid]})
     total = len(ordered)
     passed = sum(1 for c in ordered if c["passed"])
-    verdict = "PASS" if total > 0 and passed == total else "FAIL"
+    observed = "PASS" if total > 0 and passed == total else "FAIL"
 
-    raw = None
-    if os.path.isfile(scenario_path):
-        try:
-            raw = load_scenario(scenario_path)
-        except (ValueError, OSError):
-            raw = None
-    expectation = raw.get("fixture_expected_result", "PASS") if isinstance(raw, dict) else "PASS"
+    expectation = "PASS"
+    if isinstance(scenario, dict):
+        expectation = scenario.get("fixture_expected_result", "PASS")
 
+    matched = observed == expectation
     diagnostics = []
-    matched = verdict == expectation
     if not matched:
         diagnostics.append({
             "code": "FIXTURE_EXPECTATION_MISMATCH",
-            "message": "classification %s does not match fixture_expected_result %s" % (verdict, expectation),
+            "message": "observed %s does not match fixture_expected_result %s" % (observed, expectation),
         })
 
     doc = {
@@ -343,10 +531,12 @@ def finalize(sid, scenario_path, checks=None, details=None):
         "protocol_version": "1.5.0",
         "kind": "behavioral_evaluation_result",
         "mode": "offline-fixture",
-        "result": verdict,
+        "observed_result": observed,
+        "expected_result": expectation,
+        "expectation_matched": matched,
+        "result": "PASS" if matched else "FAIL",
         "exit_code": 0 if matched else 1,
         "scenario_id": sid,
-        "fixture_expected_result": expectation,
         "summary": {"total": total, "passed": passed, "failed": total - passed},
         "checks": ordered,
         "diagnostics": diagnostics,
@@ -356,6 +546,11 @@ def finalize(sid, scenario_path, checks=None, details=None):
 
 if not os.path.isdir(scenarios_dir):
     fail_fast("scenarios directory not found: %s" % scenarios_dir)
+
+try:
+    result_schema = load_json(result_schema_path)
+except (ValueError, OSError) as exc:
+    fail_fast("cannot load evaluation-result schema: %s" % exc)
 
 scenario_files = []
 for name in sorted(os.listdir(scenarios_dir)):
@@ -370,24 +565,27 @@ run_failures = 0
 docs = []
 for spath in scenario_files:
     doc, matched = evaluate_scenario(spath)
+    # Every emitted document must satisfy its own managed schema before the
+    # runner may print it or report success (#review blocker 4).
+    validate_or_fail(doc, result_schema, "evaluation-result-v1.schema.json", doc.get("scenario_id"))
     docs.append(doc)
     if fmt == "json":
         print(json.dumps(doc, separators=(",", ":")))
     else:
-        status = "harness-ok" if matched else "HARNESS-FAIL"
         failed_checks = [c["id"] for c in doc["checks"] if not c["passed"]]
         suffix = (" failed=%s" % ",".join(failed_checks)) if failed_checks else ""
-        print("%-28s %-4s expectation=%-4s %s%s" % (
-            doc["scenario_id"], doc["result"], doc["fixture_expected_result"], status, suffix))
+        print("%-28s observed=%-4s expected=%-4s harness=%-4s%s" % (
+            doc["scenario_id"], doc["observed_result"], doc["expected_result"],
+            doc["result"], suffix))
     if not matched:
         run_failures += 1
 
 total_docs = len(docs)
-expected_pass = sum(1 for d in docs if d["fixture_expected_result"] == d["result"])
+expected_ok = sum(1 for d in docs if d["result"] == "PASS")
 
 if fmt != "json":
     print("")
-    print("evals: %d/%d scenarios classified as expected" % (expected_pass, total_docs))
+    print("evals: %d/%d scenarios evaluated correctly" % (expected_ok, total_docs))
 
 sys.exit(0 if run_failures == 0 else 1)
 PYEOF

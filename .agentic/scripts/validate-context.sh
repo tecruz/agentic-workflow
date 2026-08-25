@@ -12,7 +12,14 @@
 #   - a completed task has no unresolved selection placeholders
 #   - the `None selected` sentinel never coexists with selections
 #   - selection versions are recognized by the registry
-#   - selection identifiers cannot escape the registry namespace
+#
+# The registry itself is validated before use: a module's declared ID must
+# match `^[a-z0-9][a-z0-9-]*$`, must equal its directory name, must be unique,
+# must declare a positive-integer Version and a recognized Minimum risk
+# profile, must not repeat any required heading, and must carry substantive
+# content under every required documentation section. A violating registry is
+# rejected wholesale as unusable (BLOCKED), so task-provided text can never
+# influence filesystem paths.
 #
 # Content in fenced code blocks, HTML comments, and blockquote lines is not
 # authoritative and is ignored.
@@ -204,72 +211,151 @@ fail_blocked() {
 }
 
 if [ ! -f "$TASK_FILE" ]; then
-    if [ "$FORMAT" = "json" ]; then
-        fail_invalid "CONTEXT_SECTION_MISSING" "" "" "Task file was not found: $(display_path "$TASK_FILE")"
-    else
-        echo "Error: task file not found: $TASK_FILE" >&2
-    fi
-    exit 1
+    fail_invalid "CONTEXT_SECTION_MISSING" "" "" "Task file was not found: $(display_path "$TASK_FILE")"
 fi
 
 # ---------------------------------------------------------------------------
-# Load the registry: parallel arrays MODULE_IDS / MODULE_VERSIONS holding the
-# declared ID and Version of every <registry>/<id>/MODULE.md. A module whose
-# declared Version is not a positive integer makes the registry unverifiable
-# and blocks the run rather than guessing.
+# Registry validation. Every module becomes one structured record:
+#   REG_DIRS[i]   containing directory name
+#   REG_IDS[i]    declared ID (must equal the directory name)
+#   REG_VERSIONS  declared positive-integer Version
+#   REG_MINS[i]   declared Minimum risk profile (recognized)
+# A registry that violates any identity or metadata rule is rejected whole
+# (CONTEXT_REGISTRY_INVALID, BLOCKED): an untrusted registry must never be
+# partially consumed, and task-provided IDs never select filesystem paths.
 # ---------------------------------------------------------------------------
-declare -a MODULE_IDS=()
-declare -a MODULE_VERSIONS=()
+REG_ID_PATTERN='^[a-z0-9][a-z0-9-]*$'
+
+declare -a REG_DIRS=()
+declare -a REG_IDS=()
+declare -a REG_VERSIONS=()
+declare -a REG_MINS=()
+
+has_meaningful_char() {
+    printf '%s' "$1" | grep -qE '[[:alpha:][:digit:]]'
+}
+
+registry_invalid() {
+    fail_blocked "CONTEXT_REGISTRY_INVALID" "registry" "${2:-}" "Context module registry is unusable: $1"
+}
 
 load_registry() {
     if [ ! -d "$REGISTRY" ]; then
         fail_blocked "CONTEXT_REGISTRY_MISSING" "" "" "Context module registry not found: $(basename "$REGISTRY")"
         return
     fi
-    local dir mf id ver
+    local dir mf dirname line current id ver min
+    local id_n ver_n min_n lw_n rc_n ag_n re_n ps_n
+    local lw_c rc_c ag_c re_c ps_c
     for dir in "$REGISTRY"/*/ ; do
         [ -d "$dir" ] || continue
-        mf="$dir/MODULE.md"
+        mf="${dir}MODULE.md"
         [ -f "$mf" ] || continue
-        id=""
-        ver=""
-        local in_id=0 in_ver=0 line
+        dirname="$(basename "$dir")"
+
+        id="" ; ver="" ; min=""
+        id_n=0 ; ver_n=0 ; min_n=0
+        lw_n=0 ; rc_n=0 ; ag_n=0 ; re_n=0 ; ps_n=0
+        lw_c=0 ; rc_c=0 ; ag_c=0 ; re_c=0 ; ps_c=0
+        current=""
+
         while IFS= read -r line || [ -n "$line" ]; do
-            case "$line" in
-                "## ID")    in_id=1;  in_ver=0; continue ;;
-                "## Version") in_ver=1; in_id=0; continue ;;
-                "##"*)      in_id=0;  in_ver=0; continue ;;
+            line="${line%$'\r'}"
+            norm_line="$(printf '%s' "$line" | tr '[:upper:]' '[:lower:]' | sed 's/[[:space:]]*$//')"
+            case "$norm_line" in
+                "## id")                    current="id";     id_n=$((id_n + 1)); continue ;;
+                "## version")               current="ver";    ver_n=$((ver_n + 1)); continue ;;
+                "## minimum risk profile")  current="min";    min_n=$((min_n + 1)); continue ;;
+                "## load when")             current="lw";     lw_n=$((lw_n + 1)); continue ;;
+                "## required context")      current="rc";     rc_n=$((rc_n + 1)); continue ;;
+                "## approval gates")        current="ag";     ag_n=$((ag_n + 1)); continue ;;
+                "## required evidence")     current="re";     re_n=$((re_n + 1)); continue ;;
+                "## prohibited shortcuts")  current="ps";     ps_n=$((ps_n + 1)); continue ;;
+                "##"*)                      current="" ;;
             esac
-            if [ "$in_id" -eq 1 ] && [ -z "$id" ] && [ -n "${line//[[:space:]]/}" ]; then
-                id="$(printf '%s' "$line" | tr -d '[:space:]')"
-            elif [ "$in_ver" -eq 1 ] && [ -z "$ver" ] && [ -n "${line//[[:space:]]/}" ]; then
-                ver="$(printf '%s' "$line" | tr -d '[:space:]')"
-            fi
+            case "$current" in
+                id)
+                    if [ -z "$id" ] && [ -n "$(printf '%s' "$line" | tr -d '[:space:]')" ]; then
+                        id="$(printf '%s' "$line" | tr -d '[:space:]')"
+                    fi ;;
+                ver)
+                    if [ -z "$ver" ] && [ -n "$(printf '%s' "$line" | tr -d '[:space:]')" ]; then
+                        ver="$(printf '%s' "$line" | tr -d '[:space:]')"
+                    fi ;;
+                min)
+                    if [ -z "$min" ] && [ -n "${line//[[:space:]]/}" ]; then
+                        min="$(printf '%s' "$line" | awk '{print $1}')"
+                    fi ;;
+                lw) [ "$lw_c" -eq 0 ] && has_meaningful_char "$line" && lw_c=1 ;;
+                rc) [ "$rc_c" -eq 0 ] && has_meaningful_char "$line" && rc_c=1 ;;
+                ag) [ "$ag_c" -eq 0 ] && has_meaningful_char "$line" && ag_c=1 ;;
+                re) [ "$re_c" -eq 0 ] && has_meaningful_char "$line" && re_c=1 ;;
+                ps) [ "$ps_c" -eq 0 ] && has_meaningful_char "$line" && ps_c=1 ;;
+            esac
         done < "$mf"
-        if ! printf '%s' "$ver" | grep -Eq '^[1-9][0-9]*$'; then
-            fail_blocked "MODULE_VERSION_UNSUPPORTED" "registry" "$(basename "$dir")" "Module '$(basename "$dir")' declares an unsupported version ('$ver'); registry is unusable."
+
+        for pair in "ID:$id_n" "Version:$ver_n" "Minimum risk profile:$min_n" \
+                    "Load when:$lw_n" "Required context:$rc_n" \
+                    "Approval gates:$ag_n" "Required evidence:$re_n" \
+                    "Prohibited shortcuts:$ps_n"; do
+            count="${pair##*:}"
+            case "$count" in
+                0)
+                    registry_invalid "module '$dirname' is missing its '${pair%%:*}' section." "$dirname"
+                    return
+                    ;;
+                1) ;;
+                *)
+                    registry_invalid "module '$dirname' declares heading '${pair%%:*}' more than once." "$dirname"
+                    return
+                    ;;
+            esac
+        done
+
+        if ! printf '%s' "$id" | grep -Eq "$REG_ID_PATTERN"; then
+            registry_invalid "module '$dirname' declares ID '$id', which does not match $REG_ID_PATTERN." "$dirname"
             return
         fi
-        MODULE_IDS+=("$id")
-        MODULE_VERSIONS+=("$ver")
-    done
-}
-
-registry_has() {
-    local want="$1" i
-    for i in "${!MODULE_IDS[@]}"; do
-        if [ "${MODULE_IDS[$i]}" = "$want" ]; then
-            return 0
+        if [ "$id" != "$dirname" ]; then
+            registry_invalid "module '$dirname' declares ID '$id' that differs from its directory name." "$dirname"
+            return
         fi
+        local seen
+        for seen in "${REG_IDS[@]:-}"; do
+            if [ "$seen" = "$id" ]; then
+                registry_invalid "module ID '$id' is declared more than once." "$dirname"
+                return
+            fi
+        done
+        if ! printf '%s' "$ver" | grep -Eq '^[1-9][0-9]*$'; then
+            registry_invalid "module '$dirname' declares an unsupported Version ('$ver')." "$dirname"
+            return
+        fi
+        case "$min" in
+            prototype|standard|high-assurance) ;;
+            *)
+                registry_invalid "module '$dirname' declares missing or unrecognized Minimum risk profile ('$min')." "$dirname"
+                return
+                ;;
+        esac
+        if [ "$lw_c" -eq 0 ] || [ "$rc_c" -eq 0 ] || [ "$ag_c" -eq 0 ] ||
+           [ "$re_c" -eq 0 ] || [ "$ps_c" -eq 0 ]; then
+            registry_invalid "module '$dirname' is missing substantive content under one of: Load when, Required context, Approval gates, Required evidence, Prohibited shortcuts." "$dirname"
+            return
+        fi
+
+        REG_DIRS+=("$dirname")
+        REG_IDS+=("$id")
+        REG_VERSIONS+=("$ver")
+        REG_MINS+=("$min")
     done
-    return 1
 }
 
-registry_version_of() {
+registry_index_of() {
     local want="$1" i
-    for i in "${!MODULE_IDS[@]}"; do
-        if [ "${MODULE_IDS[$i]}" = "$want" ]; then
-            printf '%s' "${MODULE_VERSIONS[$i]}"
+    for i in "${!REG_IDS[@]}"; do
+        if [ "${REG_IDS[$i]}" = "$want" ]; then
+            printf '%s' "$i"
             return 0
         fi
     done
@@ -277,13 +363,7 @@ registry_version_of() {
 }
 
 # True when the value carries at least one letter or number.
-has_meaningful_char() {
-    printf '%s' "$1" | grep -qE '[[:alpha:][:digit:]]'
-}
-
-# True when the value is recognized placeholder content rather than a real
-# rationale: bare placeholder tokens, bracketed or angle-bracket markers,
-# '<label>: TBD' forms, or placeholder-prefixed fragments.
+# (Placeholder detection shares the meaningful-char predicate.)
 is_placeholder_text() {
     local n
     n="$(printf '%s' "$1" | sed -e 's/^[[:space:]-]*+//' -e 's/[[:space:].!?;:,-]*$//' -e 's/^[[:space:]]*//' | tr '[:upper:]' '[:lower:]')"
@@ -303,9 +383,6 @@ PROFILE=""
 STATUS=""
 SECTION_FOUND=0
 
-# Authoritative-line scanner: drops fenced code blocks, HTML comment blocks,
-# blockquote lines, and collects Profile/Status declarations and the raw body
-# of `## Context modules` (until the next `## ` heading).
 declare -a SECTION_LINES=()
 
 scan_task_file() {
@@ -360,14 +437,12 @@ scan_task_file() {
     done < "$TASK_FILE"
 }
 
-# Selection state.
 SELECTION_COUNT=0
 NONE_SENTINEL_SEEN=0
 declare -a SELECTED_IDS=()
 declare -a SELECTED_VERSIONS=()
 
 parse_selection_line() {
-    # Strips the bullet marker and returns the remainder on stdout.
     local raw="$1"
     printf '%s' "$raw" | sed -e 's/^[[:space:]]*[-*+][[:space:]]*//'
 }
@@ -375,7 +450,6 @@ parse_selection_line() {
 handle_entry() {
     local entry="$1"
 
-    # Skip blank entries.
     if [ -z "${entry//[[:space:]]/}" ]; then
         return 0
     fi
@@ -410,12 +484,13 @@ handle_entry() {
         fail_invalid "MODULE_SELECTION_UNRESOLVED" "## Context modules" "$id" "Selection of '$id' does not confirm the module was loaded before planning."
     fi
 
-    if ! registry_has "$id"; then
+    local idx
+    idx="$(registry_index_of "$id" || true)"
+    if [ -z "$idx" ]; then
         fail_invalid "MODULE_UNKNOWN" "## Context modules" "$id" "Selected module '$id' is not in the managed registry."
     fi
 
-    local reg_ver
-    reg_ver="$(registry_version_of "$id")"
+    local reg_ver="${REG_VERSIONS[$idx]}"
     if [ "${ver#v}" != "$reg_ver" ]; then
         fail_invalid "MODULE_VERSION_UNSUPPORTED" "## Context modules" "$id" "Selection of '$id' declares version '${ver#v}' but the registry provides '$reg_ver'."
     fi
@@ -447,30 +522,19 @@ profile_rank() {
         prototype) printf 0 ;;
         standard) printf 1 ;;
         high-assurance) printf 2 ;;
-        *) printf -1 ;;
+        *) printf '%s' -1 ;;
     esac
 }
 
 check_profile_floor() {
-    local p_rank m_rank i id
+    local p_rank m_rank i idx id min_profile
     p_rank="$(profile_rank "$PROFILE")"
     [ "$p_rank" -lt 0 ] && return 0
     for i in "${!SELECTED_IDS[@]}"; do
         id="${SELECTED_IDS[$i]}"
-        local min_profile=""
-        local mf="$REGISTRY/$id/MODULE.md"
-        local grab=0 line
-        while IFS= read -r line || [ -n "$line" ]; do
-            line="${line%$'\r'}"
-            norm_line="$(printf '%s' "$line" | tr '[:upper:]' '[:lower:]')"
-            case "$norm_line" in
-                "## minimum risk profile") grab=1; continue ;;
-                "##"*) grab=0; continue ;;
-            esac
-            if [ "$grab" -eq 1 ] && [ -z "$min_profile" ] && [ -n "${line//[[:space:]]/}" ]; then
-                min_profile="$(printf '%s' "$line" | awk '{print $1}')"
-            fi
-        done < "$mf"
+        idx="$(registry_index_of "$id" || true)"
+        [ -z "$idx" ] && continue
+        min_profile="${REG_MINS[$idx]}"
         m_rank="$(profile_rank "$min_profile")"
         if [ "$m_rank" -ge 0 ] && [ "$p_rank" -lt "$m_rank" ]; then
             fail_invalid "MODULE_PROFILE_TOO_LOW" "## Context modules" "$id" "Task profile '$PROFILE' is below the '$min_profile' minimum required by module '$id'."
@@ -513,7 +577,11 @@ if [ "$FORMAT" = "json" ]; then
         SELECTED_PAYLOAD="$SELECTED_PAYLOAD ${SELECTED_IDS[$_i]}:${SELECTED_VERSIONS[$_i]}"
         _i=$((_i + 1))
     done
-    AGENTIC_SELECTED="$SELECTED_PAYLOAD" python3 -c '
+    # The successful leg is checked exactly like the failure legs: a failed
+    # serialization (closed stdout, full disk, hostile payload) must never
+    # masquerade as a VALID run with no result document.
+    serialized=""
+    serialized="$(AGENTIC_SELECTED="$SELECTED_PAYLOAD" python3 -c '
 import json, os, sys
 task_file = sys.argv[1]
 profile = sys.argv[2] if sys.argv[2] in ("prototype", "standard", "high-assurance") else None
@@ -535,7 +603,14 @@ doc = {
     "diagnostics": [],
 }
 print(json.dumps(doc))
-' "$(display_path "$TASK_FILE")" "${PROFILE:-}" "$( [ "$HANDOFF" -eq 1 ] && echo handoff || echo standard )"
+' "$(display_path "$TASK_FILE")" "${PROFILE:-}" "$( [ "$HANDOFF" -eq 1 ] && echo handoff || echo standard )")" || {
+        echo "ERROR: failed to serialize JSON result." >&2
+        exit 1
+    }
+    if ! printf '%s\n' "$serialized"; then
+        echo "ERROR: failed to write JSON result." >&2
+        exit 1
+    fi
 else
     echo "VALID: context selections ok ($( [ "$NONE_SENTINEL_SEEN" -eq 1 ] && echo 'none selected' || { printf '%s' "${SELECTED_IDS[*]}"; } ))"
 fi

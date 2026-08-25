@@ -13,19 +13,19 @@ Profile: standard
 
 Fixture artifact for the behavioral evaluation harness.
 
+## Approval gates
+
+- None identified
+
 ## Acceptance criteria
 
-- AC-1: Observable condition recorded in the fixture.
+- AC-1: The contributing guide reads correctly.
 
 ## Required evidence
 
 | AC ID | Evidence | Result |
 | --- | --- | --- |
-| AC-1 | n/a rationale: prose-only edit verified by proofread | satisfied |
-
-## Approval gates
-
-- - None identified
+| AC-1 | n/a rationale: prose-only edit verified by proofreading | satisfied |
 
 ## Context modules
 
@@ -35,12 +35,16 @@ Fixture artifact for the behavioral evaluation harness.
 
 ### Baseline
 
-Baseline verification executed before changes.
+- Contributing guide rendered without the fix.
 
 ### Final
 
-Final verification executed and recorded in verification-result.json.
+- Contributing guide proofread after the correction.
+
+## Files changed
+
+- `CONTRIBUTING.md`
 
 ## Remaining risks
 
-- Fixture artifact; no production impact.
+- None identified.

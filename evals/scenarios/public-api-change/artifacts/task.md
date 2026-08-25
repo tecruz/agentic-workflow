@@ -13,19 +13,19 @@ Profile: standard
 
 Fixture artifact for the behavioral evaluation harness.
 
+## Approval gates
+
+- [x] AG-1: Approved by API Policy Owner on 2026-08-24
+
 ## Acceptance criteria
 
-- AC-1: Observable condition recorded in the fixture.
+- AC-1: Existing consumers continue to pass against the extended response.
 
 ## Required evidence
 
 | AC ID | Evidence | Result |
 | --- | --- | --- |
 | AC-1 | compatibility-evidence: consumer contract fixtures pass unchanged | passed |
-
-## Approval gates
-
-- [x] AG-1: Approved by API Policy Owner on 2026-08-24
 
 ## Context modules
 
@@ -35,12 +35,17 @@ Fixture artifact for the behavioral evaluation harness.
 
 ### Baseline
 
-Baseline verification executed before changes.
+- Consumer contract fixtures green against the current response shape.
 
 ### Final
 
-Final verification executed and recorded in verification-result.json.
+- Consumer contract fixtures green with pagination metadata added.
+
+## Files changed
+
+- `src/api/orders.ts`
+- `src/api/orders.contract.test.ts`
 
 ## Remaining risks
 
-- Fixture artifact; no production impact.
+- None identified.

@@ -37,6 +37,7 @@
             "enum": [
               "CONTEXT_SECTION_MISSING",
               "CONTEXT_REGISTRY_MISSING",
+              "CONTEXT_REGISTRY_INVALID",
               "MODULE_UNKNOWN",
               "MODULE_DUPLICATE",
               "MODULE_RATIONALE_MISSING",

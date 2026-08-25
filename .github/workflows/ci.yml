@@ -65,7 +65,7 @@ jobs:
           # known false positive here, and the two intentional dead assignments
           # carry inline SC2034 directives. Severity is capped at warning so
           # informational/style findings cannot block.
-          shellcheck -e SC1087 -S warning install.sh .agentic/scripts/verify.sh .agentic/scripts/validate-task.sh .agentic/scripts/validate-context.sh
+          shellcheck -e SC1087 -S warning install.sh .agentic/scripts/verify.sh .agentic/scripts/validate-task.sh .agentic/scripts/validate-context.sh .agentic/scripts/validate-handoff.sh
 
   # ── Bash fast (Ubuntu) ─────────────────────────────────────────────────
   bash-fast:
@@ -86,6 +86,12 @@ jobs:
           bash -n .agentic/scripts/verify.sh
           bash -n .agentic/scripts/validate-task.sh
           bash -n .agentic/scripts/validate-context.sh
+          bash -n .agentic/scripts/validate-handoff.sh
+
+      - name: Validate completed tasks through the composite handoff gate
+        run: |
+          bash .agentic/scripts/validate-handoff.sh .agentic/tasks/TASK-002-risk-profiles-and-evidence-contracts.md
+          bash .agentic/scripts/validate-handoff.sh .agentic/tasks/TASK-006-context-modules-and-evals.md
 
       - name: Run offline behavioral evaluations
         run: bash evals/run-evals.sh
@@ -119,7 +125,7 @@ jobs:
         shell: pwsh
         run: |
           $err = $false
-          foreach ($f in @('install.ps1', '.agentic/scripts/verify.ps1', '.agentic/scripts/validate-task.ps1', '.agentic/scripts/validate-context.ps1')) {
+          foreach ($f in @('install.ps1', '.agentic/scripts/verify.ps1', '.agentic/scripts/validate-task.ps1', '.agentic/scripts/validate-context.ps1', '.agentic/scripts/validate-handoff.ps1')) {
             try { [scriptblock]::Create((Get-Content -Raw -LiteralPath $f)) | Out-Null }
             catch { Write-Error $_.Exception.Message; $err = $true }
           }
@@ -129,15 +135,17 @@ jobs:
         shell: pwsh
         run: |
           $results = @()
-          foreach ($f in @('install.ps1', '.agentic/scripts/verify.ps1', '.agentic/scripts/validate-task.ps1', '.agentic/scripts/validate-context.ps1')) {
+          foreach ($f in @('install.ps1', '.agentic/scripts/verify.ps1', '.agentic/scripts/validate-task.ps1', '.agentic/scripts/validate-context.ps1', '.agentic/scripts/validate-handoff.ps1')) {
             $results += Invoke-ScriptAnalyzer -Path $f -Severity Error
           }
           $results | Format-Table -AutoSize
           if ($results) { exit 1 }
 
-      - name: Validate the completed task in handoff mode
+      - name: Validate completed tasks through the composite handoff gate
         shell: pwsh
-        run: pwsh -NoProfile -File .agentic/scripts/validate-task.ps1 -Handoff .agentic/tasks/TASK-002-risk-profiles-and-evidence-contracts.md
+        run: |
+          pwsh -NoProfile -File .agentic/scripts/validate-handoff.ps1 .agentic/tasks/TASK-002-risk-profiles-and-evidence-contracts.md
+          pwsh -NoProfile -File .agentic/scripts/validate-handoff.ps1 .agentic/tasks/TASK-006-context-modules-and-evals.md
 
       - name: Run fixture smoke harness
         shell: pwsh
@@ -166,6 +174,7 @@ jobs:
           bash -n .agentic/scripts/verify.sh
           bash -n .agentic/scripts/validate-task.sh
           bash -n .agentic/scripts/validate-context.sh
+          bash -n .agentic/scripts/validate-handoff.sh
 
       - name: Run fixture smoke harness
         run: bash tests/fixtures/run-fixtures.sh .agentic/scripts/verify.sh

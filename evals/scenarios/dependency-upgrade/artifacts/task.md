@@ -13,19 +13,19 @@ Profile: standard
 
 Fixture artifact for the behavioral evaluation harness.
 
+## Approval gates
+
+- None identified
+
 ## Acceptance criteria
 
-- AC-1: Observable condition recorded in the fixture.
+- AC-1: The suite is green on the upgraded lockfile.
 
 ## Required evidence
 
 | AC ID | Evidence | Result |
 | --- | --- | --- |
-| AC-1 | build-and-test-passing: full suite green on updated lockfile | passed |
-
-## Approval gates
-
-- - None identified
+| AC-1 | build-and-test-passing: full suite green on the updated lockfile | passed |
 
 ## Context modules
 
@@ -35,12 +35,17 @@ Fixture artifact for the behavioral evaluation harness.
 
 ### Baseline
 
-Baseline verification executed before changes.
+- 'npm ci && npm test' → 210 passed, 0 failed on the previous lockfile.
 
 ### Final
 
-Final verification executed and recorded in verification-result.json.
+- 'npm ci && npm test' → 210 passed, 0 failed on the upgraded lockfile.
+
+## Files changed
+
+- `package.json`
+- `package-lock.json`
 
 ## Remaining risks
 
-- Fixture artifact; no production impact.
+- None identified.

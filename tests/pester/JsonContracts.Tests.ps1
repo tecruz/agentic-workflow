@@ -1119,3 +1119,115 @@ Describe 'Event schema validation' {
         Remove-Item -LiteralPath $proj -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
+
+Describe 'Behavioral evaluation contracts and schema validation' {
+
+    BeforeAll {
+        $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+        $script:evalsDir = Join-Path $repoRoot 'evals'
+        $script:runEvalsSh = Join-Path $evalsDir 'run-evals.sh'
+        $script:runEvalsPs = Join-Path $evalsDir 'run-evals.ps1'
+        $script:evaluationSchema = Join-Path $evalsDir 'schemas' 'evaluation-result-v1.schema.json'
+        $script:scenarioSchema = Join-Path $evalsDir 'schemas' 'scenario-v1.schema.json'
+        $script:verificationSchema = Join-Path $repoRoot '.agentic' 'schemas' 'verification-result-v1.schema.json'
+
+        # Self-contained: Pester 5 It-blocks cannot call helpers defined at
+        # other scopes, so this mirrors Test-JsonAgainstSchema locally.
+        function Test-EvalSchemaValid([string]$JsonPath, [string]$SchemaPath) {
+            $cmd = "import json, jsonschema, sys; jsonschema.validate(instance=json.load(open(sys.argv[1], encoding='utf-8')), schema=json.load(open(sys.argv[2], encoding='utf-8')))"
+            $null = python -c $cmd $JsonPath $SchemaPath 2>&1
+            return $LASTEXITCODE
+        }
+
+        function Invoke-EvalRunner([string]$Runner, [string]$Format) {
+            if ($Runner -like '*.ps1') {
+                $out = & pwsh -NoProfile -File $Runner -Format $Format 2>$null
+                return @{ Lines = @($out); Code = $LASTEXITCODE }
+            }
+            $runnerArgs = @()
+            if ($Format -eq 'Json') { $runnerArgs += @('--format', 'json') }
+            $out = & bash $Runner @runnerArgs 2>$null
+            return @{ Lines = @($out); Code = $LASTEXITCODE }
+        }
+
+        function Assert-EvalDocsSchemaValid([object[]]$Lines, [string]$Label) {
+            ($Lines.Count) | Should -Be 8 -Because "one document per scenario ($Label)"
+            foreach ($line in $Lines) {
+                $tmp = [System.IO.Path]::GetTempFileName()
+                try {
+                    [System.IO.File]::WriteAllText($tmp, "$line`n", [System.Text.UTF8Encoding]::new($false))
+                    # Validate against the managed schema with the pinned
+                    # external jsonschema authority while the file exists.
+                    (Test-EvalSchemaValid $tmp $evaluationSchema) | Should -Be 0 -Because "every emitted evaluation document must satisfy its own schema ($Label)"
+                }
+                finally { Remove-Item -LiteralPath $tmp -ErrorAction SilentlyContinue }
+            }
+        }
+    }
+
+    It 'run-evals.sh emits one schema-valid document per scenario and exits 0 (Bash)' {
+        if ($IsWindows) { return }
+        $r = Invoke-EvalRunner $runEvalsSh 'Json'
+        $r.Code | Should -Be 0
+        Assert-EvalDocsSchemaValid $r.Lines 'bash'
+    }
+
+    It 'run-evals.ps1 emits one schema-valid document per scenario and exits 0 (PowerShell)' {
+        $r = Invoke-EvalRunner $runEvalsPs 'Json'
+        $r.Code | Should -Be 0
+        Assert-EvalDocsSchemaValid $r.Lines 'powershell'
+    }
+
+    It 'the negative control is valid in every other respect and fails only FORBIDDEN_ACTIONS_ABSENT (PowerShell)' {
+        $r = Invoke-EvalRunner $runEvalsPs 'Json'
+        $r.Code | Should -Be 0
+        $neg = @($r.Lines | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.scenario_id -eq 'test-weakening-attempt' })
+        ($neg.Count) | Should -Be 1
+        $doc = $neg[0]
+        # Three-way split from the review: observed FAIL, expected FAIL,
+        # expectation matched — so the HARNESS verdict is PASS/exit 0 even
+        # though the scenario artifact itself failed its checks.
+        $doc.observed_result | Should -Be 'FAIL'
+        $doc.expected_result | Should -Be 'FAIL'
+        $doc.expectation_matched | Should -BeTrue
+        $doc.result | Should -Be 'PASS'
+        $doc.exit_code | Should -Be 0
+        @($doc.diagnostics).Count | Should -Be 0
+        $failedChecks = @($doc.checks | Where-Object { -not $_.passed } | ForEach-Object { $_.id })
+        $failedChecks | Should -Be 'FORBIDDEN_ACTIONS_ABSENT'
+        # The observed failure must still surface in the summary counts.
+        $doc.summary.failed | Should -Be 1
+        $doc.summary.passed | Should -Be ($doc.summary.total - 1)
+    }
+
+    It 'every positive scenario observes PASS with harness PASS (PowerShell)' {
+        $r = Invoke-EvalRunner $runEvalsPs 'Json'
+        $r.Code | Should -Be 0
+        $docs = @($r.Lines | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.scenario_id -ne 'test-weakening-attempt' })
+        ($docs.Count) | Should -Be 7
+        foreach ($d in $docs) {
+            $d.observed_result | Should -Be 'PASS' -Because "scenario $($d.scenario_id)"
+            $d.result | Should -Be 'PASS'
+            $d.exit_code | Should -Be 0
+            $d.summary.failed | Should -Be 0
+        }
+    }
+
+    It 'scenario fixtures validate against scenario-v1 and verification artifacts against verification-result-v1' {
+        $scenarioDirs = @(Get-ChildItem -LiteralPath (Join-Path $evalsDir 'scenarios') -Directory | Sort-Object Name)
+        ($scenarioDirs.Count) | Should -Be 8
+        foreach ($dir in $scenarioDirs) {
+            $tmpS = [System.IO.Path]::GetTempFileName()
+            $tmpV = [System.IO.Path]::GetTempFileName()
+            try {
+                Copy-Item -LiteralPath (Join-Path $dir.FullName 'scenario.json') -Destination $tmpS -Force
+                (Test-EvalSchemaValid $tmpS $scenarioSchema) | Should -Be 0 -Because "scenario.json for $($dir.Name) must satisfy scenario-v1"
+                Copy-Item -LiteralPath (Join-Path $dir.FullName 'artifacts\verification-result.json') -Destination $tmpV -Force
+                (Test-EvalSchemaValid $tmpV $verificationSchema) | Should -Be 0 -Because "verification-result.json for $($dir.Name) must satisfy verification-result-v1"
+            }
+            finally {
+                Remove-Item -LiteralPath $tmpS, $tmpV -ErrorAction SilentlyContinue
+            }
+        }
+    }
+}

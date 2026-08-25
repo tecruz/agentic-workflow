@@ -5,14 +5,26 @@
 
 .DESCRIPTION
     PowerShell counterpart of evals/run-evals.sh. Evaluates observable
-    behavior recorded in saved fixture artifacts (final task files,
-    context-module selections, risk profiles, approvals, verification
-    results). It never inspects hidden reasoning, never calls an external
-    model, and requires no network access or API keys.
+    behavior recorded in saved fixture artifacts by running the REAL
+    production contracts against them:
 
-    A scenario classifies PASS when every check passes. Scenarios may declare
-    "fixture_expected_result": "FAIL" as a negative control: the embedded
-    policy violation must be detected.
+      - scenario.json            validated against evals/schemas/scenario-v1.schema.json
+      - artifacts/task.md        validated by validate-task -Handoff and
+                                 validate-context -Handoff (the actual gates)
+      - verification-result.json validated against the managed
+                                 verification-result-v1.schema.json, including
+                                 summary/checks-array agreement
+      - approvals/evidence parsed ONLY from authoritative sections (fenced
+        code, HTML comments, and blockquotes ignored)
+
+    It never inspects hidden reasoning, never calls an external model, and
+    requires no network access or API keys.
+
+    Every emitted behavioral_evaluation_result document carries the three-way
+    split required by evaluation-result-v1.schema.json (observed_result /
+    expected_result / expectation_matched / result / exit_code) and is
+    validated against that managed schema before it may be emitted; a
+    document that violates its own schema aborts the run.
 
 .PARAMETER Format
     Output format: Text (default) or Json (NDJSON, one
@@ -37,77 +49,194 @@ if (-not $ScenariosDir) {
     $ScenariosDir = Join-Path $PSScriptRoot 'scenarios'
 }
 
-$contextValidator = Join-Path (Split-Path -Parent $PSScriptRoot) '.agentic\scripts\validate-context.ps1'
-if (-not (Test-Path -LiteralPath $contextValidator)) {
-    $contextValidator = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) '.agentic\scripts\validate-context.ps1'
-}
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$taskValidator = Join-Path $repoRoot '.agentic\scripts\validate-task.ps1'
+$contextValidator = Join-Path $repoRoot '.agentic\scripts\validate-context.ps1'
+$scenarioSchemaPath = Join-Path $PSScriptRoot 'schemas\scenario-v1.schema.json'
+$resultSchemaPath = Join-Path $PSScriptRoot 'schemas\evaluation-result-v1.schema.json'
+$verificationSchemaPath = Join-Path $repoRoot '.agentic\schemas\verification-result-v1.schema.json'
 
 if (-not (Test-Path -LiteralPath $ScenariosDir -PathType Container)) {
     [Console]::Error.WriteLine("ERROR: scenarios directory not found: $ScenariosDir")
     exit 1
 }
-if (-not (Test-Path -LiteralPath $contextValidator -PathType Leaf)) {
-    [Console]::Error.WriteLine("ERROR: context validator not found: $contextValidator")
-    exit 1
+foreach ($dep in @($taskValidator, $contextValidator, $scenarioSchemaPath, $resultSchemaPath, $verificationSchemaPath)) {
+    if (-not (Test-Path -LiteralPath $dep)) {
+        [Console]::Error.WriteLine("ERROR: required dependency missing: $dep")
+        exit 1
+    }
 }
 
 $profileRank = @{ prototype = 0; standard = 1; 'high-assurance' = 2 }
 $checkOrder = @(
-    'SCENARIO_SCHEMA_OK',
+    'SCENARIO_SCHEMA_VALID',
     'TASK_ARTIFACT_PRESENT',
+    'TASK_CONTRACT_VALID',
     'CONTEXT_CONTRACT_VALID',
+    'VERIFICATION_SCHEMA_VALID',
     'PROFILE_FLOOR_RESPECTED',
     'REQUIRED_MODULES_SELECTED',
     'FORBIDDEN_MODULES_AVOIDED',
     'APPROVALS_DECLARED',
     'EVIDENCE_PRESENT',
-    'VERIFICATION_PASSED',
     'FORBIDDEN_PATHS_AVOIDED',
     'FORBIDDEN_ACTIONS_ABSENT'
 )
 
-function Test-ScenarioStructure([hashtable]$doc) {
-    if ($null -eq $doc) { return $false }
-    if ($doc.schema_version -ne 1) { return $false }
-    if ($doc.id -isnot [string] -or $doc.id -cnotmatch '^[a-z0-9][a-z0-9-]*$') { return $false }
-    if ($doc.input -isnot [hashtable]) { return $false }
-    if ($doc.input.task -isnot [string]) { return $false }
-    if ($doc.input.changed_paths -isnot [array]) { return $false }
-    if ($doc.expected -isnot [hashtable]) { return $false }
-    if (-not $profileRank.ContainsKey([string]$doc.expected.minimum_profile)) { return $false }
-    if ($doc.expected.required_modules -isnot [array]) { return $false }
-    return $true
-}
+# ---------------------------------------------------------------------------
+# Minimal offline draft-07 subset interpreter (mirror of run-evals.sh).
+# Supports exactly the keywords used by the managed schemas: type, const,
+# enum, pattern, required, properties, additionalProperties:false, items,
+# minimum, minItems, maxItems, allOf, if/then.
+# ---------------------------------------------------------------------------
 
-function Get-TaskField([string]$taskText, [string]$field) {
-    if ($taskText -cmatch ("(?m)^{0}:\s*(\S+)" -f [regex]::Escape($field))) {
-        return $Matches[1]
-    }
-    return $null
-}
-
-function Get-SelectionViaValidator([string]$taskPath) {
-    # Nested pwsh -File invocation so the validator's `exit` cannot terminate
-    # this runner; mirrors how CI invokes validators.
-    $out = & pwsh -NoProfile -File $contextValidator -Format Json $taskPath 2>$null
-    $code = $LASTEXITCODE
-    if (-not $out) { return @{ Ok = $false; Profile = $null; Ids = @() } }
-    try {
-        $joined = ($out | Out-String).Trim()
-        # validate-context emits exactly one JSON document.
-        $firstLine = ($joined -split "`n")[0]
-        $doc = $firstLine | ConvertFrom-Json
-        $ids = @($doc.selected_modules | ForEach-Object { $_.id })
-        return @{ Ok = ($code -eq 0 -and $doc.result -eq 'VALID'); Profile = $doc.profile; Ids = $ids }
-    }
-    catch {
-        return @{ Ok = $false; Profile = $null; Ids = @() }
+function Test-JsonType($Value, [string]$Name) {
+    switch ($Name) {
+        'object' { return ($null -ne $Value -and $Value -is [System.Collections.IDictionary]) }
+        'array' { return ($null -ne $Value -and $Value -is [System.Collections.IEnumerable] -and $Value -isnot [string] -and $Value -isnot [System.Collections.IDictionary]) }
+        'string' { return $Value -is [string] }
+        'boolean' { return $Value -is [bool] }
+        'integer' { return ($Value -is [int] -or $Value -is [long]) -and $Value -isnot [bool] }
+        'number' { return ($Value -is [int] -or $Value -is [long] -or $Value -is [double] -or $Value -is [decimal]) -and $Value -isnot [bool] }
+        'null' { return $null -eq $Value }
+        default { return $true }
     }
 }
 
-function Test-GateDeclared([string[]]$lines, [string]$token) {
-    $wanted = ($token -replace '[-_]+', ' ').ToLowerInvariant()
-    foreach ($line in $lines) {
+function Test-JsonEqual($A, $B) {
+    if ($null -eq $A -or $null -eq $B) { return ($null -eq $A -and $null -eq $B) }
+    # JSON numbers deserialize as Int64 while constructed docs use Int32;
+    # compare numerics across widths, everything else strictly.
+    $aNum = ($A -is [int] -or $A -is [long] -or $A -is [double] -or $A -is [decimal]) -and ($A -isnot [bool])
+    $bNum = ($B -is [int] -or $B -is [long] -or $B -is [double] -or $B -is [decimal]) -and ($B -isnot [bool])
+    if ($aNum -and $bNum) { return ([double]$A -eq [double]$B) }
+    return $A.Equals($B)
+}
+
+function Test-JsonHasKey($Dict, [string]$Key) {
+    if ($Dict -is [System.Collections.Specialized.OrderedDictionary]) { return $Dict.Contains($Key) }
+    return $Dict.ContainsKey($Key)
+}
+
+function Get-JsonSchemaErrors($Instance, $Hashtag, [string]$Path = '$') {
+    $errors = @()
+    if ($null -eq $Hashtag -or $Hashtag -isnot [System.Collections.IDictionary]) { return $errors }
+
+    if ($Hashtag.Contains('type')) {
+        $names = @($Hashtag['type'])
+        $ok = $false
+        foreach ($n in $names) { if (Test-JsonType $Instance $n) { $ok = $true; break } }
+        if (-not $ok) {
+            $errors += ("{0}: expected type {1}" -f $Path, ($names -join '/'))
+            return $errors
+        }
+    }
+
+    if ($Hashtag.Contains('const') -and -not (Test-JsonEqual $Instance $Hashtag['const'])) {
+        $errors += ("{0}: must equal {1}" -f $Path, ($Hashtag['const'] | ConvertTo-Json -Compress))
+    }
+
+    if ($Hashtag.Contains('enum')) {
+        $found = $false
+        foreach ($opt in @($Hashtag['enum'])) { if (Test-JsonEqual $Instance $opt) { $found = $true; break } }
+        if (-not $found) {
+            $errors += ("{0}: value not in enum" -f $Path)
+        }
+    }
+
+    if ($Hashtag.Contains('pattern') -and $Instance -is [string]) {
+        if ($Instance -cnotmatch $Hashtag['pattern']) {
+            $errors += ("{0}: does not match pattern {1}" -f $Path, $Hashtag['pattern'])
+        }
+    }
+
+    if (Test-JsonType $Instance 'number') {
+        if ($Hashtag.Contains('minimum') -and [double]$Instance -lt [double]$Hashtag['minimum']) {
+            $errors += ("{0}: below minimum {1}" -f $Path, $Hashtag['minimum'])
+        }
+    }
+
+    if (Test-JsonType $Instance 'array') {
+        $list = @($Instance)
+        if ($Hashtag.Contains('minItems') -and $list.Count -lt [int]$Hashtag['minItems']) {
+            $errors += ("{0}: fewer than {1} items" -f $Path, $Hashtag['minItems'])
+        }
+        if ($Hashtag.Contains('maxItems') -and $list.Count -gt [int]$Hashtag['maxItems']) {
+            $errors += ("{0}: more than {1} items" -f $Path, $Hashtag['maxItems'])
+        }
+        if ($Hashtag.Contains('items')) {
+            for ($i = 0; $i -lt $list.Count; $i++) {
+                $errors += @(Get-JsonSchemaErrors $list[$i] $Hashtag['items'] ('{0}[{1}]' -f $Path, $i))
+            }
+        }
+    }
+
+    if (Test-JsonType $Instance 'object') {
+        if ($Hashtag.Contains('required')) {
+            foreach ($prop in @($Hashtag['required'])) {
+                if (-not (Test-JsonHasKey $Instance $prop)) {
+                    $errors += ("{0}: missing required property '{1}'" -f $Path, $prop)
+                }
+            }
+        }
+        $props = $Hashtag['properties']
+        foreach ($key in @($Instance.Keys)) {
+            if ($null -ne $props -and (Test-JsonHasKey $props $key)) {
+                $errors += @(Get-JsonSchemaErrors $Instance[$key] $props[$key] ("{0}.{1}" -f $Path, $key))
+            }
+            elseif ($Hashtag.Contains('additionalProperties') -and $Hashtag['additionalProperties'] -eq $false) {
+                $errors += ("{0}: unexpected property '{1}'" -f $Path, $key)
+            }
+        }
+    }
+
+    if ($Hashtag.Contains('allOf')) {
+        foreach ($sub in @($Hashtag['allOf'])) {
+            $errors += @(Get-JsonSchemaErrors $Instance $sub $Path)
+        }
+    }
+
+    if ($Hashtag.Contains('if')) {
+        if (@(Get-JsonSchemaErrors $Instance $Hashtag['if'] $Path).Count -eq 0) {
+            if ($Hashtag.Contains('then')) {
+                $errors += @(Get-JsonSchemaErrors $Instance $Hashtag['then'] $Path)
+            }
+        }
+    }
+
+    return $errors
+}
+
+function ConvertTo-AuthoritativeLines([string]$TaskText) {
+    # Task lines minus fenced code blocks, HTML comments, and blockquote
+    # lines — mirrors the production validators' authoritative-content scan.
+    $out = [System.Collections.Generic.List[string]]::new()
+    $inFence = $false
+    $inComment = $false
+    foreach ($raw in ($TaskText -split "`r?`n")) {
+        $stripped = $raw.Trim()
+        if ($inFence) {
+            if ($stripped.StartsWith('```', [System.StringComparison]::Ordinal)) { $inFence = $false }
+            continue
+        }
+        if ($stripped.StartsWith('```', [System.StringComparison]::Ordinal)) { $inFence = $true; continue }
+        if ($inComment) {
+            if ($stripped.Contains('-->')) { $inComment = $false }
+            continue
+        }
+        if ($stripped.Contains('<!--')) {
+            if (-not $stripped.Contains('-->')) { $inComment = $true }
+            continue
+        }
+        if ($stripped.StartsWith('>', [System.StringComparison]::Ordinal)) { continue }
+        $out.Add($raw.TrimEnd("`r"))
+    }
+    return $out.ToArray()
+}
+
+function Test-GateDeclared([string[]]$Lines, [string]$Token) {
+    $wanted = ($Token -replace '[-_]+', ' ').ToLowerInvariant()
+    foreach ($line in $Lines) {
         if ($line -cmatch '^\s*[-*]\s*\[x\]\s*AG-\d+:') {
             $candidate = ($line -replace '[-_]+', ' ').ToLowerInvariant()
             if ($candidate.Contains($wanted)) { return $true }
@@ -116,20 +245,20 @@ function Test-GateDeclared([string[]]$lines, [string]$token) {
     return $false
 }
 
-function Test-EvidencePresent([string[]]$lines, [string]$token) {
-    foreach ($line in $lines) {
+function Test-EvidencePresent([string[]]$Lines, [string]$Token) {
+    foreach ($line in $Lines) {
         $stripped = $line.Trim()
         if ($stripped.StartsWith('|') -and ([regex]::Matches($stripped, '\|')).Count -ge 4) {
-            if ($stripped.ToLowerInvariant().Contains($token.ToLowerInvariant())) { return $true }
+            if ($stripped.ToLowerInvariant().Contains($Token.ToLowerInvariant())) { return $true }
         }
     }
     return $false
 }
 
-function Test-ForbiddenPath([array]$changedPaths, [array]$forbiddenPaths) {
-    foreach ($changed in $changedPaths) {
+function Test-ForbiddenPath([array]$ChangedPaths, [array]$ForbiddenPaths) {
+    foreach ($changed in $ChangedPaths) {
         $norm = ($changed -replace '\\', '/').TrimStart('.', '/').TrimStart('/')
-        foreach ($fp in $forbiddenPaths) {
+        foreach ($fp in $ForbiddenPaths) {
             $f = ($fp -replace '\\', '/').TrimStart('.', '/').TrimStart('/')
             if ($norm -eq $f -or $norm.EndsWith('/' + $f)) { return $true }
         }
@@ -137,7 +266,57 @@ function Test-ForbiddenPath([array]$changedPaths, [array]$forbiddenPaths) {
     return $false
 }
 
-function Invoke-Evaluation([string]$scenarioPath) {
+function Invoke-TaskValidatorContract([string]$TaskPath) {
+    $out = & pwsh -NoProfile -File $taskValidator -Handoff $TaskPath 2>&1
+    $code = $LASTEXITCODE
+    if ($code -eq 0) { return @{ Ok = $true; Detail = '' } }
+    $first = "$(@($out) | Select-Object -First 1)".Trim()
+    if (-not $first) { $first = "validate-task -Handoff rejected the artifact (exit $code)" }
+    return @{ Ok = $false; Detail = $first }
+}
+
+function Invoke-ContextValidatorContract([string]$TaskPath) {
+    $out = & pwsh -NoProfile -File $contextValidator -Handoff -Format Json $TaskPath 2>$null
+    $code = $LASTEXITCODE
+    $profile = $null
+    $ids = @()
+    try {
+        $joined = ($out | Out-String).Trim()
+        $firstLine = ($joined -split "`n")[0]
+        $doc = $firstLine | ConvertFrom-Json -AsHashtable
+        $profile = $doc['profile']
+        $ids = @($doc['selected_modules'] | ForEach-Object { $_['id'] })
+    }
+    catch { }
+    return @{ Ok = ($code -eq 0); Profile = $profile; Ids = $ids }
+}
+
+$summaryFields = @('checks_defined', 'checks_run', 'required_run',
+    'passed', 'failed', 'optional_failed', 'blocked', 'optional_skipped')
+
+function Get-VerificationMismatches([hashtable]$VDoc) {
+    # Summary counts must be derivable from the actual checks array.
+    $summary = $VDoc['summary']
+    $checks = @($VDoc['checks'])
+    $executed = @($checks | Where-Object { $_['status'] -in @('PASS', 'FAIL') })
+    $derived = @{
+        checks_defined   = $checks.Count
+        checks_run       = $executed.Count
+        required_run     = @($executed | Where-Object { $_['requirement'] -eq 'required' }).Count
+        passed           = @($checks | Where-Object { $_['status'] -eq 'PASS' }).Count
+        failed           = @($checks | Where-Object { $_['requirement'] -eq 'required' -and $_['status'] -eq 'FAIL' }).Count
+        optional_failed  = @($checks | Where-Object { $_['requirement'] -eq 'optional' -and $_['status'] -eq 'FAIL' }).Count
+        blocked          = @($checks | Where-Object { $_['status'] -eq 'BLOCKED' }).Count
+        optional_skipped = @($checks | Where-Object { $_['status'] -eq 'SKIPPED_OPTIONAL' }).Count
+    }
+    $mismatched = @()
+    foreach ($field in $summaryFields) {
+        if (-not (Test-JsonEqual $summary[$field] $derived[$field])) { $mismatched += $field }
+    }
+    return $mismatched
+}
+
+function Invoke-Evaluation([string]$ScenarioPath) {
     $checks = [ordered]@{}
     $details = @{}
 
@@ -146,44 +325,41 @@ function Invoke-Evaluation([string]$scenarioPath) {
         if ($Detail) { $details[$Id] = $Detail }
     }
 
-    $sid = Split-Path -Leaf (Split-Path -Parent $scenarioPath)
-    $rawOk = $false
+    $sid = Split-Path -Leaf (Split-Path -Parent $ScenarioPath)
     $scenario = $null
+    $schemaOk = $false
     try {
-        $scenario = Get-Content -Raw -LiteralPath $scenarioPath | ConvertFrom-Json -AsHashtable
-        $rawOk = $true
+        $scenario = Get-Content -Raw -LiteralPath $ScenarioPath | ConvertFrom-Json -AsHashtable
+        $sschema = Get-Content -Raw -LiteralPath $scenarioSchemaPath | ConvertFrom-Json -AsHashtable
+        $errs = @(Get-JsonSchemaErrors $scenario $sschema)
+        $schemaOk = ($errs.Count -eq 0)
+        Record 'SCENARIO_SCHEMA_VALID' $schemaOk (($schemaOk) ? '' : ('scenario.json violates scenario-v1: ' + ($errs[0..([Math]::Min(2, $errs.Count - 1))] -join '; ')))
     }
     catch {
-        Record 'SCENARIO_SCHEMA_OK' $false "unreadable or malformed scenario.json"
+        Record 'SCENARIO_SCHEMA_VALID' $false ("unreadable or malformed scenario.json: " + $_.Exception.Message)
     }
 
-    $schemaOk = $false
-    if ($rawOk) {
-        $schemaOk = Test-ScenarioStructure $scenario
-        if (-not $schemaOk) { Record 'SCENARIO_SCHEMA_OK' $false 'scenario does not satisfy scenario-v1 structure' }
-        else { Record 'SCENARIO_SCHEMA_OK' $true }
-    }
-    if ($schemaOk) { $sid = $scenario.id }
+    if ($schemaOk) { $sid = $scenario['id'] }
 
-    $artifactsDir = Join-Path (Split-Path -Parent $scenarioPath) 'artifacts'
+    $artifactsDir = Join-Path (Split-Path -Parent $ScenarioPath) 'artifacts'
     $taskPath = Join-Path $artifactsDir 'task.md'
 
-    $expected = if ($schemaOk) { $scenario.expected } else { $null }
-    $forbidden = if ($schemaOk -and $scenario.ContainsKey('forbidden')) { $scenario.forbidden } else { @{} }
-    $requiredModules = if ($expected) { @($expected.required_modules) } else { @() }
-    $requiredGates = if ($expected) { @($expected.required_approval_gates) } else { @() }
-    $requiredEvidence = if ($expected) { @($expected.required_evidence) } else { @() }
+    $expected = if ($null -ne $scenario -and $scenario.ContainsKey('expected')) { $scenario['expected'] } else { @{} }
+    $forbidden = if ($null -ne $scenario -and $scenario.ContainsKey('forbidden')) { $scenario['forbidden'] } else { @{} }
+    $requiredModules = if ($schemaOk -and $expected.ContainsKey('required_modules')) { @($expected['required_modules']) } else { @() }
+    $requiredGates = if ($schemaOk -and $expected.ContainsKey('required_approval_gates')) { @($expected['required_approval_gates']) } else { @() }
+    $requiredEvidence = if ($schemaOk -and $expected.ContainsKey('required_evidence')) { @($expected['required_evidence']) } else { @() }
 
     if ($schemaOk -and (Test-Path -LiteralPath $taskPath -PathType Leaf) -and ((Get-Item -LiteralPath $taskPath).Length -gt 0)) {
         Record 'TASK_ARTIFACT_PRESENT' $true
-        $taskText = Get-Content -Raw -LiteralPath $taskPath
-        $taskLines = @(Get-Content -LiteralPath $taskPath)
 
-        $selection = Get-SelectionViaValidator $taskPath
-        Record 'CONTEXT_CONTRACT_VALID' $selection.Ok '' 
-        if (-not $selection.Ok) { $details['CONTEXT_CONTRACT_VALID'] = 'validate-context rejected the artifact task file' }
+        $contract = Invoke-TaskValidatorContract $taskPath
+        Record 'TASK_CONTRACT_VALID' $contract.Ok $contract.Detail
 
-        $minProfile = [string]$expected.minimum_profile
+        $selection = Invoke-ContextValidatorContract $taskPath
+        Record 'CONTEXT_CONTRACT_VALID' $selection.Ok (($selection.Ok) ? '' : 'validate-context -Handoff rejected the artifact task file')
+
+        $minProfile = [string]$expected['minimum_profile']
         $profRank = if ($selection.Profile -and $profileRank.ContainsKey([string]$selection.Profile)) { $profileRank[[string]$selection.Profile] } else { -1 }
         $needRank = $profileRank[$minProfile]
         Record 'PROFILE_FLOOR_RESPECTED' ($profRank -ge $needRank) ("task profile '{0}' vs minimum '{1}'" -f $selection.Profile, $minProfile)
@@ -191,36 +367,51 @@ function Invoke-Evaluation([string]$scenarioPath) {
         $missing = @($requiredModules | Where-Object { $selection.Ids -notcontains $_ })
         Record 'REQUIRED_MODULES_SELECTED' ($missing.Count -eq 0) (($missing.Count -gt 0) ? ("missing: " + ($missing -join ', ')) : '')
 
-        $forbiddenModules = if ($forbidden.ContainsKey('modules')) { @($forbidden.modules) } else { @() }
+        $forbiddenModules = if ($forbidden.ContainsKey('modules')) { @($forbidden['modules']) } else { @() }
         $used = @($selection.Ids | Where-Object { $forbiddenModules -contains $_ })
         Record 'FORBIDDEN_MODULES_AVOIDED' ($used.Count -eq 0) (($used.Count -gt 0) ? ("forbidden modules selected: " + ($used -join ', ')) : '')
 
-        $gateMissing = @($requiredGates | Where-Object { -not (Test-GateDeclared $taskLines $_) })
+        $taskText = Get-Content -Raw -LiteralPath $taskPath
+        $authLines = ConvertTo-AuthoritativeLines $taskText
+
+        $gateMissing = @($requiredGates | Where-Object { -not (Test-GateDeclared $authLines $_) })
         Record 'APPROVALS_DECLARED' ($gateMissing.Count -eq 0) (($gateMissing.Count -gt 0) ? ("no approval record for: " + ($gateMissing -join ', ')) : '')
 
-        $evMissing = @($requiredEvidence | Where-Object { -not (Test-EvidencePresent $taskLines $_) })
+        $evMissing = @($requiredEvidence | Where-Object { -not (Test-EvidencePresent $authLines $_) })
         Record 'EVIDENCE_PRESENT' ($evMissing.Count -eq 0) (($evMissing.Count -gt 0) ? ("evidence table lacks: " + ($evMissing -join ', ')) : '')
 
         $verificationPath = Join-Path $artifactsDir 'verification-result.json'
         $verOk = $false
+        $verDetail = 'artifact verification-result.json must be a schema-valid PASS verification_result'
         if (Test-Path -LiteralPath $verificationPath -PathType Leaf) {
             try {
                 $vdoc = Get-Content -Raw -LiteralPath $verificationPath | ConvertFrom-Json -AsHashtable
-                $verOk = ($vdoc.kind -eq 'verification_result' -and $vdoc.result -eq 'PASS' -and $vdoc.exit_code -eq 0)
+                $vschema = Get-Content -Raw -LiteralPath $verificationSchemaPath | ConvertFrom-Json -AsHashtable
+                $verrs = @(Get-JsonSchemaErrors $vdoc $vschema)
+                $mismatched = @(Get-VerificationMismatches $vdoc)
+                if ($verrs.Count -gt 0) {
+                    $verDetail = 'violates verification-result-v1: ' + ($verrs[0..([Math]::Min(2, $verrs.Count - 1))] -join '; ')
+                }
+                elseif ($mismatched.Count -gt 0) {
+                    $verDetail = 'summary disagrees with checks array: ' + ($mismatched -join ', ')
+                }
+                elseif ([string]$vdoc['result'] -ne 'PASS') {
+                    $verDetail = "verification result is '$($vdoc['result'])', not PASS"
+                }
+                else { $verOk = $true }
             }
-            catch { $verOk = $false }
+            catch { $verDetail = "unreadable verification-result.json: $($_.Exception.Message)" }
         }
-        Record 'VERIFICATION_PASSED' $verOk ''
-        if (-not $verOk) { $details['VERIFICATION_PASSED'] = 'artifact verification-result.json must be a PASS verification_result' }
+        Record 'VERIFICATION_SCHEMA_VALID' $verOk $verDetail
 
-        $changed = @($scenario.input.changed_paths)
-        $forbiddenPaths = if ($forbidden.ContainsKey('paths')) { @($forbidden.paths) } else { @() }
+        $changed = if ($schemaOk) { @($scenario['input']['changed_paths']) } else { @() }
+        $forbiddenPaths = if ($forbidden.ContainsKey('paths')) { @($forbidden['paths']) } else { @() }
         $badPaths = Test-ForbiddenPath $changed $forbiddenPaths
-        Record 'FORBIDDEN_PATHS_AVOIDED' (-not $badPaths) ($badPaths ? 'a changed path matches a forbidden path' : '')
+        Record 'FORBIDDEN_PATHS_AVOIDED' (-not $badPaths) (($badPaths) ? 'a changed path matches a forbidden path' : '')
 
         $tokens = @()
         if ($forbidden.ContainsKey('actions')) {
-            foreach ($a in @($forbidden.actions)) { $tokens += $a.ToLowerInvariant() }
+            foreach ($a in @($forbidden['actions'])) { $tokens += $a.ToLowerInvariant() }
         }
         $hit = $null
         if ($tokens.Count -gt 0) {
@@ -248,33 +439,45 @@ function Invoke-Evaluation([string]$scenarioPath) {
     }
     $total = $ordered.Count
     $passedCount = @($ordered | Where-Object { $_.passed }).Count
-    $verdict = if ($total -gt 0 -and $passedCount -eq $total) { 'PASS' } else { 'FAIL' }
+    $observed = if ($total -gt 0 -and $passedCount -eq $total) { 'PASS' } else { 'FAIL' }
 
     $expectation = 'PASS'
-    if ($rawOk -and $scenario.ContainsKey('fixture_expected_result')) { $expectation = [string]$scenario.fixture_expected_result }
+    if ($null -ne $scenario -and $scenario.ContainsKey('fixture_expected_result')) { $expectation = [string]$scenario['fixture_expected_result'] }
 
+    $matched = $observed -eq $expectation
     $diagnostics = @()
-    $matched = $verdict -eq $expectation
     if (-not $matched) {
         $diagnostics += [ordered]@{
             code    = 'FIXTURE_EXPECTATION_MISMATCH'
-            message = "classification $verdict does not match fixture_expected_result $expectation"
+            message = "observed $observed does not match fixture_expected_result $expectation"
         }
     }
 
     $doc = [ordered]@{
-        schema_version         = 1
-        protocol_version       = '1.5.0'
-        kind                   = 'behavioral_evaluation_result'
-        mode                   = 'offline-fixture'
-        result                 = $verdict
-        exit_code              = if ($matched) { 0 } else { 1 }
-        scenario_id            = $sid
-        fixture_expected_result = $expectation
-        summary                = [ordered]@{ total = $total; passed = $passedCount; failed = $total - $passedCount }
-        checks                 = $ordered
-        diagnostics            = $diagnostics
+        schema_version       = 1
+        protocol_version     = '1.5.0'
+        kind                 = 'behavioral_evaluation_result'
+        mode                 = 'offline-fixture'
+        observed_result      = $observed
+        expected_result      = $expectation
+        expectation_matched  = [bool]$matched
+        result               = if ($matched) { 'PASS' } else { 'FAIL' }
+        exit_code            = if ($matched) { 0 } else { 1 }
+        scenario_id          = $sid
+        summary              = [ordered]@{ total = $total; passed = $passedCount; failed = $total - $passedCount }
+        checks               = $ordered
+        diagnostics          = $diagnostics
     }
+
+    # Every emitted document must satisfy its own managed schema before the
+    # runner may print it or report success (#review blocker 4).
+    $resultSchema = Get-Content -Raw -LiteralPath $resultSchemaPath | ConvertFrom-Json -AsHashtable
+    $selfErrs = @(Get-JsonSchemaErrors $doc $resultSchema)
+    if ($selfErrs.Count -gt 0) {
+        [Console]::Error.WriteLine(('ERROR: emitted document violates evaluation-result-v1.schema.json for {0}: {1}' -f $sid, ($selfErrs[0..([Math]::Min(4, $selfErrs.Count - 1))] -join '; ')))
+        exit 1
+    }
+
     return @{ Doc = $doc; Matched = $matched }
 }
 
@@ -289,10 +492,9 @@ foreach ($dir in (Get-ChildItem -LiteralPath $ScenariosDir -Directory | Sort-Obj
         [Console]::Out.WriteLine(($outcome.Doc | ConvertTo-Json -Compress -Depth 6))
     }
     else {
-        $status = if ($outcome.Matched) { 'harness-ok' } else { 'HARNESS-FAIL' }
         $failedChecks = @($outcome.Doc.checks | Where-Object { -not $_.passed } | ForEach-Object { $_.id })
         $suffix = if ($failedChecks.Count -gt 0) { ' failed=' + ($failedChecks -join ',') } else { '' }
-        $line = '{0,-28} {1,-4} expectation={2,-4} {3}{4}' -f $outcome.Doc.scenario_id, $outcome.Doc.result, $outcome.Doc.fixture_expected_result, $status, $suffix
+        $line = '{0,-28} observed={1,-4} expected={2,-4} harness={3,-4}{4}' -f $outcome.Doc.scenario_id, $outcome.Doc.observed_result, $outcome.Doc.expected_result, $outcome.Doc.result, $suffix
         [Console]::Out.WriteLine($line)
     }
 }
@@ -305,7 +507,7 @@ if ($results.Count -eq 0) {
 $expectedOk = @($results | Where-Object { $_.Matched }).Count
 if ($Format -ne 'Json') {
     [Console]::Out.WriteLine('')
-    [Console]::Out.WriteLine(('evals: {0}/{1} scenarios classified as expected' -f $expectedOk, $results.Count))
+    [Console]::Out.WriteLine(('evals: {0}/{1} scenarios evaluated correctly' -f $expectedOk, $results.Count))
 }
 
 exit $(if ($expectedOk -eq $results.Count) { 0 } else { 1 })

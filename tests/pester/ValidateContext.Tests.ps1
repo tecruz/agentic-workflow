@@ -136,19 +136,72 @@ Describe 'validate-context cross-language semantic parity' {
             Set-ItResult -Skipped -Because 'bash (git-bash/WSL) is not available'
             return
         }
+
+        # Batched execution: exactly one child process per language covers the
+        # whole corpus. Per-fixture spawns cost minutes under CI/job hosts.
+        # The validators emit through [Console]::Out/Error, so the PowerShell
+        # leg must redirect those streams around each in-process call — a
+        # plain 2>&1 merge cannot see them — and read the script's exit code
+        # from $LASTEXITCODE afterwards ('exit' inside an invoked script file
+        # sets it without terminating this child).
+        $env:VCTX_PARITY_VP = $validatePs
+        $env:VCTX_PARITY_FD = $fixturesDir
+        $env:VCTX_PARITY_VSH = $validateSh
+
+        $psRows = @(& pwsh -NoProfile -Command '
+            Get-ChildItem -LiteralPath $env:VCTX_PARITY_FD -Filter *.md |
+                Sort-Object Name |
+                ForEach-Object {
+                    $swOut = [System.IO.StringWriter]::new()
+                    $swErr = [System.IO.StringWriter]::new()
+                    $oldOut = [Console]::Out
+                    $oldErr = [Console]::Error
+                    [Console]::SetOut($swOut)
+                    [Console]::SetError($swErr)
+                    try { & $env:VCTX_PARITY_VP $_.FullName }
+                    finally {
+                        [Console]::SetOut($oldOut)
+                        [Console]::SetError($oldErr)
+                    }
+                    $code = $LASTEXITCODE
+                    $combined = ($swOut.ToString() + $swErr.ToString()) -replace "`r", ""
+                    $first = ($combined -split "`n")[0]
+                    "{0}`t{1}`t{2}" -f $_.Name, $code, $first
+                }
+        ')
+
+        $posixDir = ConvertTo-PosixPath $fixturesDir
+        $shRows = @(& $script:BashCmd.Source -c '
+            for f in "$1"/*.md; do
+                [ -e "$f" ] || continue
+                out="$(bash "$VCTX_PARITY_VSH" "$f" 2>&1)"
+                code=$?
+                first="$(printf "%s" "$out" | head -n 1)"
+                printf "%s\t%s\t%s\n" "$(basename "$f")" "$code" "$first"
+            done
+        ' _ "$posixDir")
+
+        Remove-Item Env:VCTX_PARITY_VP, Env:VCTX_PARITY_FD, Env:VCTX_PARITY_VSH -ErrorAction SilentlyContinue
+
+        $psMap = @{}
+        foreach ($row in $psRows) {
+            if ("$row" -notmatch '\S') { continue }
+            $parts = "$row" -split "`t", 3
+            $psMap[$parts[0]] = @{ Code = [int]$parts[1]; First = $parts[2] }
+        }
         $mismatches = @()
-        foreach ($fixture in (Get-ChildItem -LiteralPath $fixturesDir -Filter '*.md' | Sort-Object Name)) {
-            $psOut = & pwsh -NoProfile -File $validatePs $fixture.FullName 2>&1
-            $psCode = $LASTEXITCODE
-            $psFirst = "$(@($psOut) | Select-Object -First 1)"
-
-            $posix = ConvertTo-PosixPath $fixture.FullName
-            $shOut = & $script:BashCmd.Source $validateSh $posix 2>&1
-            $shCode = $LASTEXITCODE
-            $shFirst = "$(@($shOut) | Select-Object -First 1)"
-
-            if ($psCode -ne $shCode -or $psFirst -cne $shFirst) {
-                $mismatches += "{0}: sh={1}/{2} ps={3}/{4}" -f $fixture.Name, $shCode, $shFirst, $psCode, $psFirst
+        foreach ($row in $shRows) {
+            if ("$row" -notmatch '\S') { continue }
+            $parts = "$row" -split "`t", 3
+            $name = $parts[0]
+            $shCode = [int]$parts[1]
+            $shFirst = $parts[2]
+            if (-not $psMap.ContainsKey($name)) {
+                $mismatches += "${name}: missing from the PowerShell run"
+                continue
+            }
+            if ($psMap[$name].Code -ne $shCode -or $psMap[$name].First -cne $shFirst) {
+                $mismatches += "{0}: sh={1}/{2} ps={3}/{4}" -f $name, $shCode, $shFirst, $psMap[$name].Code, $psMap[$name].First
             }
         }
         if ($mismatches.Count -gt 0) {
@@ -156,3 +209,143 @@ Describe 'validate-context cross-language semantic parity' {
         }
     }
 }
+
+
+Describe 'validate-context review-blocker regressions' {
+
+    BeforeEach {
+        $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+        $script:vctx = Join-Path $repoRoot '.agentic' 'scripts' 'validate-context.ps1'
+        $script:vhand = Join-Path $repoRoot '.agentic' 'scripts' 'validate-handoff.ps1'
+        $fixtures = Join-Path $repoRoot 'tests' 'fixtures' 'context-tasks'
+
+        function Invoke-Ctx([string]$fixture, [string]$registry = $null, [switch]$Json) {
+            $old = $env:AGENTIC_CONTEXT_REGISTRY
+            if ($registry) { $env:AGENTIC_CONTEXT_REGISTRY = $registry }
+            try {
+                $call = @{ TaskFile = (Join-Path $fixtures $fixture) }
+                if ($Json) { $call.Format = 'Json' }
+                $out = & pwsh -NoProfile -File $script:vctx @call 2>&1
+                return @{ Code = $LASTEXITCODE; Output = ($out | Out-String).Trim() }
+            }
+            finally {
+                if ($null -eq $old) { Remove-Item Env:AGENTIC_CONTEXT_REGISTRY -ErrorAction SilentlyContinue }
+                else { $env:AGENTIC_CONTEXT_REGISTRY = $old }
+            }
+        }
+
+        function New-SandboxModule([string]$registry, [string]$dirname, [string]$id, [string]$version, [string]$minProfile) {
+            $dir = Join-Path $registry $dirname
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            $lines = @(
+                "# Module: $dirname", '', '## ID', '', $id, '',
+                '## Version', '', $version, '',
+                '## Minimum risk profile', ''
+            )
+            if ($minProfile) { $lines += @($minProfile, '') }
+            $lines += @(
+                '## Load when', '', '- trigger line', '',
+                '## Required context', '', '- context line', '',
+                '## Approval gates', '', '- gate line', '',
+                '## Required evidence', '', '- evidence line', '',
+                '## Prohibited shortcuts', '', '- shortcut line', ''
+            )
+            Set-Content -LiteralPath (Join-Path $dir 'MODULE.md') -Value $lines
+        }
+
+        function New-TempRegistry {
+            $sb = Join-Path ([System.IO.Path]::GetTempPath()) ("ctxreg-" + [guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path $sb -Force | Out-Null
+            return $sb
+        }
+    }
+
+    It 'INVALID (1) for fenced/commented/quoted/unclosed-fence content' -ForEach @(
+        @{ f = 'context-fenced-selection.md'; c = 1 },
+        @{ f = 'context-fenced-none.md'; c = 1 },
+        @{ f = 'context-unclosed-fence.md'; c = 1 },
+        @{ f = 'context-commented-selection.md'; c = 1 },
+        @{ f = 'context-blockquote-selection.md'; c = 1 }
+    ) {
+        Invoke-Ctx $_.f | Select-Object -ExpandProperty Code | Should -Be $_.c
+    }
+
+    It 'a fenced Profile declaration cannot satisfy the profile floor' {
+        # Message text is pinned by the Bash suite; the classification alone
+        # proves the fenced high-assurance declaration was ignored.
+        Invoke-Ctx 'context-fenced-profile-status.md' | Select-Object -ExpandProperty Code | Should -Be 1
+    }
+
+    It 'BLOCKED (2) for registry identity and metadata violations' -ForEach @(
+        @{ n = 'good-name'; i = 'other-name'; v = '1'; m = 'high-assurance' }  # ID/dir mismatch
+        @{ n = 'evil'; i = '../other-module'; v = '1'; m = 'standard' }         # path-like ID
+        @{ n = 'no-id'; i = ''; v = '1'; m = 'standard' }                       # missing ID
+        @{ n = 'odd-min'; i = 'some-id'; v = '1'; m = 'critical' }              # unknown min profile
+        @{ n = 'no-min'; i = 'some-id'; v = '1'; m = '' }                       # missing min profile
+    ) {
+        $sb = New-TempRegistry
+        try {
+            New-SandboxModule $sb $_.n $_.i $_.v $_.m
+            Invoke-Ctx 'context-valid-single.md' $sb | Select-Object -ExpandProperty Code | Should -Be 2
+        }
+        finally { Remove-Item -Recurse -Force $sb -ErrorAction SilentlyContinue }
+    }
+
+    It 'BLOCKED (2) for a duplicated declared ID across directories' {
+        $sb = New-TempRegistry
+        try {
+            New-SandboxModule $sb 'module-a' 'dup-id' '1' 'standard'
+            New-SandboxModule $sb 'module-b' 'dup-id' '1' 'standard'
+            Invoke-Ctx 'context-valid-single.md' $sb | Select-Object -ExpandProperty Code | Should -Be 2
+        }
+        finally { Remove-Item -Recurse -Force $sb -ErrorAction SilentlyContinue }
+    }
+
+    It 'BLOCKED (2) for a duplicated heading and for an empty doc section' {
+        $sb = New-TempRegistry
+        try {
+            New-SandboxModule $sb 'dup-head' 'some-id' '1' 'standard'
+            Add-Content -LiteralPath (Join-Path $sb 'dup-head\MODULE.md') -Value "`n## Version`n`n2`n"
+            Invoke-Ctx 'context-valid-single.md' $sb | Select-Object -ExpandProperty Code | Should -Be 2
+
+            $sb2 = New-TempRegistry
+            New-SandboxModule $sb2 'empty-docs' 'some-id' '1' 'standard'
+            $mf = Join-Path $sb2 'empty-docs\MODULE.md'
+            (Get-Content -LiteralPath $mf) | Where-Object { $_ -ne '- trigger line' } | Set-Content -LiteralPath $mf
+            Invoke-Ctx 'context-valid-single.md' $sb2 | Select-Object -ExpandProperty Code | Should -Be 2
+            Remove-Item -Recurse -Force $sb2 -ErrorAction SilentlyContinue
+        }
+        finally { Remove-Item -Recurse -Force $sb -ErrorAction SilentlyContinue }
+    }
+
+    It 'JSON redacts absolute outside-project paths in the full document' {
+        # Nested invocation: [Console]::Out bypasses in-process stream capture.
+        $outside = Join-Path ([System.IO.Path]::GetTempPath()) 'ctx-redact-probe.md'
+        Set-Content -LiteralPath $outside -Value "# TASK-X`n`n## Context modules`n`n- None selected`n"
+        try {
+            $raw = & pwsh -NoProfile -File $script:vctx -Format Json $outside 2>$null
+            $LASTEXITCODE | Should -Be 0
+            $json = "$raw"
+            $doc = $json | ConvertFrom-Json
+            $doc.task_file | Should -Be 'ctx-redact-probe.md'
+            $json | Should -Not -Match 'Temp|Users'
+        }
+        finally { Remove-Item -LiteralPath $outside -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'composite handoff gate accepts a fully valid completed HA task' {
+        & pwsh -NoProfile -File $script:vhand (Join-Path $fixtures 'context-full-contract-ha.md') *> $null
+        $LASTEXITCODE | Should -Be 0
+    }
+
+    It 'composite handoff gate propagates INVALID from the context leg' {
+        & pwsh -NoProfile -File $script:vhand (Join-Path $fixtures 'context-unknown-module.md') *> $null
+        $LASTEXITCODE | Should -Be 1
+    }
+
+    It 'composite handoff gate propagates BLOCKED from the task leg' {
+        & pwsh -NoProfile -File $script:vhand (Join-Path $fixtures 'context-valid-bare-none.md') *> $null
+        $LASTEXITCODE | Should -Be 2
+    }
+}
+

@@ -46,9 +46,10 @@ classify_with_registry() {  # classify_with_registry <registry-dir> <fixture>
 }
 
 @test "MODULE_UNKNOWN diagnostic names the offending module" {
-    run bash -c "bash '$VALIDATE' '$FIXTURES/context-unknown-module.md' 2>&1"
+    classify context-unknown-module.md
     [ "$status" -eq 1 ]
-    [[ "$output" == *"mystery-module'* is not in the managed registry"* ]]
+    out="$(bash "$VALIDATE" "$FIXTURES/context-unknown-module.md" 2>&1)" || true
+    printf '%s' "$out" | grep -q "'mystery-module' is not in the managed registry"
 }
 
 @test "INVALID (1) for a duplicate selection" {
@@ -152,9 +153,241 @@ assert doc["diagnostics"][0]["code"] == "MODULE_UNKNOWN", doc["diagnostics"][0]
 @test "INVALID (1) against a registry that lacks the selected module" {
     sandbox="$(mktemp -d)"
     mkdir -p "$sandbox/some-other-module"
-    printf '# Module: other\n\n## ID\n\nsome-other-module\n\n## Version\n\n1\n' > "$sandbox/some-other-module/MODULE.md"
+    printf '# Module: other\n\n## ID\n\nsome-other-module\n\n## Version\n\n1\n\n## Minimum risk profile\n\nstandard\n\n## Load when\n\n- trigger line\n\n## Required context\n\n- context line\n\n## Approval gates\n\n- gate line\n\n## Required evidence\n\n- evidence line\n\n## Prohibited shortcuts\n\n- shortcut line\n' > "$sandbox/some-other-module/MODULE.md"
     classify_with_registry "$sandbox" "$FIXTURES/context-valid-single.md"
     code="$status"
     rm -rf "$sandbox"
     [ "$code" -eq 1 ]
+}
+
+
+# --- Authority-scope regressions (review blocker #2) -----------------------
+
+@test "INVALID (1) for a selection hidden inside a fenced code block" {
+    classify context-fenced-selection.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a None selected sentinel hidden inside a fence" {
+    classify context-fenced-none.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for an unclosed fence that swallows the whole section" {
+    classify context-unclosed-fence.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for an HTML-commented selection" {
+    classify context-commented-selection.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a blockquoted selection" {
+    classify context-blockquote-selection.md
+    [ "$status" -eq 1 ]
+}
+
+@test "declarations inside fences are ignored: fenced Profile cannot satisfy a floor" {
+    # The fence declares high-assurance; the authoritative file says standard,
+    # so selecting security-review must still trip the profile floor.
+    out="$(bash "$VALIDATE" "$FIXTURES/context-fenced-profile-status.md" 2>&1)" || true
+    printf '%s' "$out" | grep -q "below the 'high-assurance' minimum"
+}
+
+# --- Registry identity and metadata validation (review blocker #3) ---------
+
+make_module() {  # make_module <registry> <dirname> <declared-id> <version> <min-profile>
+    mkdir -p "$1/$2"
+    {
+        echo "# Module: $2"
+        echo
+        echo "## ID"
+        echo
+        echo "$3"
+        echo
+        echo "## Version"
+        echo
+        echo "$4"
+        echo
+        echo "## Minimum risk profile"
+        echo
+        if [ -n "$5" ]; then
+            echo "$5"
+            echo
+        fi
+        echo "## Load when"
+        echo
+        echo "- trigger line"
+        echo
+        echo "## Required context"
+        echo
+        echo "- context line"
+        echo
+        echo "## Approval gates"
+        echo
+        echo "- gate line"
+        echo
+        echo "## Required evidence"
+        echo
+        echo "- evidence line"
+        echo
+        echo "## Prohibited shortcuts"
+        echo
+        echo "- shortcut line"
+    } > "$1/$2/MODULE.md"
+}
+
+expect_registry_blocked() {  # expect_registry_blocked <fixture> <setup-fn>
+    local fixture="$1" setup="$2"
+    sandbox="$(mktemp -d)"
+    "$setup" "$sandbox"
+    AGENTIC_CONTEXT_REGISTRY="$sandbox" run bash "$VALIDATE" "$FIXTURES/$fixture"
+    code="$status"
+    out="$output"
+    rm -rf "$sandbox"
+    [ "$code" -eq 2 ]
+    printf '%s' "$out" | grep -q "CONTEXT_REGISTRY_INVALID\|registry is unusable"
+}
+
+register_mismatched_id()      { make_module "$1" good-name other-name 1 high-assurance; }
+register_duplicate_id()       { make_module "$1" module-a dup-id 1 standard; make_module "$1" module-b dup-id 1 standard; }
+register_path_id()            { make_module "$1" evil '../other-module' 1 standard; }
+register_missing_id()         { make_module "$1" no-id '' 1 standard; }
+register_no_min_profile()     { make_module "$1" no-min some-id 1 ''; }
+register_unknown_min_profile(){ make_module "$1" odd-min some-id 1 critical; }
+register_duplicate_heading()  {
+    make_module "$1" dup-head some-id 1 standard
+    printf '\n## Version\n\n2\n' >> "$1/dup-head/MODULE.md"
+}
+register_empty_doc_section()  {
+    make_module "$1" empty-docs some-id 1 standard
+    sed -i '/^- trigger line$/d' "$1/empty-docs/MODULE.md"
+}
+register_valid_minimal()      { make_module "$1" some-other-module some-other-module 1 standard; }
+
+@test "BLOCKED (2): declared ID differing from its directory name" {
+    expect_registry_blocked context-valid-single.md register_mismatched_id
+}
+@test "BLOCKED (2): the same declared ID in two directories" {
+    expect_registry_blocked context-valid-single.md register_duplicate_id
+}
+@test "BLOCKED (2): an ID containing a path component" {
+    expect_registry_blocked context-valid-single.md register_path_id
+}
+@test "BLOCKED (2): a module without any ID" {
+    expect_registry_blocked context-valid-single.md register_missing_id
+}
+@test "BLOCKED (2): a missing Minimum risk profile" {
+    expect_registry_blocked context-valid-single.md register_no_min_profile
+}
+@test "BLOCKED (2): an unrecognized Minimum risk profile" {
+    expect_registry_blocked context-valid-single.md register_unknown_min_profile
+}
+@test "BLOCKED (2): a duplicated Version heading" {
+    expect_registry_blocked context-valid-single.md register_duplicate_heading
+}
+@test "BLOCKED (2): a documentation section without content" {
+    expect_registry_blocked context-valid-single.md register_empty_doc_section
+}
+
+@test "a registry that lacks the selected module is INVALID (1), not blocked" {
+    sandbox="$(mktemp -d)"
+    register_valid_minimal "$sandbox"
+    AGENTIC_CONTEXT_REGISTRY="$sandbox" run bash "$VALIDATE" "$FIXTURES/context-valid-single.md"
+    code="$status"
+    rm -rf "$sandbox"
+    [ "$code" -eq 1 ]
+}
+
+@test "a path-like ID never resolves outside the sandbox registry" {
+    sandbox="$(mktemp -d)"
+    register_path_id "$sandbox"
+    mkdir -p "$sandbox/other-module"
+    echo pwned > "$sandbox/other-module/MODULE.md"
+    AGENTIC_CONTEXT_REGISTRY="$sandbox" run bash "$VALIDATE" "$FIXTURES/context-valid-single.md"
+    code="$status"
+    out="$output"
+    rm -rf "$sandbox"
+    [ "$code" -eq 2 ]
+    printf '%s' "$out" | grep -q "CONTEXT_REGISTRY_INVALID\|registry is unusable"
+}
+
+# --- Path redaction in JSON output (review blocker #7) ---------------------
+
+@test "JSON redacts absolute outside-project paths to the basename (Bash)" {
+    if ! command -v python3 >/dev/null 2>&1; then
+        skip "python3 not available"
+    fi
+    out="$(bash "$VALIDATE" --format json /home/someone/secret/project/TASK-X.md 2>/dev/null)" || true
+    printf '%s' "$out" | grep -q '"task_file": *"TASK-X.md"'
+    if printf '%s' "$out" | grep -q '/home/someone'; then
+        echo "absolute path leaked into JSON: $out" >&2
+        return 1
+    fi
+}
+
+@test "composite handoff gate accepts a fully valid completed task (Bash)" {
+    run bash "$REPO_ROOT/.agentic/scripts/validate-handoff.sh" "$FIXTURES/context-full-contract-ha.md"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"handoff gate satisfied"* ]]
+}
+
+@test "composite handoff gate reports BLOCKED when either leg blocks (Bash)" {
+    # Task validator: BLOCKED(2) on planned status under --handoff;
+    # context validator: INVALID(1) on bare sentinel? No: bare sentinel is
+    # valid, so this fixture isolates the task leg's BLOCKED.
+    run bash "$REPO_ROOT/.agentic/scripts/validate-handoff.sh" "$FIXTURES/context-valid-bare-none.md"
+    [ "$status" -eq 2 ]
+}
+
+@test "composite handoff gate reports INVALID for an unknown module (Bash)" {
+    run bash "$REPO_ROOT/.agentic/scripts/validate-handoff.sh" "$FIXTURES/context-unknown-module.md"
+    [ "$status" -eq 1 ]
+}
+
+# --- Successful-leg JSON serialization must be checked (review blocker #6) --
+
+@test "JSON mode emits exactly one document on success" {
+    if ! command -v python3 >/dev/null 2>&1; then
+        skip "python3 not available"
+    fi
+    out="$(bash "$VALIDATE" --format json "$FIXTURES/context-valid-single.md" 2>/dev/null)" || {
+        echo "validator failed unexpectedly: $out" >&2
+        return 1
+    }
+    count="$(printf '%s\n' "$out" | grep -c '"result": *"VALID"')"
+    [ "$count" -eq 1 ]
+    printf '%s' "$out" | python3 -c '
+import json, sys
+doc = json.loads(sys.stdin.read())
+assert doc["result"] == "VALID", doc
+assert doc["exit_code"] == 0, doc
+'
+}
+
+@test "a failing python3 serialization fails the run instead of faking success" {
+    stub="$(mktemp -d)"
+    printf '#!/bin/sh\nexit 3\n' > "$stub/python3"
+    chmod +x "$stub/python3"
+    out="$(PATH="$stub:$PATH" bash "$VALIDATE" --format json "$FIXTURES/context-valid-single.md" 2>&1)"
+    code=$?
+    rm -rf "$stub"
+    [ "$code" -eq 1 ]
+    printf '%s' "$out" | grep -q "failed to serialize JSON result"
+    if printf '%s' "$out" | grep -q '"result": *"VALID"'; then
+        echo "VALID emitted despite serialization failure: $out" >&2
+        return 1
+    fi
+}
+
+@test "an unwritable JSON destination fails the run instead of faking success" {
+    if [ ! -w /dev/full ]; then
+        skip "/dev/full not available (POSIX CI only)"
+    fi
+    if ! command -v python3 >/dev/null 2>&1; then
+        skip "python3 not available"
+    fi
+    run bash -c "bash '$VALIDATE' --format json '$FIXTURES/context-valid-single.md' >/dev/full"
+    [ "$status" -ne 0 ]
 }
