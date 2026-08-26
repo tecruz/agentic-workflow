@@ -429,3 +429,45 @@ assert doc["exit_code"] == 0, doc
     run bash -c "bash '$VALIDATE' --format json '$FIXTURES/context-valid-single.md' >/dev/full"
     [ "$status" -ne 0 ]
 }
+
+# --- Golden expected outcomes for new context fixtures (review blockers #1, #2, #3) ---
+
+@test "VALID (0) for uppercase profile STANDARD (context-profile-uppercase-standard.md)" {
+    classify context-profile-uppercase-standard.md
+    [ "$status" -eq 0 ]
+}
+
+@test "VALID (0) for canonical em-dash separator (context-selection-canonical-emdash.md)" {
+    classify context-selection-canonical-emdash.md
+    [ "$status" -eq 0 ]
+}
+
+@test "VALID (0) for canonical hyphen separator (context-selection-canonical-hyphen.md)" {
+    classify context-selection-canonical-hyphen.md
+    [ "$status" -eq 0 ]
+}
+
+@test "INVALID (1) for colon separator (context-selection-colon-separator.md)" {
+    classify context-selection-colon-separator.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for missing separator (context-selection-missing-separator.md)" {
+    classify context-selection-missing-separator.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for uppercase LOADED token (context-selection-uppercase-loaded.md)" {
+    classify context-selection-uppercase-loaded.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for 'None selectedness' malformed sentinel (context-sentinel-selectedness.md)" {
+    classify context-sentinel-selectedness.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for 'None selected-but-not-really' malformed sentinel (context-sentinel-hyphen-nospace.md)" {
+    classify context-sentinel-hyphen-nospace.md
+    [ "$status" -eq 1 ]
+}

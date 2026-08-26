@@ -140,7 +140,20 @@ function Output-ContextJson {
 function Write-Invalid {
     param([string]$Code, [string]$Section, [string]$Identifier, [string]$Message)
     if ($Format -eq 'Json') {
-        Output-ContextJson 'INVALID' 1 $Message $Code $Section $Identifier
+        # JSON mode: use neutral identifier and generic message to avoid leaking task content
+        $jsonIdent = $null
+        $jsonMsg = switch ($Code) {
+            'CONTEXT_SECTION_MISSING' { "Task file is missing the required '## Context modules' section." }
+            'CONTEXT_PROFILE_INVALID' { "Task must declare exactly one recognized risk profile." }
+            'MODULE_UNKNOWN' { "Selected module is not in the managed registry." }
+            'MODULE_VERSION_UNSUPPORTED' { "Selection declares an unsupported module version." }
+            'MODULE_RATIONALE_MISSING' { "Selection must carry a selection rationale." }
+            'MODULE_DUPLICATE' { "Module is selected more than once." }
+            'MODULE_PROFILE_TOO_LOW' { "Task profile is below the minimum required by the selected module." }
+            'MODULE_SELECTION_UNRESOLVED' { "Module selection does not match the required structure." }
+            default { "Structural contract violation." }
+        }
+        Output-ContextJson 'INVALID' 1 $jsonMsg $Code $Section $jsonIdent
         exit 1
     }
     else {
@@ -152,7 +165,15 @@ function Write-Invalid {
 function Write-Blocked {
     param([string]$Code, [string]$Section, [string]$Identifier, [string]$Message)
     if ($Format -eq 'Json') {
-        Output-ContextJson 'BLOCKED' 2 $Message $Code $Section $Identifier
+        # JSON mode: use neutral identifier and generic message
+        $jsonIdent = $null
+        $jsonMsg = switch ($Code) {
+            'CONTEXT_REGISTRY_MISSING' { "Context module registry not found." }
+            'CONTEXT_REGISTRY_INVALID' { "Context module registry is unusable." }
+            'MODULE_SELECTION_UNRESOLVED' { "Completed task carries an unresolved selection placeholder." }
+            default { "Completion gate not satisfied." }
+        }
+        Output-ContextJson 'BLOCKED' 2 $jsonMsg $Code $Section $jsonIdent
         exit 2
     }
     else {

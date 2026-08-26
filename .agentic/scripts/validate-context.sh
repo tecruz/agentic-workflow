@@ -185,7 +185,30 @@ fail_invalid() {
     [ -n "$section" ] || section="null"
     [ -n "$ident" ] || ident="null"
     if [ "$FORMAT" = "json" ]; then
-        output_context_json "INVALID" 1 "$msg" "$code" "$section" "$ident"
+        # JSON mode: use neutral identifier and generic message to avoid leaking task content
+        local json_ident="null"
+        local json_msg=""
+        case "$code" in
+            "CONTEXT_SECTION_MISSING")
+                json_msg="Task file is missing the required '## Context modules' section." ;;
+            "CONTEXT_PROFILE_INVALID")
+                json_msg="Task must declare exactly one recognized risk profile." ;;
+            "MODULE_UNKNOWN")
+                json_msg="Selected module is not in the managed registry." ;;
+            "MODULE_VERSION_UNSUPPORTED")
+                json_msg="Selection declares an unsupported module version." ;;
+            "MODULE_RATIONALE_MISSING")
+                json_msg="Selection must carry a selection rationale." ;;
+            "MODULE_DUPLICATE")
+                json_msg="Module is selected more than once." ;;
+            "MODULE_PROFILE_TOO_LOW")
+                json_msg="Task profile is below the minimum required by the selected module." ;;
+            "MODULE_SELECTION_UNRESOLVED")
+                json_msg="Module selection does not match the required structure." ;;
+            *)
+                json_msg="Structural contract violation." ;;
+        esac
+        output_context_json "INVALID" 1 "$json_msg" "$code" "$section" "$json_ident"
         exit 1
     else
         echo "INVALID: $msg" >&2
@@ -202,7 +225,20 @@ fail_blocked() {
     [ -n "$section" ] || section="null"
     [ -n "$ident" ] || ident="null"
     if [ "$FORMAT" = "json" ]; then
-        output_context_json "BLOCKED" 2 "$msg" "$code" "$section" "$ident"
+        # JSON mode: use neutral identifier and generic message
+        local json_ident="null"
+        local json_msg=""
+        case "$code" in
+            "CONTEXT_REGISTRY_MISSING")
+                json_msg="Context module registry not found." ;;
+            "CONTEXT_REGISTRY_INVALID")
+                json_msg="Context module registry is unusable." ;;
+            "MODULE_SELECTION_UNRESOLVED")
+                json_msg="Completed task carries an unresolved selection placeholder." ;;
+            *)
+                json_msg="Completion gate not satisfied." ;;
+        esac
+        output_context_json "BLOCKED" 2 "$json_msg" "$code" "$section" "$json_ident"
         exit 2
     else
         echo "BLOCKED: $msg" >&2
@@ -469,16 +505,39 @@ handle_entry() {
     # must be a substantive rationale: symbol-only separators are malformed,
     # and placeholder suffixes (TBD/TODO/Pending/...) block a completed task.
     # Requires word-boundary after 'selected' to reject 'selectedness' etc.
+    # Anchored grammar: ^none\s+selected(?:\s+[—–-]\s+.+)?$
     local lowered
     lowered="$(printf '%s' "$entry" | tr '[:upper:]' '[:lower:]')"
-    if printf '%s' "$lowered" | grep -qE '^none[[:space:]]+selected($|[^a-z0-9_])'; then
-        NONE_SENTINEL_SEEN=1
-        # Extract suffix after the 'none selected' words (preserve original case for rationale)
+    # First check: must start with "none selected" followed by end-of-string or whitespace+separator
+    if ! printf '%s' "$lowered" | grep -qE '^none[[:space:]]+selected($|[[:space:]]+)'; then
+        # Not a sentinel line - but check if it's a malformed "none selected" variant
+        if printf '%s' "$lowered" | grep -qE '^none[[:space:]]+selected'; then
+            fail_invalid "MODULE_SELECTION_UNRESOLVED" "## Context modules" "$entry" "'None selected' must be followed by end-of-line or a separator ( — / – / - ) with surrounding whitespace: $entry"
+        fi
+    else
+        # It starts with "none selected" - now validate the full grammar
         local suffix
         suffix="$(printf '%s' "$entry" | sed -E 's/^[Nn][Oo][Nn][Ee][[:space:]]+[Ss][Ee][Ll][Ee][Cc][Tt][Ee][Dd]//')"
+        
+        # If there's a suffix, it MUST match the separator+rationale pattern
         if [ -n "$(printf '%s' "$suffix" | tr -d '[:space:]')" ]; then
-            local rationale
-            rationale="$(printf '%s' "$suffix" | sed -E 's/^[[:space:]]*[—–-][[:space:]]*//')"
+            local rationale separator
+            # Parse separator explicitly using actual UTF-8 bytes (Bash 3.2 compatible)
+            local em_dash=$'\xe2\x80\x94'
+            local en_dash=$'\xe2\x80\x93'
+            case "$suffix" in
+                " $em_dash "*) separator=" $em_dash "; rationale="${suffix# $em_dash }" ;;
+                " $en_dash "*) separator=" $en_dash "; rationale="${suffix# $en_dash }" ;;
+                " - "*) separator=" - "; rationale="${suffix# - }" ;;
+                "- "*) separator="- "; rationale="${suffix#- }" ;;
+                " $em_dash"*) separator=" $em_dash"; rationale="${suffix# $em_dash}" ;;
+                " $en_dash"*) separator=" $en_dash"; rationale="${suffix# $en_dash}" ;;
+                " -"*) separator=" -"; rationale="${suffix# -}" ;;
+                "-$"*) separator="-"; rationale="${suffix#-}" ;;
+                *)
+                    fail_invalid "MODULE_SELECTION_UNRESOLVED" "## Context modules" "None selected" "'None selected' must use a separator ( — / – / - ) with surrounding whitespace before rationale: $entry"
+                    ;;
+            esac
             if ! has_meaningful_char "$rationale"; then
                 fail_invalid "MODULE_SELECTION_UNRESOLVED" "## Context modules" "None selected" "'None selected' carries a separator but no rationale."
             fi
@@ -486,6 +545,7 @@ handle_entry() {
                 fail_blocked "MODULE_SELECTION_UNRESOLVED" "## Context modules" "None selected" "Completed task carries an unresolved 'None selected' rationale placeholder."
             fi
         fi
+        NONE_SENTINEL_SEEN=1
         return 0
     fi
 
@@ -494,18 +554,27 @@ handle_entry() {
     # Canonical grammar (ADR-0010): <id> v<N> loaded — <rationale>
     # Requires exactly: valid id, version, lowercase 'loaded', a separator
     # (em dash / en dash / hyphen) and a substantive rationale.
-    local id="" ver="" loaded_token="" rest=""
+    local id="" ver="" loaded_token="" rest="" separator=""
     id="$(printf '%s' "$entry" | awk '{print $1}')"
     ver="$(printf '%s' "$entry" | awk '{print $2}')"
     loaded_token="$(printf '%s' "$entry" | awk '{print $3}')"
-    rest="$(printf '%s' "$entry" | sed -E 's/^[^[:space:]]+[[:space:]]+v[1-9][0-9]*[[:space:]]+loaded[[:space:]]+//')"
 
-    if ! printf '%s' "$entry" | grep -Eq '^[^[:space:]]+[[:space:]]+v[1-9][0-9]*[[:space:]]+loaded[[:space:]]+[—–-][[:space:]]+[^[:space:]]'; then
-        fail_invalid "MODULE_SELECTION_UNRESOLVED" "## Context modules" "$entry" "Selection entry is not in the canonical form '<module-id> v<N> loaded — <rationale>': $entry"
-    fi
+    # Parse the separator explicitly using actual UTF-8 bytes (Bash 3.2 compatible)
+    local after_loaded
+    after_loaded="$(printf '%s' "$entry" | sed -E 's/^[^[:space:]]+[[:space:]]+v[1-9][0-9]*[[:space:]]+loaded[[:space:]]+//')"
+    local em_dash=$'\xe2\x80\x94'
+    local en_dash=$'\xe2\x80\x93'
+    case "$after_loaded" in
+        "$em_dash "*) separator="$em_dash "; rest="${after_loaded#$em_dash }" ;;
+        "$en_dash "*) separator="$en_dash "; rest="${after_loaded#$en_dash }" ;;
+        "- "*) separator="- "; rest="${after_loaded#- }" ;;
+        *)
+            fail_invalid "MODULE_SELECTION_UNRESOLVED" "## Context modules" "$entry" "Selection entry is not in the canonical form '<module-id> v<N> loaded — <rationale>': $entry"
+            ;;
+    esac
 
     local sep_rationale
-    sep_rationale="$(printf '%s' "$rest" | sed -E 's/^[—–-][[:space:]]*//')"
+    sep_rationale="$rest"
 
     if [ "$loaded_token" != "loaded" ]; then
         fail_invalid "MODULE_SELECTION_UNRESOLVED" "## Context modules" "$id" "Selection of '$id' does not confirm the module was loaded before planning."

@@ -375,3 +375,48 @@ Describe 'validate-context review-blocker regressions' {
     }
 }
 
+Describe 'validate-context golden expected outcomes for new fixtures' {
+    BeforeEach {
+        $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+        $script:validate = Join-Path $repoRoot '.agentic' 'scripts' 'validate-context.ps1'
+        $fixtures = Join-Path $repoRoot 'tests' 'fixtures' 'context-tasks'
+
+        function Invoke-Validator([string]$fixture) {
+            $out = & $script:validate (Join-Path $fixtures $fixture) 2>&1
+            return @{ Code = $LASTEXITCODE; Output = ($out | Out-String).Trim() }
+        }
+    }
+
+    It 'VALID (0) for uppercase profile STANDARD' {
+        Invoke-Validator 'context-profile-uppercase-standard.md' | Select-Object -ExpandProperty Code | Should -Be 0
+    }
+
+    It 'VALID (0) for canonical em-dash separator' {
+        Invoke-Validator 'context-selection-canonical-emdash.md' | Select-Object -ExpandProperty Code | Should -Be 0
+    }
+
+    It 'VALID (0) for canonical hyphen separator' {
+        Invoke-Validator 'context-selection-canonical-hyphen.md' | Select-Object -ExpandProperty Code | Should -Be 0
+    }
+
+    It 'INVALID (1) for colon separator' {
+        Invoke-Validator 'context-selection-colon-separator.md' | Select-Object -ExpandProperty Code | Should -Be 1
+    }
+
+    It 'INVALID (1) for missing separator' {
+        Invoke-Validator 'context-selection-missing-separator.md' | Select-Object -ExpandProperty Code | Should -Be 1
+    }
+
+    It 'INVALID (1) for uppercase LOADED token' {
+        Invoke-Validator 'context-selection-uppercase-loaded.md' | Select-Object -ExpandProperty Code | Should -Be 1
+    }
+
+    It 'INVALID (1) for None selectedness malformed sentinel' {
+        Invoke-Validator 'context-sentinel-selectedness.md' | Select-Object -ExpandProperty Code | Should -Be 1
+    }
+
+    It 'INVALID (1) for None selected-but-not-really malformed sentinel' {
+        Invoke-Validator 'context-sentinel-hyphen-nospace.md' | Select-Object -ExpandProperty Code | Should -Be 1
+    }
+}
+
