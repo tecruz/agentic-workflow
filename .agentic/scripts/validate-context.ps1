@@ -61,6 +61,7 @@ else {
 }
 
 $script:ProfileName = $null
+$script:ProfileCount = 0
 $script:StatusName = $null
 $script:SectionFound = $false
 $script:SectionLines = [System.Collections.Generic.List[string]]::new()
@@ -326,6 +327,7 @@ foreach ($raw in (Get-Content -LiteralPath $TaskFile)) {
     # Bash validator's lowercased-line matching.
     $norm = $line.ToLowerInvariant().TrimEnd()
     if ($norm -match '^profile:\s*(\S+)') {
+        $script:ProfileCount++
         $script:ProfileName = $Matches[1]
         continue
     }
@@ -354,6 +356,17 @@ if (-not $script:SectionFound) {
     Write-Invalid 'CONTEXT_SECTION_MISSING' '## Context modules' '' "Task file has no '## Context modules' section."
 }
 
+# The minimum-profile floor is part of this validator's contract, so it can
+# only be evaluated against exactly one recognized profile declaration. A
+# missing, unknown, or duplicated profile is INVALID before any selection is
+# examined — JSON results are never VALID with a null profile.
+if ($script:ProfileCount -ne 1) {
+    Write-Invalid 'CONTEXT_PROFILE_INVALID' '## Risk profile' '' "Task must declare exactly one risk profile (found $($script:ProfileCount) declarations)."
+}
+if ($script:ProfileName -notin @('prototype', 'standard', 'high-assurance')) {
+    Write-Invalid 'CONTEXT_PROFILE_INVALID' '## Risk profile' $script:ProfileName "'$($script:ProfileName)' is not a recognized risk profile (prototype | standard | high-assurance)."
+}
+
 # Selection state.
 $selectionCount = 0
 $noneSentinelSeen = $false
@@ -373,8 +386,21 @@ foreach ($rawLine in $script:SectionLines) {
     $entry = ($rawLine -creplace '^\s*[-*+]\s+', '').Trim()
     if ([string]::IsNullOrWhiteSpace($entry)) { continue }
 
-    if ($entry -imatch '^none\s+selected\b') {
+    if ($entry -imatch '^none\s+selected\b\s*(.*)$') {
         $noneSentinelSeen = $true
+        # Sentinel suffix must be a substantive rationale: symbol-only
+        # separators are malformed, placeholder suffixes (TBD/TODO/Pending...)
+        # block a completed task.
+        $suffix = $Matches[1].Trim()
+        if ($suffix) {
+            $rationale = $suffix -creplace '^[—–-]\s*', ''
+            if (-not (Test-MeaningfulChar $rationale)) {
+                Write-Invalid 'MODULE_SELECTION_UNRESOLVED' '## Context modules' 'None selected' "'None selected' carries a separator but no rationale."
+            }
+            if ((Test-PlaceholderText $rationale) -and $script:StatusName -eq 'done') {
+                Write-Blocked 'MODULE_SELECTION_UNRESOLVED' '## Context modules' 'None selected' "Completed task carries an unresolved 'None selected' rationale placeholder."
+            }
+        }
         continue
     }
 

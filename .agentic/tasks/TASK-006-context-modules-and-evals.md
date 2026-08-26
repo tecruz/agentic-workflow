@@ -19,7 +19,10 @@ public-API compatibility commitment, privacy-regulated data, or safety-critical
 behavior is implemented by this feature itself; the security-review module
 describes process requirements, it does not implement security controls.
 Escalation signals were reviewed; none apply. The standard profile with full
-CI plus a real N-1 migration test provides adequate verification depth.
+CI plus a real N-1 migration test provides adequate verification depth. The
+infrastructure-change module is likewise not triggered: its Load-when trigger
+is scoped to production-affecting pipeline/deployment changes, and this task's
+workflow edits only run this framework repository's own test suites.
 
 ## Acceptance criteria
 

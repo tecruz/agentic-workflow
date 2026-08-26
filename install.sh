@@ -190,6 +190,8 @@ MANAGED_FILES=(
     ".agentic/context/public-api-change/MODULE.md"
     ".agentic/scripts/validate-context.sh"
     ".agentic/scripts/validate-context.ps1"
+    ".agentic/scripts/validate-handoff.sh"
+    ".agentic/scripts/validate-handoff.ps1"
 )
 
 # Seed-once, project-owned: never overwritten after creation.

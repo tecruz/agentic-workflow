@@ -1,4 +1,17 @@
 {
+  "protocol_version": "1.5.0",
+  "exit_code": 0,
+  "summary": {
+    "checks_defined": 2,
+    "checks_run": 2,
+    "required_run": 2,
+    "passed": 2,
+    "failed": 0,
+    "optional_failed": 0,
+    "blocked": 0,
+    "optional_skipped": 0
+  },
+  "source": "checks_tsv",
   "checks": [
     {
       "id": "link-checker",
@@ -19,20 +32,7 @@
       "reason_code": null
     }
   ],
-  "summary": {
-    "checks_defined": 2,
-    "checks_run": 2,
-    "required_run": 2,
-    "passed": 2,
-    "failed": 0,
-    "optional_failed": 0,
-    "blocked": 0,
-    "optional_skipped": 0
-  },
-  "result": "PASS",
-  "exit_code": 0,
-  "source": "checks_tsv",
   "schema_version": 1,
-  "protocol_version": "1.5.0",
-  "kind": "verification_result"
+  "kind": "verification_result",
+  "result": "PASS"
 }

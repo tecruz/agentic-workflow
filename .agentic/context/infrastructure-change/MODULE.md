@@ -14,7 +14,7 @@ high-assurance
 
 ## Load when
 
-- CI/CD pipeline changes
+- CI/CD pipeline changes that affect production deployments, release gates, or deployment credentials (framework-test workflow edits that only run this repository's own checks do not trigger this module)
 - Terraform/OpenTofu or other infrastructure-as-code changes
 - Kubernetes manifests, Helm charts, or controller configuration
 - Cloud resource definitions and deployment configuration

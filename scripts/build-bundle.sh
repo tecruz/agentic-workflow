@@ -95,7 +95,7 @@ cp "$ROOT/.agentic/VERSION" \
    "$BUNDLE/.agentic/"
 cp "$ROOT"/.agentic/rules/*.md "$BUNDLE/.agentic/rules/"
 cp "$ROOT"/.agentic/profiles/*.md "$BUNDLE/.agentic/profiles/"
-cp "$ROOT/.agentic/scripts/verify.sh" "$ROOT/.agentic/scripts/verify.ps1" "$ROOT/.agentic/scripts/validate-task.sh" "$ROOT/.agentic/scripts/validate-task.ps1" "$ROOT/.agentic/scripts/validate-context.sh" "$ROOT/.agentic/scripts/validate-context.ps1" "$BUNDLE/.agentic/scripts/"
+cp "$ROOT/.agentic/scripts/verify.sh" "$ROOT/.agentic/scripts/verify.ps1" "$ROOT/.agentic/scripts/validate-task.sh" "$ROOT/.agentic/scripts/validate-task.ps1" "$ROOT/.agentic/scripts/validate-context.sh" "$ROOT/.agentic/scripts/validate-context.ps1" "$ROOT/.agentic/scripts/validate-handoff.sh" "$ROOT/.agentic/scripts/validate-handoff.ps1" "$BUNDLE/.agentic/scripts/"
 cp "$ROOT"/.agentic/templates/*.md "$ROOT"/.agentic/templates/checks.tsv "$BUNDLE/.agentic/templates/"
 cp "$ROOT/.agentic/tasks/README.md" "$BUNDLE/.agentic/tasks/"
 cp "$ROOT/.agentic/decisions/README.md" "$BUNDLE/.agentic/decisions/"

@@ -72,11 +72,22 @@ configure_test_git_identity() {
     done
     [ -f .agentic/scripts/validate-context.sh ]
     [ -f .agentic/scripts/validate-context.ps1 ]
+    [ -f .agentic/scripts/validate-handoff.sh ]
+    [ -f .agentic/scripts/validate-handoff.ps1 ]
     [ -f .agentic/schemas/context-selection-v1.schema.json ]
     grep -q $'\.agentic/context/INDEX\.md\tmanaged' .agentic/install-manifest.tsv
     grep -q $'\.agentic/context/security-review/MODULE\.md\tmanaged' .agentic/install-manifest.tsv
     grep -q $'\.agentic/scripts/validate-context\.sh\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/scripts/validate-handoff\.sh\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/scripts/validate-handoff\.ps1\tmanaged' .agentic/install-manifest.tsv
     grep -q $'\.agentic/schemas/context-selection-v1\.schema\.json\tmanaged' .agentic/install-manifest.tsv
+}
+
+@test "installed handoff gate keeps its executable bit and gates a completed task" {
+    bash "$INSTALL" . >/dev/null 2>&1
+    [ -x .agentic/scripts/validate-handoff.sh ]
+    run ./.agentic/scripts/validate-handoff.sh "$REPO_ROOT/tests/fixtures/context-tasks/context-full-contract-ha.md"
+    [ "$status" -eq 0 ]
 }
 
 @test "installed context validator keeps its executable bit and runs directly" {
@@ -93,6 +104,9 @@ configure_test_git_identity() {
     printf 'adopter evidence\n' > .agentic/tasks/TASK-900-adopter.md
     bash "$INSTALL" . --uninstall >/dev/null 2>&1
     [ ! -d .agentic/context ]
+    [ ! -f .agentic/scripts/validate-handoff.sh ]
+    [ ! -f .agentic/scripts/validate-handoff.ps1 ]
+    [ ! -f .agentic/scripts/validate-context.sh ]
     [ -f .agentic/tasks/TASK-900-adopter.md ]
 }
 
@@ -967,6 +981,8 @@ SHIM
     [ -f "$BUNDLE/.agentic/profiles/high-assurance.md" ]
     [ -f "$BUNDLE/.agentic/scripts/validate-task.sh" ]
     [ -f "$BUNDLE/.agentic/scripts/validate-task.ps1" ]
+    [ -f "$BUNDLE/.agentic/scripts/validate-handoff.sh" ]
+    [ -f "$BUNDLE/.agentic/scripts/validate-handoff.ps1" ]
     [ -f "$BUNDLE/.agentic/templates/task.md" ]
 }
 
@@ -1056,6 +1072,9 @@ SHIM
     [ -f "$EXTRACTED_BUNDLE/.agentic/scripts/validate-task.sh" ]
     [ -x "$EXTRACTED_BUNDLE/.agentic/scripts/validate-task.sh" ]
     [ -f "$EXTRACTED_BUNDLE/.agentic/scripts/validate-task.ps1" ]
+    [ -f "$EXTRACTED_BUNDLE/.agentic/scripts/validate-handoff.sh" ]
+    [ -x "$EXTRACTED_BUNDLE/.agentic/scripts/validate-handoff.sh" ]
+    [ -f "$EXTRACTED_BUNDLE/.agentic/scripts/validate-handoff.ps1" ]
     [ -f "$EXTRACTED_BUNDLE/.agentic/templates/task.md" ]
     grep -q "Profile" "$EXTRACTED_BUNDLE/.agentic/templates/task.md"
     grep -q "Required evidence" "$EXTRACTED_BUNDLE/.agentic/templates/task.md"
@@ -1111,6 +1130,8 @@ SHIM
     [ -f "$BUNDLE/.agentic/profiles/README.md" ]
     [ -f "$BUNDLE/.agentic/scripts/validate-task.sh" ]
     [ -x "$BUNDLE/.agentic/scripts/validate-task.sh" ]
+    [ -f "$BUNDLE/.agentic/scripts/validate-handoff.sh" ]
+    [ -x "$BUNDLE/.agentic/scripts/validate-handoff.sh" ]
     [ -f "$BUNDLE/.agentic/templates/task.md" ]
 
     PROJECT="$TMP/project"

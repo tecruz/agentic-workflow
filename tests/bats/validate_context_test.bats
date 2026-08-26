@@ -40,6 +40,18 @@ classify_with_registry() {  # classify_with_registry <registry-dir> <fixture>
     [ "$status" -eq 0 ]
 }
 
+@test "the None selected sentinel rejects unresolved suffixes" {
+    # Placeholder suffix on a completed task: BLOCKED (2).
+    classify context-none-tbd.md
+    [ "$status" -eq 2 ]
+    # Separator without any rationale: INVALID (1).
+    classify context-none-empty-rationale.md
+    [ "$status" -eq 1 ]
+    # A substantive narrative suffix remains acceptable.
+    classify context-none-narrative-ok.md
+    [ "$status" -eq 0 ]
+}
+
 @test "INVALID (1) for an unknown module id" {
     classify context-unknown-module.md
     [ "$status" -eq 1 ]
@@ -346,6 +358,30 @@ register_valid_minimal()      { make_module "$1" some-other-module some-other-mo
 @test "composite handoff gate reports INVALID for an unknown module (Bash)" {
     run bash "$REPO_ROOT/.agentic/scripts/validate-handoff.sh" "$FIXTURES/context-unknown-module.md"
     [ "$status" -eq 1 ]
+}
+
+# --- Profile contract: standalone VALID requires exactly one profile -------
+
+@test "INVALID (1): selections require exactly one recognized risk profile" {
+    for fx in context-profile-missing context-profile-unknown context-profile-duplicate context-profile-invalid-with-ha-module context-profile-invalid-none-selected; do
+        run bash "$VALIDATE" "$FIXTURES/$fx.md"
+        [ "$status" -eq 1 ]
+        printf '%s' "$output" | grep -q "CONTEXT_PROFILE_INVALID\|recognized risk profile"
+    done
+}
+
+@test "JSON mode never reports VALID with a null profile" {
+    if ! command -v python3 >/dev/null 2>&1; then
+        skip "python3 not available"
+    fi
+    out="$(bash "$VALIDATE" --format json "$FIXTURES/context-profile-unknown.md" 2>/dev/null)" || true
+    printf '%s' "$out" | python3 -c '
+import json, sys
+doc = json.loads(sys.stdin.read())
+assert doc["result"] == "INVALID", doc
+assert doc["profile"] is None, doc
+assert doc["diagnostics"][0]["code"] == "CONTEXT_PROFILE_INVALID", doc
+'
 }
 
 # --- Successful-leg JSON serialization must be checked (review blocker #6) --

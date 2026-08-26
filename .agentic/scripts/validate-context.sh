@@ -380,6 +380,7 @@ is_placeholder_text() {
 }
 
 PROFILE=""
+PROFILE_COUNT=0
 STATUS=""
 SECTION_FOUND=0
 
@@ -416,6 +417,7 @@ scan_task_file() {
         norm="$(printf '%s' "$line" | sed -e 's/[[:space:]]*$//' | tr '[:upper:]' '[:lower:]')"
         case "$norm" in
             "profile:"*)
+                PROFILE_COUNT=$((PROFILE_COUNT + 1))
                 PROFILE="$(printf '%s' "$line" | sed -e 's/^[Pp][Rr][Oo][Ff][Ii][Ll][Ee]:[[:space:]]*//' | awk '{print $1}')"
                 ;;
             "status:"*)
@@ -454,12 +456,28 @@ handle_entry() {
         return 0
     fi
 
-    # Sentinel: '- None selected' optionally followed by '— <why>'
+    # Sentinel: '- None selected' optionally followed by '— <why>'. A suffix
+    # must be a substantive rationale: symbol-only separators are malformed,
+    # and placeholder suffixes (TBD/TODO/Pending/...) block a completed task.
     local lowered
     lowered="$(printf '%s' "$entry" | tr '[:upper:]' '[:lower:]')"
     case "$lowered" in
         none\ selected*)
             NONE_SENTINEL_SEEN=1
+            local suffix=""
+            if [ "${#lowered}" -gt 13 ]; then
+                suffix="$(printf '%s' "$entry" | cut -c14-)"
+            fi
+            if [ -n "$(printf '%s' "$suffix" | tr -d '[:space:]')" ]; then
+                local rationale
+                rationale="$(printf '%s' "$suffix" | sed -e 's/^[[:space:]]*[—–-][[:space:]]*//')"
+                if ! has_meaningful_char "$rationale"; then
+                    fail_invalid "MODULE_SELECTION_UNRESOLVED" "## Context modules" "None selected" "'None selected' carries a separator but no rationale."
+                fi
+                if is_placeholder_text "$rationale" && [ "$STATUS" = "done" ]; then
+                    fail_blocked "MODULE_SELECTION_UNRESOLVED" "## Context modules" "None selected" "Completed task carries an unresolved 'None selected' rationale placeholder."
+                fi
+            fi
             return 0
             ;;
     esac
@@ -552,6 +570,20 @@ fi
 if [ "$SECTION_FOUND" -ne 1 ]; then
     fail_invalid "CONTEXT_SECTION_MISSING" "## Context modules" "" "Task file has no '## Context modules' section."
 fi
+
+# The minimum-profile floor is part of this validator's contract, so it can
+# only be evaluated against exactly one recognized profile declaration. A
+# missing, unknown, or duplicated profile is INVALID before any selection is
+# examined — JSON results are never VALID with a null profile.
+if [ "$PROFILE_COUNT" -ne 1 ]; then
+    fail_invalid "CONTEXT_PROFILE_INVALID" "## Risk profile" "" "Task must declare exactly one risk profile (found $PROFILE_COUNT declarations)."
+fi
+case "$PROFILE" in
+    prototype|standard|high-assurance) ;;
+    *)
+        fail_invalid "CONTEXT_PROFILE_INVALID" "## Risk profile" "$PROFILE" "'$PROFILE' is not a recognized risk profile (prototype | standard | high-assurance)."
+        ;;
+esac
 
 for raw in "${SECTION_LINES[@]}"; do
     entry="$(parse_selection_line "$raw")"

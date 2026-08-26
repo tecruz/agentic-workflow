@@ -22,7 +22,7 @@
 | security-review | 1 | high-assurance | Authentication, authorization, secrets, sessions, permissions, cryptography |
 | database-migrations | 1 | high-assurance | Schema changes, migration files, backfills, destructive data operations |
 | dependency-changes | 1 | standard | Manifest or lockfile changes, dependency upgrades, new external libraries, supply-chain implications |
-| infrastructure-change | 1 | high-assurance | CI/CD, Terraform/OpenTofu, Kubernetes, cloud resources, deployment configuration |
+| infrastructure-change | 1 | high-assurance | Production-affecting CI/CD, Terraform/OpenTofu, Kubernetes, cloud resources, deployment configuration |
 | public-api-change | 1 | standard | Public endpoints, published interfaces, SDK contracts, backward compatibility |
 
 ## Rules

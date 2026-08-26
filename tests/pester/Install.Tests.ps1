@@ -80,11 +80,13 @@ Describe 'install.ps1' {
             Test-Path (Join-Path $tmp '.agentic\profiles\high-assurance.md') | Should -Be $true
             Test-Path (Join-Path $tmp '.agentic\scripts\validate-task.sh') | Should -Be $true
             Test-Path (Join-Path $tmp '.agentic\scripts\validate-task.ps1') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\scripts\validate-handoff.ps1') | Should -Be $true
             Test-Path (Join-Path $tmp '.agentic\templates\task.md') | Should -Be $true
             # all new files are framework-managed and recorded in the manifest
             $manifest = Get-Content -Raw (Join-Path $tmp '.agentic\install-manifest.tsv')
             $manifest -match "\.agentic/profiles/README\.md`tmanaged" | Should -Be $true
             $manifest -match "\.agentic/scripts/validate-task\.ps1`tmanaged" | Should -Be $true
+            $manifest -match "\.agentic/scripts/validate-handoff\.ps1`tmanaged" | Should -Be $true
             $manifest -match "\.agentic/templates/task\.md`tmanaged" | Should -Be $true
             # the installed validator runs directly and classifies a valid task
             $repoFixture = Join-Path $repoRoot 'tests\fixtures\tasks\standard-valid.md'
@@ -1419,6 +1421,8 @@ Describe 'install.ps1' {
                 Test-Path (Join-Path $bundleRoot ".agentic\context\$mod\MODULE.md") | Should -Be $true
             }
             Test-Path (Join-Path $bundleRoot '.agentic\scripts\validate-context.ps1') | Should -Be $true
+            Test-Path (Join-Path $bundleRoot '.agentic\scripts\validate-handoff.sh') | Should -Be $true
+            Test-Path (Join-Path $bundleRoot '.agentic\scripts\validate-handoff.ps1') | Should -Be $true
             Test-Path (Join-Path $bundleRoot '.agentic\schemas\context-selection-v1.schema.json') | Should -Be $true
         }
         finally { Remove-Item -Recurse -Force $extractDir -ErrorAction SilentlyContinue }
@@ -1649,8 +1653,10 @@ Describe 'install.ps1' {
                 Test-Path (Join-Path $tmp ".agentic\context\$mod\MODULE.md") | Should -Be $true
             }
             Test-Path (Join-Path $tmp '.agentic\scripts\validate-context.ps1') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\scripts\validate-handoff.ps1') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\scripts\validate-handoff.sh') | Should -Be $true
             Test-Path (Join-Path $tmp '.agentic\schemas\context-selection-v1.schema.json') | Should -Be $true
-            foreach ($p in @('.agentic/context/INDEX.md', '.agentic/scripts/validate-context.sh', '.agentic/schemas/context-selection-v1.schema.json')) {
+            foreach ($p in @('.agentic/context/INDEX.md', '.agentic/scripts/validate-context.sh', '.agentic/scripts/validate-handoff.sh', '.agentic/schemas/context-selection-v1.schema.json')) {
                 (Get-Content -Raw (Join-Path $tmp '.agentic\install-manifest.tsv')) -match [regex]::Escape("$p`tmanaged`t") | Should -Be $true
             }
 

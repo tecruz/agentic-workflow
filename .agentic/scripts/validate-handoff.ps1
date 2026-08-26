@@ -49,6 +49,14 @@ if ($taskCode -eq 0 -and $contextCode -eq 0) {
 
 $gateCode = if ($taskCode -eq 2 -or $contextCode -eq 2) { 2 } else { 1 }
 
+function Get-FirstDiagnostic($Output) {
+    foreach ($line in @($Output)) {
+        $s = "$line".Trim()
+        if ($s) { return $s }
+    }
+    return '<no diagnostic>'
+}
+
 $verdict = if ($gateCode -eq 2) { 'BLOCKED' } else { 'INVALID' }
-[Console]::Error.WriteLine("${verdict}: handoff gate failed (task=$taskCode context=$contextCode)")
+[Console]::Error.WriteLine("${verdict}: handoff gate failed (task=${taskCode}: $(Get-FirstDiagnostic $taskOut); context=${contextCode}: $(Get-FirstDiagnostic $contextOut))")
 exit $gateCode

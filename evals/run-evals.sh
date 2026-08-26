@@ -297,16 +297,18 @@ def read_task_text(path):
         return fh.read()
 
 
-def authoritative_lines(task_text):
-    """Task lines minus fenced code blocks, HTML comments, and blockquotes.
+def authoritative_sections(task_text):
+    """Authoritative task content grouped by `##` section (lowercased names).
 
-    Mirrors the authoritative-content scan performed by the production
-    validators, so approvals and evidence can only be satisfied by content
-    those validators themselves consider authoritative.
+    Mirrors the production validators' content scan — fenced code blocks,
+    HTML comments, and blockquote lines are dropped — and additionally scopes
+    every line to its section so approvals and evidence can only be satisfied
+    by their own authoritative sections, never by prose or unrelated tables.
     """
-    out = []
+    sections = {}
     in_fence = False
     in_comment = False
+    current = None
     for raw in task_text.splitlines():
         line = raw.rstrip("\r")
         stripped = line.strip()
@@ -327,16 +329,48 @@ def authoritative_lines(task_text):
             continue
         if stripped.startswith(">"):
             continue
-        out.append(line)
-    return out
+        if stripped.startswith("##"):
+            current = stripped.lstrip("#").strip().lower()
+            sections.setdefault(current, [])
+            continue
+        if current is not None:
+            sections.setdefault(current, []).append(line)
+    return sections
+
+
+APPROVAL_SECTION = "approval gates"
+EVIDENCE_SECTIONS = ("required evidence", "requirement-to-evidence")
+CANONICAL_TABLE_HEADER_RE = re.compile(
+    r"^\|\s*(?:ac id|requirement id)\s*\|[^|]*\|\s*result\s*\|\s*$",
+    re.IGNORECASE,
+)
+
+
+def canonical_evidence_rows(section_lines):
+    """Rows of the first canonical `<ID> | Evidence | Result` table only."""
+    rows = []
+    collecting = False
+    for raw in section_lines:
+        s = raw.strip()
+        if not collecting:
+            if CANONICAL_TABLE_HEADER_RE.match(s):
+                collecting = True
+            continue
+        if not s.startswith("|"):
+            break
+        cells = [c.strip() for c in s.strip("|").split("|")]
+        if all(set(c) <= set("-: ") for c in cells):
+            continue
+        rows.append(s.lower())
+    return rows
 
 
 APPROVAL_PATTERN = re.compile(r"^\s*[-*]\s*\[x\]\s*AG-\d+:", re.IGNORECASE)
 
 
-def approvals_declare(lines, token):
+def approvals_declare(sections, token):
     wanted = re.sub(r"[-_]+", " ", token).lower()
-    for line in lines:
+    for line in sections.get(APPROVAL_SECTION, []):
         if APPROVAL_PATTERN.match(line):
             candidate = re.sub(r"[-_]+", " ", line).lower()
             if wanted in candidate:
@@ -344,21 +378,22 @@ def approvals_declare(lines, token):
     return False
 
 
-def evidence_contains(lines, token):
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith("|") and stripped.count("|") >= 4:
-            if token.lower() in line.lower():
+def evidence_contains(sections, token):
+    for name in EVIDENCE_SECTIONS:
+        for row in canonical_evidence_rows(sections.get(name, [])):
+            if token.lower() in row:
                 return True
     return False
 
 
 def path_forbidden(changed_paths, forbidden_paths):
+    """Directory-aware match: a change is forbidden when it equals a
+    forbidden path, lives inside one, or would overwrite one."""
     for changed in changed_paths:
         norm = changed.replace("\\", "/").lstrip("./")
         for fp in forbidden_paths:
             f = fp.replace("\\", "/").lstrip("./")
-            if norm == f or norm.endswith("/" + f):
+            if norm == f or norm.startswith(f.rstrip("/") + "/") or f.startswith(norm.rstrip("/") + "/"):
                 return True
     return False
 
@@ -488,12 +523,12 @@ def evaluate_scenario(scenario_path):
         record("FORBIDDEN_MODULES_AVOIDED", not used,
                "" if not used else "forbidden modules selected: %s" % ", ".join(used))
 
-        auth_lines = authoritative_lines(read_task_text(task_path))
-        gate_missing = [g for g in required_gates if not approvals_declare(auth_lines, g)]
+        auth_sections = authoritative_sections(read_task_text(task_path))
+        gate_missing = [g for g in required_gates if not approvals_declare(auth_sections, g)]
         record("APPROVALS_DECLARED", not gate_missing,
                "" if not gate_missing else "no approval record for: %s" % ", ".join(gate_missing))
 
-        ev_missing = [e for e in required_evidence if not evidence_contains(auth_lines, e)]
+        ev_missing = [e for e in required_evidence if not evidence_contains(auth_sections, e)]
         record("EVIDENCE_PRESENT", not ev_missing,
                "" if not ev_missing else "evidence table lacks: %s" % ", ".join(ev_missing))
 
@@ -559,15 +594,26 @@ def finalize(sid, scenario_path, scenario, checks=None, details=None):
     observed = "PASS" if total > 0 and passed == total else "FAIL"
 
     expectation = "PASS"
+    expected_failures = []
     if isinstance(scenario, dict):
         expectation = scenario.get("fixture_expected_result", "PASS")
+        expected_failures = sorted(scenario.get("expected_failed_checks", []))
 
-    matched = observed == expectation
+    # A negative control only proves detection when the EXACT intended check
+    # set failed; a failure of any other check must fail the harness itself.
+    actual_failures = sorted(cid for cid in checks if not checks[cid])
+    matched = observed == expectation and actual_failures == expected_failures
     diagnostics = []
-    if not matched:
+    if observed != expectation:
         diagnostics.append({
             "code": "FIXTURE_EXPECTATION_MISMATCH",
             "message": "observed %s does not match fixture_expected_result %s" % (observed, expectation),
+        })
+    elif actual_failures != expected_failures:
+        diagnostics.append({
+            "code": "FIXTURE_EXPECTATION_MISMATCH",
+            "message": "failed checks [%s] do not match expected_failed_checks [%s]"
+                       % (", ".join(actual_failures), ", ".join(expected_failures)),
         })
 
     doc = {

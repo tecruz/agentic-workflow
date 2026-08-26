@@ -270,6 +270,32 @@ Describe 'validate-context review-blocker regressions' {
         Invoke-Ctx $_.f | Select-Object -ExpandProperty Code | Should -Be $_.c
     }
 
+    It 'INVALID (1): selections require exactly one recognized risk profile' -ForEach @(
+        'context-profile-missing.md'
+        'context-profile-unknown.md'
+        'context-profile-duplicate.md'
+        'context-profile-invalid-with-ha-module.md'
+        'context-profile-invalid-none-selected.md'
+    ) {
+        Invoke-Ctx $_ | Select-Object -ExpandProperty Code | Should -Be 1
+    }
+
+    It 'the None selected sentinel rejects unresolved suffixes' -ForEach @(
+        @{ f = 'context-none-tbd.md'; c = 2 }
+        @{ f = 'context-none-empty-rationale.md'; c = 1 }
+        @{ f = 'context-none-narrative-ok.md'; c = 0 }
+    ) {
+        Invoke-Ctx $_.f | Select-Object -ExpandProperty Code | Should -Be $_.c
+    }
+
+    It 'JSON mode never reports VALID with a null profile' {
+        $out = Invoke-Ctx 'context-profile-unknown.md' -Json
+        $doc = ($out.Output -split "`n")[0] | ConvertFrom-Json
+        $doc.result | Should -Be 'INVALID'
+        $doc.profile | Should -BeNullOrEmpty
+        $doc.diagnostics[0].code | Should -Be 'CONTEXT_PROFILE_INVALID'
+    }
+
     It 'a fenced Profile declaration cannot satisfy the profile floor' {
         # Message text is pinned by the Bash suite; the classification alone
         # proves the fenced high-assurance declaration was ignored.
@@ -321,7 +347,7 @@ Describe 'validate-context review-blocker regressions' {
     It 'JSON redacts absolute outside-project paths in the full document' {
         # Nested invocation: [Console]::Out bypasses in-process stream capture.
         $outside = Join-Path ([System.IO.Path]::GetTempPath()) 'ctx-redact-probe.md'
-        Set-Content -LiteralPath $outside -Value "# TASK-X`n`n## Context modules`n`n- None selected`n"
+        Set-Content -LiteralPath $outside -Value "# TASK-X`n`n## Risk profile`n`nProfile: standard`n`n## Context modules`n`n- None selected`n"
         try {
             $raw = & pwsh -NoProfile -File $script:vctx -Format Json $outside 2>$null
             $LASTEXITCODE | Should -Be 0

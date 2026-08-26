@@ -61,6 +61,21 @@
     "fixture_expected_result": {
       "description": "Offline harness only: the classification the runner must produce for this saved-artifact fixture (PASS by default). A FAIL fixture is a negative control proving the runner detects forbidden behavior.",
       "enum": ["PASS", "FAIL"]
+    },
+    "expected_failed_checks": {
+      "description": "Offline harness only: the EXACT set of check ids that must fail. Negative controls must pin their intended violation so a failure of any other check cannot masquerade as detection.",
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "fixture_expected_result": { "const": "FAIL" } }, "required": ["fixture_expected_result"] },
+      "then": { "required": ["schema_version", "id", "input", "expected", "fixture_expected_result", "expected_failed_checks"], "properties": { "expected_failed_checks": { "minItems": 1 } } }
+    },
+    {
+      "if": { "properties": { "fixture_expected_result": { "const": "PASS" } }, "required": ["fixture_expected_result"] },
+      "then": { "properties": { "expected_failed_checks": { "maxItems": 0 } } }
+    }
+  ]
 }

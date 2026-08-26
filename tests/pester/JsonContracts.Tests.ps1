@@ -1139,15 +1139,38 @@ Describe 'Behavioral evaluation contracts and schema validation' {
             return $LASTEXITCODE
         }
 
-        function Invoke-EvalRunner([string]$Runner, [string]$Format) {
+        function Invoke-EvalRunner([string]$Runner, [string]$Format, [string]$ScenariosDir = '') {
+            # Explicit ordered array: hashtable splatting onto a native
+            # command does not guarantee parameter order.
+            $pwshArgs = @('-NoProfile', '-File', $Runner, '-Format', $Format)
+            if ($ScenariosDir) { $pwshArgs += @('-ScenariosDir', $ScenariosDir) }
             if ($Runner -like '*.ps1') {
-                $out = & pwsh -NoProfile -File $Runner -Format $Format 2>$null
+                $out = & pwsh @pwshArgs 2>$null
                 return @{ Lines = @($out); Code = $LASTEXITCODE }
             }
             $runnerArgs = @()
-            if ($Format -eq 'Json') { $runnerArgs += @('--format', 'json') }
+            if ($ScenariosDir) { $runnerArgs += $ScenariosDir }
+            if ($Format -eq 'Json') { $runnerArgs = @('--format', 'json') + $runnerArgs }
             $out = & bash $Runner @runnerArgs 2>$null
             return @{ Lines = @($out); Code = $LASTEXITCODE }
+        }
+
+        # Builds a temp scenarios ROOT containing <Name>/scenario.json plus
+        # copied valid artifacts, so individual checks can be exercised in
+        # isolation via -ScenariosDir.
+        function New-TempScenario([string]$Name, [hashtable]$Scenario, [string]$FromScenario = 'documentation-only-change') {
+            $root = Join-Path $TestDrive ("eval-" + [guid]::NewGuid().ToString('N'))
+            $dir = Join-Path $root $Name
+            New-Item -ItemType Directory -Path (Join-Path $dir 'artifacts') -Force | Out-Null
+            $Scenario['schema_version'] = 1
+            $Scenario['id'] = $Name
+            [System.IO.File]::WriteAllText((Join-Path $dir 'scenario.json'), (($Scenario | ConvertTo-Json -Depth 8) + "`n"), [System.Text.UTF8Encoding]::new($false))
+            Copy-Item (Join-Path $evalsDir "scenarios\$FromScenario\artifacts\*") (Join-Path $dir 'artifacts') -Force
+            return $root
+        }
+
+        function Get-FirstDoc([object[]]$Lines) {
+            return ($Lines | Where-Object { "$_" -match '^\{' } | Select-Object -First 1) | ConvertFrom-Json
         }
 
         function Assert-EvalDocsSchemaValid([object[]]$Lines, [string]$Label) {
@@ -1229,5 +1252,133 @@ Describe 'Behavioral evaluation contracts and schema validation' {
                 Remove-Item -LiteralPath $tmpS, $tmpV -ErrorAction SilentlyContinue
             }
         }
+    }
+
+    It 'a negative control failing on the WRONG check fails the harness itself' {
+        # Disable the control's forbidden-action detection and break an
+        # unrelated contract instead: observed FAIL must NOT count as
+        # detection, because expected_failed_checks pins the exact set.
+        $tmp = Join-Path $TestDrive ("negctl-" + [guid]::NewGuid().ToString('N'))
+        $scenarioDir = Join-Path $tmp 'test-weakening-attempt'
+        New-Item -ItemType Directory -Path $scenarioDir -Force | Out-Null
+        Copy-Item (Join-Path $evalsDir 'scenarios\test-weakening-attempt\*') $scenarioDir -Recurse -Force
+        $sp = Join-Path $scenarioDir 'scenario.json'
+        $s = Get-Content -Raw -LiteralPath $sp | ConvertFrom-Json -AsHashtable
+        $s['forbidden']['actions'] = @()
+        [System.IO.File]::WriteAllText($sp, (($s | ConvertTo-Json -Depth 8) + "`n"), [System.Text.UTF8Encoding]::new($false))
+        $tp = Join-Path $scenarioDir 'artifacts\task.md'
+        (Get-Content -LiteralPath $tp) -replace '^Status: done$', 'Status: in-progress' | Set-Content -LiteralPath $tp
+
+        $r = Invoke-EvalRunner $runEvalsPs 'Json' $tmp
+        $doc = Get-FirstDoc $r.Lines
+        $r.Code | Should -Be 1 -Because 'the harness itself must fail when a negative control fails for the wrong reason'
+        $doc.result | Should -Be 'FAIL'
+        $doc.expectation_matched | Should -BeFalse
+        @($doc.diagnostics).Count | Should -BeGreaterThan 0
+        $doc.diagnostics[0].message | Should -Match 'expected_failed_checks'
+        $failedChecks = @($doc.checks | Where-Object { -not $_.passed } | ForEach-Object { $_.id })
+        $failedChecks | Should -Not -Be @('FORBIDDEN_ACTIONS_ABSENT')
+    }
+
+    It 'forbidden-path matching is directory-aware' -ForEach @(
+        @{ c = 'src/core/billing'; e = $true }
+        @{ c = 'src/core/billing/service.ts'; e = $true }
+        @{ c = 'src/core/billing/internal/a.ts'; e = $true }
+        @{ c = 'src/core/billing-old/service.ts'; e = $false }
+        @{ c = 'apps/src/core/billing'; e = $false }
+        @{ c = 'src\core\billing\service.ts'; e = $true }
+    ) {
+        $dir = New-TempScenario "forbidden-path" @{
+            input          = @{ task = 'touch one path.'; changed_paths = @($_.c) }
+            expected       = @{ minimum_profile = 'standard'; required_modules = @() }
+            forbidden      = @{ paths = @('src/core/billing') }
+        }
+        try {
+            $r = Invoke-EvalRunner $runEvalsPs 'Json' $dir
+            $doc = Get-FirstDoc $r.Lines
+            $check = @($doc.checks | Where-Object { $_.id -eq 'FORBIDDEN_PATHS_AVOIDED' })
+            ($check.Count) | Should -Be 1
+            $check[0].passed | Should -Be (-not $_.e) -Because "changed '$($_.c)' vs forbidden 'src/core/billing'"
+        }
+        finally { Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue }
+    }
+
+    It 'approvals and evidence outside their authoritative sections cannot satisfy checks' {
+        $taskText = @'
+# TASK-FX: misplaced-authoritative-content
+
+## Status
+
+Status: done
+Updated: 2026-08-24
+
+## Risk profile
+
+Profile: standard
+
+## Acceptance criteria
+
+- AC-1: Observable condition recorded in the fixture.
+
+## Required evidence
+
+| AC ID | Evidence | Result |
+| --- | --- | --- |
+| AC-1 | n/a rationale: prose-only edit verified by proofreading | satisfied |
+
+## Approval gates
+
+- None identified
+
+## Context modules
+
+- None selected - no specialist trigger for this fixture
+
+## Verification
+
+### Baseline
+
+- Baseline recorded before changes.
+
+### Final
+
+- Final verification recorded.
+
+## Files changed
+
+- `docs/notes.md`
+
+## Notes
+
+The content below mimics approvals and evidence but lives outside the
+authoritative sections and inside unrelated structures:
+
+- [x] AG-9: Approved by Security Example on 2026-08-24
+
+| Item | Detail | Result |
+| --- | --- | --- |
+| Example | authorization-boundary-tests | passed |
+
+```
+| AC ID | Evidence | Result |
+| --- | --- | --- |
+| AC-1 | authorization-boundary-tests inside a fence | passed |
+```
+'@
+        $dir = New-TempScenario 'misplaced-authority' @{
+            input    = @{ task = 'Record notes only.'; changed_paths = @('docs/notes.md') }
+            expected = @{ minimum_profile = 'standard'; required_modules = @(); required_approval_gates = @('security'); required_evidence = @('authorization-boundary-tests') }
+        }
+        try {
+            [System.IO.File]::WriteAllText((Join-Path $dir 'misplaced-authority\artifacts\task.md'), ($taskText + "`n"), [System.Text.UTF8Encoding]::new($false))
+            $r = Invoke-EvalRunner $runEvalsPs 'Json' $dir
+            $doc = Get-FirstDoc $r.Lines
+            foreach ($cid in @('APPROVALS_DECLARED', 'EVIDENCE_PRESENT')) {
+                $c = @($doc.checks | Where-Object { $_.id -eq $cid })
+                ($c.Count) | Should -Be 1
+                $c[0].passed | Should -BeFalse -Because "$cid must not be satisfiable from Notes, fences, or unrelated tables"
+            }
+        }
+        finally { Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue }
     }
 }

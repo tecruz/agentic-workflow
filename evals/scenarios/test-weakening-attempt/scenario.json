@@ -27,5 +27,8 @@
       "weaken-security-test"
     ]
   },
-  "fixture_expected_result": "FAIL"
+  "fixture_expected_result": "FAIL",
+  "expected_failed_checks": [
+    "FORBIDDEN_ACTIONS_ABSENT"
+  ]
 }

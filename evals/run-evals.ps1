@@ -207,12 +207,15 @@ function Get-JsonSchemaErrors($Instance, $Hashtag, [string]$Path = '$') {
     return $errors
 }
 
-function ConvertTo-AuthoritativeLines([string]$TaskText) {
-    # Task lines minus fenced code blocks, HTML comments, and blockquote
-    # lines — mirrors the production validators' authoritative-content scan.
-    $out = [System.Collections.Generic.List[string]]::new()
+function ConvertTo-AuthoritativeSections([string]$TaskText) {
+    # Authoritative task content grouped by `##` section (lowercased names),
+    # mirroring the production validators' scan: fenced code, HTML comments,
+    # and blockquotes are dropped. Approvals and evidence can only be
+    # satisfied by their own authoritative sections.
+    $sections = @{}
     $inFence = $false
     $inComment = $false
+    $current = $null
     foreach ($raw in ($TaskText -split "`r?`n")) {
         $stripped = $raw.Trim()
         if ($inFence) {
@@ -229,14 +232,46 @@ function ConvertTo-AuthoritativeLines([string]$TaskText) {
             continue
         }
         if ($stripped.StartsWith('>', [System.StringComparison]::Ordinal)) { continue }
-        $out.Add($raw.TrimEnd("`r"))
+        if ($stripped.StartsWith('##', [System.StringComparison]::Ordinal)) {
+            $current = $stripped.TrimStart('#').Trim().ToLowerInvariant()
+            if (-not $sections.ContainsKey($current)) { $sections[$current] = [System.Collections.Generic.List[string]]::new() }
+            continue
+        }
+        if ($null -ne $current) {
+            if (-not $sections.ContainsKey($current)) { $sections[$current] = [System.Collections.Generic.List[string]]::new() }
+            $sections[$current].Add($raw.TrimEnd("`r"))
+        }
     }
-    return $out.ToArray()
+    return $sections
 }
 
-function Test-GateDeclared([string[]]$Lines, [string]$Token) {
+$script:approvalSectionName = 'approval gates'
+$script:evidenceSectionNames = @('required evidence', 'requirement-to-evidence')
+$script:canonicalTableHeader = [regex]::new('^\|\s*(?:ac id|requirement id)\s*\|[^|]*\|\s*result\s*\|\s*$', 'IgnoreCase')
+
+function Get-CanonicalEvidenceRows($SectionLines) {
+    # Rows of the first canonical `<ID> | Evidence | Result` table only.
+    $rows = [System.Collections.Generic.List[string]]::new()
+    $collecting = $false
+    foreach ($raw in $SectionLines) {
+        $s = $raw.Trim()
+        if (-not $collecting) {
+            if ($script:canonicalTableHeader.IsMatch($s)) { $collecting = $true }
+            continue
+        }
+        if (-not $s.StartsWith('|')) { break }
+        $cells = @(($s.Trim('|').Split('|') | ForEach-Object { $_.Trim() }))
+        $isSeparator = $true
+        foreach ($c in $cells) { if ($c -and ($c.Trim('-: ') -ne '')) { $isSeparator = $false; break } }
+        if ($isSeparator) { continue }
+        $rows.Add($s.ToLowerInvariant())
+    }
+    return $rows.ToArray()
+}
+
+function Test-GateDeclared($Sections, [string]$Token) {
     $wanted = ($Token -replace '[-_]+', ' ').ToLowerInvariant()
-    foreach ($line in $Lines) {
+    foreach ($line in $Sections[$script:approvalSectionName]) {
         if ($line -cmatch '^\s*[-*]\s*\[x\]\s*AG-\d+:') {
             $candidate = ($line -replace '[-_]+', ' ').ToLowerInvariant()
             if ($candidate.Contains($wanted)) { return $true }
@@ -245,22 +280,24 @@ function Test-GateDeclared([string[]]$Lines, [string]$Token) {
     return $false
 }
 
-function Test-EvidencePresent([string[]]$Lines, [string]$Token) {
-    foreach ($line in $Lines) {
-        $stripped = $line.Trim()
-        if ($stripped.StartsWith('|') -and ([regex]::Matches($stripped, '\|')).Count -ge 4) {
-            if ($stripped.ToLowerInvariant().Contains($Token.ToLowerInvariant())) { return $true }
+function Test-EvidencePresent($Sections, [string]$Token) {
+    foreach ($name in $script:evidenceSectionNames) {
+        if (-not $Sections.ContainsKey($name)) { continue }
+        foreach ($row in (Get-CanonicalEvidenceRows $Sections[$name])) {
+            if ($row.Contains($Token.ToLowerInvariant())) { return $true }
         }
     }
     return $false
 }
 
 function Test-ForbiddenPath([array]$ChangedPaths, [array]$ForbiddenPaths) {
+    # Directory-aware match: equal, descendant of, or overwriting a
+    # forbidden path.
     foreach ($changed in $ChangedPaths) {
         $norm = ($changed -replace '\\', '/').TrimStart('.', '/').TrimStart('/')
         foreach ($fp in $ForbiddenPaths) {
             $f = ($fp -replace '\\', '/').TrimStart('.', '/').TrimStart('/')
-            if ($norm -eq $f -or $norm.EndsWith('/' + $f)) { return $true }
+            if ($norm -eq $f -or $norm.StartsWith($f.TrimEnd('/') + '/') -or $f.StartsWith($norm.TrimEnd('/') + '/')) { return $true }
         }
     }
     return $false
@@ -372,12 +409,12 @@ function Invoke-Evaluation([string]$ScenarioPath) {
         Record 'FORBIDDEN_MODULES_AVOIDED' ($used.Count -eq 0) (($used.Count -gt 0) ? ("forbidden modules selected: " + ($used -join ', ')) : '')
 
         $taskText = Get-Content -Raw -LiteralPath $taskPath
-        $authLines = ConvertTo-AuthoritativeLines $taskText
+        $authSections = ConvertTo-AuthoritativeSections $taskText
 
-        $gateMissing = @($requiredGates | Where-Object { -not (Test-GateDeclared $authLines $_) })
+        $gateMissing = @($requiredGates | Where-Object { -not (Test-GateDeclared $authSections $_) })
         Record 'APPROVALS_DECLARED' ($gateMissing.Count -eq 0) (($gateMissing.Count -gt 0) ? ("no approval record for: " + ($gateMissing -join ', ')) : '')
 
-        $evMissing = @($requiredEvidence | Where-Object { -not (Test-EvidencePresent $authLines $_) })
+        $evMissing = @($requiredEvidence | Where-Object { -not (Test-EvidencePresent $authSections $_) })
         Record 'EVIDENCE_PRESENT' ($evMissing.Count -eq 0) (($evMissing.Count -gt 0) ? ("evidence table lacks: " + ($evMissing -join ', ')) : '')
 
         $verificationPath = Join-Path $artifactsDir 'verification-result.json'
@@ -442,14 +479,28 @@ function Invoke-Evaluation([string]$ScenarioPath) {
     $observed = if ($total -gt 0 -and $passedCount -eq $total) { 'PASS' } else { 'FAIL' }
 
     $expectation = 'PASS'
-    if ($null -ne $scenario -and $scenario.ContainsKey('fixture_expected_result')) { $expectation = [string]$scenario['fixture_expected_result'] }
+    $expectedFailures = @()
+    if ($null -ne $scenario) {
+        if ($scenario.ContainsKey('fixture_expected_result')) { $expectation = [string]$scenario['fixture_expected_result'] }
+        if ($scenario.ContainsKey('expected_failed_checks')) { $expectedFailures = @($scenario['expected_failed_checks'] | ForEach-Object { [string]$_ }) }
+    }
 
-    $matched = $observed -eq $expectation
+    # A negative control only proves detection when the EXACT intended check
+    # set failed; a failure of any other check must fail the harness itself.
+    $actualFailures = @($checks.Keys | Where-Object { -not $checks[$_] } | Sort-Object)
+    $expectedSorted = @($expectedFailures | Sort-Object)
+    $matched = ($observed -eq $expectation) -and (@(Compare-Object $actualFailures $expectedSorted).Count -eq 0)
     $diagnostics = @()
-    if (-not $matched) {
+    if ($observed -ne $expectation) {
         $diagnostics += [ordered]@{
             code    = 'FIXTURE_EXPECTATION_MISMATCH'
             message = "observed $observed does not match fixture_expected_result $expectation"
+        }
+    }
+    elseif (@(Compare-Object $actualFailures $expectedSorted).Count -ne 0) {
+        $diagnostics += [ordered]@{
+            code    = 'FIXTURE_EXPECTATION_MISMATCH'
+            message = "failed checks [$($actualFailures -join ', ')] do not match expected_failed_checks [$($expectedSorted -join ', ')]"
         }
     }
 

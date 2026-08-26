@@ -336,6 +336,7 @@ $scenarios = @(
         minProfile = 'high-assurance'; reqModules = @('security-review'); reqGates = @('security'); reqEvidence = @('authorization-boundary-tests')
         forbidden = @{ modules = @(); paths = @(); actions = @('weaken-security-test') }
         expected = 'FAIL'
+        expectedFailedChecks = @('FORBIDDEN_ACTIONS_ABSENT')
         profile = 'high-assurance'
         modulesBlock = "- security-review v1 loaded — test touches authorization behavior"
         approvals = @("[x] AG-1: Approved by Security on $date")
@@ -372,7 +373,10 @@ foreach ($s in $scenarios) {
     if ($s.forbidden.modules.Count -gt 0 -or $s.forbidden.paths.Count -gt 0 -or $s.forbidden.actions.Count -gt 0) {
         $scenario['forbidden'] = [ordered]@{ modules = $s.forbidden.modules; paths = $s.forbidden.paths; actions = $s.forbidden.actions }
     }
-    if ($s.expected -ne 'PASS') { $scenario['fixture_expected_result'] = $s.expected }
+    if ($s.expected -ne 'PASS') {
+        $scenario['fixture_expected_result'] = $s.expected
+        $scenario['expected_failed_checks'] = @($s.expectedFailedChecks)
+    }
 
     Write-Utf8 (Join-Path $dir 'scenario.json') (($scenario | ConvertTo-Json -Depth 6) + "`n")
 

@@ -36,10 +36,10 @@ if [ ! -f "$TASK_FILE" ]; then
 fi
 
 task_code=0
-bash "$SCRIPT_DIR/validate-task.sh" --handoff "$TASK_FILE" >/dev/null 2>&1 || task_code=$?
+task_diag="$(bash "$SCRIPT_DIR/validate-task.sh" --handoff "$TASK_FILE" 2>&1 >/dev/null)" || task_code=$?
 
 context_code=0
-bash "$SCRIPT_DIR/validate-context.sh" --handoff "$TASK_FILE" >/dev/null 2>&1 || context_code=$?
+context_diag="$(bash "$SCRIPT_DIR/validate-context.sh" --handoff "$TASK_FILE" 2>&1 >/dev/null)" || context_code=$?
 
 if [ "$task_code" -eq 0 ] && [ "$context_code" -eq 0 ]; then
     echo "VALID: handoff gate satisfied (task contract + context contract)"
@@ -51,8 +51,14 @@ if [ "$task_code" -eq 2 ] || [ "$context_code" -eq 2 ]; then
     gate_code=2
 fi
 
+first_line() {
+    local line
+    line="$(printf '%s' "$1" | head -n 1)"
+    printf '%s' "${line:-<no diagnostic>}"
+}
+
 case "$gate_code" in
-    2) echo "BLOCKED: handoff gate failed (task=$task_code context=$context_code)" >&2 ;;
-    *) echo "INVALID: handoff gate failed (task=$task_code context=$context_code)" >&2 ;;
+    2) echo "BLOCKED: handoff gate failed (task=$task_code: $(first_line "$task_diag"); context=$context_code: $(first_line "$context_diag"))" >&2 ;;
+    *) echo "INVALID: handoff gate failed (task=$task_code: $(first_line "$task_diag"); context=$context_code: $(first_line "$context_diag"))" >&2 ;;
 esac
 exit "$gate_code"

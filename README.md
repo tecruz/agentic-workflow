@@ -218,13 +218,16 @@ DISCOVER → CLASSIFY RISK → PLAN → IMPLEMENT → VERIFY → HANDOFF
 4. **Implement** — minimal, style-matching changes per `.agentic/rules/`.
 5. **Verify** — run the project's checks. Self-heal failures with at most
    three evidence-based repair cycles; never weaken a test to go green.
-6. **Handoff** — mark the task `done` under `## Status`, then validate it with
-   `.agentic/scripts/validate-task.sh --handoff` / `validate-task.ps1 -Handoff`
-   (the handoff gate requires `Status: done`, resolved evidence, and checked
-   approval gates), then report files changed, verification commands with exit
-   codes and results, pre-existing failures, environment blockers, remaining
-   risks, and commit status. Commits happen only when explicitly requested or
-   permitted by project policy.
+ 6. **Handoff** — mark the task `done` under `## Status`, then validate it with
+    `.agentic/scripts/validate-handoff.sh` / `validate-handoff.ps1`. The
+    composite gate runs both production validators in handoff mode —
+    `validate-task --handoff` (requires `Status: done`, resolved evidence, and
+    checked approval gates) and `validate-context --handoff` (known,
+    rationale-backed module selections at a compatible risk profile) — then
+    report files changed, verification commands with exit
+    codes and results, pre-existing failures, environment blockers, remaining
+    risks, and commit status. Commits happen only when explicitly requested or
+    permitted by project policy.
 
 Full details: [`.agentic/WORKFLOW.md`](.agentic/WORKFLOW.md). Canonical agent
 instructions: [`AGENTS.md`](AGENTS.md).
@@ -390,7 +393,9 @@ CI on any mismatch. Both the Bats and Pester suites run on all three platforms;
         ├── validate-task.sh       # Task-file validator (Linux/macOS)
         ├── validate-task.ps1      # Task-file validator (Windows)
         ├── validate-context.sh    # Context-selection validator (Linux/macOS)
-        └── validate-context.ps1   # Context-selection validator (Windows)
+        ├── validate-context.ps1   # Context-selection validator (Windows)
+        ├── validate-handoff.sh    # Composite handoff gate (Linux/macOS)
+        └── validate-handoff.ps1   # Composite handoff gate (Windows)
 ```
 
 ---

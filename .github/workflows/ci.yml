@@ -156,8 +156,7 @@ jobs:
           $results = @()
           foreach ($f in @('install.ps1', '.agentic/scripts/verify.ps1', '.agentic/scripts/validate-task.ps1', '.agentic/scripts/validate-context.ps1', '.agentic/scripts/validate-handoff.ps1')) {
             $results += Invoke-ScriptAnalyzer -Path $f -Severity Error
-          }
-          $results | Format-Table -AutoSize
+          }          $results | Format-Table -AutoSize
           if ($results) { exit 1 }
 
       - name: Validate completed tasks through the composite handoff gate

@@ -78,12 +78,21 @@ evaluation, so a detected negative control still reports `failed >= 1`.
 
 ## Negative controls
 
-A scenario may set `"fixture_expected_result": "FAIL"`. Such a fixture embeds
-a policy violation (for example a recorded `weaken-security-test` action) and
-is valid in every other contract respect; the runner must detect it, so
-`observed_result` comes out FAIL while the harness itself still passes. This
-proves the runner detects forbidden behavior rather than trivially passing
-everything. The default expectation is `PASS`.
+A scenario may set `"fixture_expected_result": "FAIL"` together with an
+`expected_failed_checks` array pinning the EXACT check ids that must fail:
+
+```json
+{
+  "fixture_expected_result": "FAIL",
+  "expected_failed_checks": ["FORBIDDEN_ACTIONS_ABSENT"]
+}
+```
+
+The runner must detect the violation AND fail on exactly those checks — a
+failure of any other check fails the harness itself, so a regression that
+stops detecting the forbidden action cannot hide behind an unrelated failure.
+Positive scenarios must observe zero failed checks (they must not declare the
+array).
 
 ## Running
 
