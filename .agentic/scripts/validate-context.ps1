@@ -228,7 +228,7 @@ function Get-HeadingStats {
         }
         if ($null -ne $current -and -not [string]::IsNullOrWhiteSpace($line)) {
             if ($null -eq $stats[$current].First) { $stats[$current].First = $line.Trim() }
-            if (-not $stats[$current].HasContent -and (Test-MeaningfulChar $line)) {
+            if (-not $stats[$current].HasContent -and (Test-MeaningfulChar $line) -and -not (Test-PlaceholderText $line)) {
                 $stats[$current].HasContent = $true
             }
         }
@@ -411,8 +411,9 @@ foreach ($rawLine in $script:SectionLines) {
     $loadedToken = if ($tokens.Count -gt 2) { $tokens[2] } else { '' }
     $rest = if ($tokens.Count -gt 3) { ($tokens[3..($tokens.Count - 1)] -join ' ') } else { '' }
 
-    # Case-sensitive grammar checks mirror the Bash validator exactly.
-    if ($entry -cnotmatch '^\S+\s+v[1-9][0-9]*\s+\S+') {
+    # Canonical grammar (ADR-0010): <id> v<N> loaded — <rationale>
+    # Requires id, version, lowercase 'loaded', separator and rationale.
+    if ($entry -cnotmatch '^\S+\s+v[1-9][0-9]*\s+loaded\s+[—–-]\s+\S') {
         Write-Invalid 'MODULE_SELECTION_UNRESOLVED' '## Context modules' $entry "Selection entry is not in the canonical form '<module-id> v<N> loaded — <rationale>': $entry"
     }
 

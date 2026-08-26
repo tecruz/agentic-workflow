@@ -232,7 +232,16 @@ declare -a REG_VERSIONS=()
 declare -a REG_MINS=()
 
 has_meaningful_char() {
-    printf '%s' "$1" | grep -qE '[[:alpha:][:digit:]]'
+    if LC_ALL=C grep -qE '[A-Za-z0-9]' <<< "$1"; then
+        return 0
+    fi
+    [ -n "$1" ] || return 1
+    if ! LC_ALL=C grep -q '[^[:print:]]' <<< "$1"; then
+        return 1
+    fi
+    command -v perl >/dev/null 2>&1 \
+        || fail_invalid "TOOLING_UNAVAILABLE" "" "" "perl is required to classify non-ASCII content; install perl or keep evidence ASCII-only."
+    perl -CS -0777 -ne 'exit(/[\p{L}\p{N}]/ ? 0 : 1)' <<< "$1" 2>/dev/null
 }
 
 registry_invalid() {
@@ -286,11 +295,11 @@ load_registry() {
                     if [ -z "$min" ] && [ -n "${line//[[:space:]]/}" ]; then
                         min="$(printf '%s' "$line" | awk '{print $1}')"
                     fi ;;
-                lw) [ "$lw_c" -eq 0 ] && has_meaningful_char "$line" && lw_c=1 ;;
-                rc) [ "$rc_c" -eq 0 ] && has_meaningful_char "$line" && rc_c=1 ;;
-                ag) [ "$ag_c" -eq 0 ] && has_meaningful_char "$line" && ag_c=1 ;;
-                re) [ "$re_c" -eq 0 ] && has_meaningful_char "$line" && re_c=1 ;;
-                ps) [ "$ps_c" -eq 0 ] && has_meaningful_char "$line" && ps_c=1 ;;
+                lw) [ "$lw_c" -eq 0 ] && has_meaningful_char "$line" && ! is_placeholder_text "$line" && lw_c=1 ;;
+                rc) [ "$rc_c" -eq 0 ] && has_meaningful_char "$line" && ! is_placeholder_text "$line" && rc_c=1 ;;
+                ag) [ "$ag_c" -eq 0 ] && has_meaningful_char "$line" && ! is_placeholder_text "$line" && ag_c=1 ;;
+                re) [ "$re_c" -eq 0 ] && has_meaningful_char "$line" && ! is_placeholder_text "$line" && re_c=1 ;;
+                ps) [ "$ps_c" -eq 0 ] && has_meaningful_char "$line" && ! is_placeholder_text "$line" && ps_c=1 ;;
             esac
         done < "$mf"
 
@@ -418,10 +427,10 @@ scan_task_file() {
         case "$norm" in
             "profile:"*)
                 PROFILE_COUNT=$((PROFILE_COUNT + 1))
-                PROFILE="$(printf '%s' "$line" | sed -e 's/^[Pp][Rr][Oo][Ff][Ii][Ll][Ee]:[[:space:]]*//' | awk '{print $1}')"
+                PROFILE="$(printf '%s' "$line" | sed -e 's/^[Pp][Rr][Oo][Ff][Ii][Ll][Ee]:[[:space:]]*//' | awk '{print $1}' | tr '[:upper:]' '[:lower:]')"
                 ;;
             "status:"*)
-                STATUS="$(printf '%s' "$line" | sed -e 's/^[Ss][Tt][Aa][Tt][Uu][Ss]:[[:space:]]*//' | awk '{print $1}')"
+                STATUS="$(printf '%s' "$line" | sed -e 's/^[Ss][Tt][Aa][Tt][Uu][Ss]:[[:space:]]*//' | awk '{print $1}' | tr '[:upper:]' '[:lower:]')"
                 ;;
             '## '*)
                 if [ "$in_section" -eq 1 ]; then
@@ -459,44 +468,44 @@ handle_entry() {
     # Sentinel: '- None selected' optionally followed by '— <why>'. A suffix
     # must be a substantive rationale: symbol-only separators are malformed,
     # and placeholder suffixes (TBD/TODO/Pending/...) block a completed task.
+    # Requires word-boundary after 'selected' to reject 'selectedness' etc.
     local lowered
     lowered="$(printf '%s' "$entry" | tr '[:upper:]' '[:lower:]')"
-    case "$lowered" in
-        none\ selected*)
-            NONE_SENTINEL_SEEN=1
-            local suffix=""
-            if [ "${#lowered}" -gt 13 ]; then
-                suffix="$(printf '%s' "$entry" | cut -c14-)"
+    if printf '%s' "$lowered" | grep -qE '^none[[:space:]]+selected($|[^a-z0-9_])'; then
+        NONE_SENTINEL_SEEN=1
+        # Extract suffix after the 'none selected' words (preserve original case for rationale)
+        local suffix
+        suffix="$(printf '%s' "$entry" | sed -E 's/^[Nn][Oo][Nn][Ee][[:space:]]+[Ss][Ee][Ll][Ee][Cc][Tt][Ee][Dd]//')"
+        if [ -n "$(printf '%s' "$suffix" | tr -d '[:space:]')" ]; then
+            local rationale
+            rationale="$(printf '%s' "$suffix" | sed -E 's/^[[:space:]]*[—–-][[:space:]]*//')"
+            if ! has_meaningful_char "$rationale"; then
+                fail_invalid "MODULE_SELECTION_UNRESOLVED" "## Context modules" "None selected" "'None selected' carries a separator but no rationale."
             fi
-            if [ -n "$(printf '%s' "$suffix" | tr -d '[:space:]')" ]; then
-                local rationale
-                rationale="$(printf '%s' "$suffix" | sed -e 's/^[[:space:]]*[—–-][[:space:]]*//')"
-                if ! has_meaningful_char "$rationale"; then
-                    fail_invalid "MODULE_SELECTION_UNRESOLVED" "## Context modules" "None selected" "'None selected' carries a separator but no rationale."
-                fi
-                if is_placeholder_text "$rationale" && [ "$STATUS" = "done" ]; then
-                    fail_blocked "MODULE_SELECTION_UNRESOLVED" "## Context modules" "None selected" "Completed task carries an unresolved 'None selected' rationale placeholder."
-                fi
+            if is_placeholder_text "$rationale" && [ "$STATUS" = "done" ]; then
+                fail_blocked "MODULE_SELECTION_UNRESOLVED" "## Context modules" "None selected" "Completed task carries an unresolved 'None selected' rationale placeholder."
             fi
-            return 0
-            ;;
-    esac
+        fi
+        return 0
+    fi
 
     SELECTION_COUNT=$((SELECTION_COUNT + 1))
 
-    # Grammar: <id> v<N> loaded [-—:] <rationale>
+    # Canonical grammar (ADR-0010): <id> v<N> loaded — <rationale>
+    # Requires exactly: valid id, version, lowercase 'loaded', a separator
+    # (em dash / en dash / hyphen) and a substantive rationale.
     local id="" ver="" loaded_token="" rest=""
     id="$(printf '%s' "$entry" | awk '{print $1}')"
     ver="$(printf '%s' "$entry" | awk '{print $2}')"
     loaded_token="$(printf '%s' "$entry" | awk '{print $3}')"
-    rest="$(printf '%s' "$entry" | cut -s -d' ' -f4-)"
+    rest="$(printf '%s' "$entry" | sed -E 's/^[^[:space:]]+[[:space:]]+v[1-9][0-9]*[[:space:]]+loaded[[:space:]]+//')"
 
-    if ! printf '%s' "$entry" | grep -Eq '^[^[:space:]]+[[:space:]]+v[1-9][0-9]*[[:space:]]+[^[:space:]]+'; then
+    if ! printf '%s' "$entry" | grep -Eq '^[^[:space:]]+[[:space:]]+v[1-9][0-9]*[[:space:]]+loaded[[:space:]]+[—–-][[:space:]]+[^[:space:]]'; then
         fail_invalid "MODULE_SELECTION_UNRESOLVED" "## Context modules" "$entry" "Selection entry is not in the canonical form '<module-id> v<N> loaded — <rationale>': $entry"
     fi
 
     local sep_rationale
-    sep_rationale="$(printf '%s' "$rest" | sed -e 's/^[—–-][[:space:]]*//')"
+    sep_rationale="$(printf '%s' "$rest" | sed -E 's/^[—–-][[:space:]]*//')"
 
     if [ "$loaded_token" != "loaded" ]; then
         fail_invalid "MODULE_SELECTION_UNRESOLVED" "## Context modules" "$id" "Selection of '$id' does not confirm the module was loaded before planning."
