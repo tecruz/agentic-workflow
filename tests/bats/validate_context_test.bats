@@ -366,7 +366,7 @@ register_valid_minimal()      { make_module "$1" some-other-module some-other-mo
     for fx in context-profile-missing context-profile-unknown context-profile-duplicate context-profile-invalid-with-ha-module context-profile-invalid-none-selected; do
         run bash "$VALIDATE" "$FIXTURES/$fx.md"
         [ "$status" -eq 1 ]
-        printf '%s' "$output" | grep -q "CONTEXT_PROFILE_INVALID\|recognized risk profile"
+        printf '%s' "$output" | grep -qi "risk profile"
     done
 }
 
