@@ -12,8 +12,13 @@
   reusable CI, extracted-archive and release-to-release upgrade tests, release
   workflow. Released as `v1.2.2`. Superseded by v1.3.0.
 - [x] PR #7 & PR #8 — Risk profiles and evidence contracts and v1.3.0 finalization (PR #8): `prototype`/`standard`/
-  `high-assurance` profiles, task validators, risk-aware task template, release upgrade tests, and release finalization. Released as `v1.3.0`.
+  `high-assurance` profiles, task validators, risk-aware task template, release upgrade tests, and release finalization. Released as `v1.3.0`. Superseded by v1.4.0.
 - [x] PR #9 — Versioned JSON result contracts (`v1.4.0`): machine-readable verification and task-validation result contracts, JSON output modes for verifiers and task validators (`--format json` / `-Format Json`), managed JSON schemas (`.agentic/schemas/`), stable diagnostic codes, clean stdout isolation, redaction policy, ADR-0009, and schema compliance tests.
+- [x] TASK-004 — PR #9 second-review blocker: Bash `--events-force` rejected directory destinations and stranded the scratch stream (see `.agentic/tasks/TASK-004-bash-events-force-directory.md`)
+- [x] TASK-005 — v1.4.0 publication: changelog publication-date alignment (`b4f1248`), annotated `v1.4.0` tag, workflow-built and published assets, and supersede bookkeeping (see `.agentic/tasks/TASK-005-v140-release-publication.md`)
+- [x] TASK-006 — PR #10 portable context modules and offline behavioral evaluations (`v1.5.0`): five-module registry under `.agentic/context/`, `validate-context.sh`/`.ps1` with cross-language parity and stable diagnostics, `context-selection-v1` schema, eight-scenario offline eval harness (no LLM/network), installer/bundle/CI registration with `evals/` leak gates, real v1.4.0→v1.5.0 migration test, protocol_version sweep to 1.5.0 (see `.agentic/tasks/TASK-006-context-modules-and-evals.md`)
+- [x] TASK-007 — PR #10 review fixes: PowerShell sentinel grammar aligned with the Bash anchored grammar (malformed `None selected-but-not-really` / `None selected because ...` now INVALID in both languages), stale Pester JSON-identifier assertion corrected to the documented redaction contract, missing perl reclassified as BLOCKED with schema-valid code `TOOLING_UNAVAILABLE`, regression fixtures + golden tests added (see `.agentic/tasks/TASK-007-pr10-review-fixes.md`)
+- [x] TASK-008 — PR #10 pre-merge polish: final fixture/test/registration counts corrected in TASK-006 and the PR description (42 shared fixtures, 57 Bats cases, 41 Pester cases, 11 registrations); eval harness fence parsing now mirrors the production validator for both ``` and `~~~`; `#Requires -Version 7.0` guard on `run-evals.ps1`; deterministic `[ordered]` JSON in `generate-scenarios.ps1` (see `.agentic/tasks/TASK-008-pr10-polish.md`)
 
 ## Recent Decisions
 
@@ -24,6 +29,13 @@
 
 ## Notes
 
+- **v1.4.0 released 2026-08-24** as annotated tag `v1.4.0` on commit `b4f1248`.
+  The Release workflow passed: metadata validation (VERSION/CHANGELOG/tag
+  agreement), full CI on the tagged SHA, bundle build, extracted-archive tests
+  for both archives, SHA256SUMS verification with re-download of uploaded
+  assets, and publication as Latest. Published assets
+  (`agentic-workflow-1.4.0.tar.gz`, `.zip`, `SHA256SUMS`). The v1.3.0 release
+  is marked as superseded.
 - **v1.3.0 released 2026-08-21** as annotated tag `v1.3.0`. Introduces risk profiles (`prototype`, `standard`, `high-assurance`), task evidence contracts, structural validators (Bash & PowerShell), and comprehensive release-to-release upgrade testing from v1.2.2. The v1.2.2 release is marked as superseded.
 - **v1.2.2 released 2026-08-18** as annotated tag `v1.2.2` on commit `c835edf`.
   The Release workflow passed on Windows, Ubuntu, and macOS: metadata
@@ -38,6 +50,8 @@
   PowerShell parse OK on `install.ps1` and `.agentic/scripts/verify.ps1`;
   Bats 123 total / 0 failures / 1 CI-only skip (pwsh parity); Pester 106
   passed / 0 failed / 2 platform skips.
+- **TASK-003 (PR #9 review blockers) completed 2026-08-24**: all 4 merge blockers fixed (optional-failure PASS schema validity, nested cwd labels, task-path redaction, format validation), schema updated to 1.4.0 with `optional_failed` and PASS invariant, tests added (Bats + Pester), docs updated (README, CHANGELOG, ADR-0009). Ready for CI gate.
+- **TASK-004 (PR #9 second-review blocker) completed 2026-08-24**: Bash `--events-force` now rejects existing non-regular event destinations before promotion, verifies a regular destination file after forced promotion, and clears `EVENTS_SCRATCH`; Bats regression test added (55/55 local). Fast CI + CI (Full) required on the resulting SHA.
 - Adopters: replace the placeholders above with links to real task and decision
   files as they are created. Keep this file brief; the per-task and per-decision
   files hold the detail.

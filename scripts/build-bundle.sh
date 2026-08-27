@@ -74,12 +74,13 @@ mkdir -p "$BUNDLE/.agentic/rules" \
          "$BUNDLE/.agentic/tasks" \
          "$BUNDLE/.agentic/decisions" \
          "$BUNDLE/.agentic/schemas" \
-         "$BUNDLE/.agentic/context/database-migrations" \
+<         "$BUNDLE/.agentic/context" \
          "$BUNDLE/.agentic/context/security-review" \
+         "$BUNDLE/.agentic/context/database-migrations" \
          "$BUNDLE/.agentic/context/dependency-changes" \
          "$BUNDLE/.agentic/context/infrastructure-change" \
-         "$BUNDLE/.agentic/orchestration" \
-         "$BUNDLE/evals"
+         "$BUNDLE/.agentic/context/public-api-change" \
+         "$BUNDLE/.agentic/orchestration"
 
 # Root-level protocol entry points and installers.
 cp "$ROOT/AGENTS.md" "$ROOT/CLAUDE.md" "$ROOT/GEMINI.md" "$ROOT/.aider.conf.yml" "$BUNDLE/"
@@ -95,22 +96,22 @@ cp "$ROOT/.agentic/VERSION" \
    "$BUNDLE/.agentic/"
 cp "$ROOT"/.agentic/rules/*.md "$BUNDLE/.agentic/rules/"
 cp "$ROOT"/.agentic/profiles/*.md "$BUNDLE/.agentic/profiles/"
-cp "$ROOT/.agentic/scripts/verify.sh" "$ROOT/.agentic/scripts/verify.ps1" "$ROOT/.agentic/scripts/validate-task.sh" "$ROOT/.agentic/scripts/validate-task.ps1" "$BUNDLE/.agentic/scripts/"
+cp "$ROOT/.agentic/scripts/verify.sh" "$ROOT/.agentic/scripts/verify.ps1" "$ROOT/.agentic/scripts/validate-task.sh" "$ROOT/.agentic/scripts/validate-task.ps1" "$ROOT/.agentic/scripts/validate-context.sh" "$ROOT/.agentic/scripts/validate-context.ps1" "$ROOT/.agentic/scripts/validate-handoff.sh" "$ROOT/.agentic/scripts/validate-handoff.ps1" "$BUNDLE/.agentic/scripts/"
 cp "$ROOT"/.agentic/templates/*.md "$ROOT"/.agentic/templates/checks.tsv "$BUNDLE/.agentic/templates/"
 cp "$ROOT/.agentic/tasks/README.md" "$BUNDLE/.agentic/tasks/"
 cp "$ROOT/.agentic/decisions/README.md" "$BUNDLE/.agentic/decisions/"
 cp "$ROOT"/.agentic/schemas/*.json "$BUNDLE/.agentic/schemas/"
 cp "$ROOT/.agentic/context/INDEX.md" "$BUNDLE/.agentic/context/"
-cp "$ROOT/.agentic/context/database-migrations/MODULE.md" "$BUNDLE/.agentic/context/database-migrations/"
-cp "$ROOT/.agentic/context/security-review/MODULE.md" "$BUNDLE/.agentic/context/security-review/"
-cp "$ROOT/.agentic/context/dependency-changes/MODULE.md" "$BUNDLE/.agentic/context/dependency-changes/"
-cp "$ROOT/.agentic/context/infrastructure-change/MODULE.md" "$BUNDLE/.agentic/context/infrastructure-change/"
+<for _mod in security-review database-migrations dependency-changes infrastructure-change public-api-change; do
+    cp "$ROOT/.agentic/context/$_mod/MODULE.md" "$BUNDLE/.agentic/context/$_mod/"
+done
 cp "$ROOT/.agentic/orchestration/README.md" "$BUNDLE/.agentic/orchestration/"
 cp "$ROOT/.agentic/orchestration/coordinator.sh" "$BUNDLE/.agentic/orchestration/"
-cp "$ROOT/evals/README.md" "$BUNDLE/evals/"
 
-# Safety: the bundle must never leak the framework's own checks or dev-only dirs.
-for leak in ".agentic/checks.tsv" "tests" ".github" "docs" "CHANGELOG.md" "README.md" "CONTRIBUTING.md" "SECURITY.md"; do
+# Safety: the bundle must never leak the framework's own checks, dev-only
+# dirs, or the behavioral-evaluation harness (evals are framework-development
+# material, not adopter payload).
+for leak in ".agentic/checks.tsv" "tests" ".github" "docs" "evals" "CHANGELOG.md" "README.md" "CONTRIBUTING.md" "SECURITY.md"; do
     if [ -e "$BUNDLE/$leak" ]; then
         echo "ERROR: bundle leaked '$leak'; aborting." >&2
         exit 1

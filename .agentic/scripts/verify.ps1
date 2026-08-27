@@ -45,8 +45,18 @@ param(
     [string] $ValidateChecks,
     [ValidateSet('Text', 'Json')]
     [string] $Format = 'Text',
-    [string] $Events = $null
+    [string] $Events = $null,
+    [switch] $EventsForce
 )
+
+# JSON stdout and event streams are mutually exclusive output modes.
+# Each output is reliable independently; combined use could produce
+# contradictory terminal event vs process exit. Reject at parse time.
+if ($Format -eq 'Json' -and $Events) {
+    [Console]::Error.WriteLine("ERROR: -Format Json and -Events cannot be used together.")
+    [Console]::Error.WriteLine("Use JSON stdout OR an event stream, not both.")
+    exit 1
+}
 
 $script:Failed = $false
 $script:Ran = 0
@@ -68,7 +78,11 @@ function Write-Log {
 function Output-VerificationJson {
     param([string] $ResultStr, [int] $ExitCode)
     $passedCount = @($script:CheckResults | Where-Object { $_.status -eq 'PASS' }).Count
-    $failedCount = @($script:CheckResults | Where-Object { $_.status -eq 'FAIL' }).Count
+    # failed counts failed REQUIRED checks only; optional failures are reported
+    # separately in optional_failed so a PASS run with a failing optional check
+    # stays schema-valid (exit 0 requires failed = 0).
+    $failedCount = @($script:CheckResults | Where-Object { $_.status -eq 'FAIL' -and $_.requirement -eq 'required' }).Count
+    $optionalFailedCount = @($script:CheckResults | Where-Object { $_.status -eq 'FAIL' -and $_.requirement -eq 'optional' }).Count
     $blockedCount = @($script:CheckResults | Where-Object { $_.status -eq 'BLOCKED' }).Count
     $optionalSkipped = @($script:CheckResults | Where-Object { $_.status -eq 'SKIPPED_OPTIONAL' }).Count
     $requiredRun = @($script:CheckResults | Where-Object { $_.requirement -eq 'required' -and $_.status -in @('PASS', 'FAIL') }).Count
@@ -76,7 +90,7 @@ function Output-VerificationJson {
 
     $resultObject = [ordered]@{
         schema_version   = 1
-        protocol_version = "1.4.0"
+        protocol_version = "1.5.0"
         kind             = "verification_result"
         result           = $ResultStr
         exit_code        = $ExitCode
@@ -87,16 +101,56 @@ function Output-VerificationJson {
             required_run     = $requiredRun
             passed           = $passedCount
             failed           = $failedCount
+            optional_failed  = $optionalFailedCount
             blocked          = $blockedCount
             optional_skipped = $optionalSkipped
         }
         checks           = $script:CheckResults
     }
     [Console]::Out.WriteLine(($resultObject | ConvertTo-Json -Depth 10 -Compress))
+}
+
+function Write-VerificationEvent {
+    param([System.Collections.Specialized.IOrderedDictionary] $Event)
+    # Single choke point for the JSONL events stream: keeps serialization
+    # (ConvertTo-Json) and newline handling identical for every event type.
     if ($Events) {
-        $jsonEvent = '{"event":"verification_completed","result":"' + $ResultStr + '","exit_code":' + $ExitCode + '}'
-        [System.IO.File]::AppendAllText($Events, $jsonEvent + "`n", [System.Text.UTF8Encoding]::new($false))
+        try {
+            [System.IO.File]::AppendAllText($Events, ($Event | ConvertTo-Json -Compress) + "`n", [System.Text.UTF8Encoding]::new($false))
+        }
+        catch {
+            [Console]::Error.WriteLine("ERROR: failed to write event to stream.")
+            exit 1
+        }
     }
+}
+
+function Complete-Verification {
+    # Single finalization path: first appends terminal event to event stream,
+    # then emits JSON result (if requested), then exits with state-model code.
+    # This ensures the event stream is complete before the JSON document is exposed.
+    param([string] $ResultStr, [int] $ExitCode)
+    try {
+        Write-VerificationEvent ([ordered]@{
+            event     = "verification_completed"
+            result    = $ResultStr
+            exit_code = $ExitCode
+        })
+    }
+    catch {
+        [Console]::Error.WriteLine("ERROR: failed to finalize verification event stream.")
+        exit 1
+    }
+    if ($Format -eq 'Json') { 
+        try {
+            Output-VerificationJson $ResultStr $ExitCode
+        }
+        catch {
+            [Console]::Error.WriteLine("ERROR: failed to write JSON verification result.")
+            exit 1
+        }
+    }
+    exit $ExitCode
 }
 
 # Path semantics must match the underlying filesystem (case-insensitive on
@@ -120,6 +174,22 @@ function Test-Command {
     return [bool](Get-Command $Name -ErrorAction SilentlyContinue)
 }
 
+function Get-CwdDisplay {
+    # Redacts a check's working directory for observable JSON output: project
+    # root becomes '.', paths under it become './<relative>', and anything
+    # else (defensive fallback) degrades to its basename so an absolute
+    # user-home path can never leak into the result document.
+    param([string] $Cwd)
+    $root = [System.IO.Path]::GetFullPath((Get-Location).Path).TrimEnd('\', '/')
+    $full = [System.IO.Path]::GetFullPath((Join-Path $root $Cwd)).TrimEnd('\', '/')
+    if ($full -eq $root) { return '.' }
+    $sep = [System.IO.Path]::DirectorySeparatorChar
+    if ($full.StartsWith($root + $sep, $script:VerifierPathComparison)) {
+        return './' + $full.Substring($root.Length + 1).Replace('\', '/')
+    }
+    return [System.IO.Path]::GetFileName($full)
+}
+
 function Invoke-Check {
     param(
         [string] $Requirement,
@@ -128,6 +198,8 @@ function Invoke-Check {
         [string] $Exe,
         [string[]] $ArgsList
     )
+
+    $cwdDisplay = Get-CwdDisplay $Cwd
 
     $cwdAbsolute = Join-Path (Get-Location).Path $Cwd
     try {
@@ -144,10 +216,21 @@ function Invoke-Check {
             id                = $Id
             requirement       = $Requirement
             status            = $st
-            working_directory = $Cwd
+            working_directory = $cwdDisplay
             exit_code         = $null
             duration_ms       = 0
             reason_code       = 'WORKING_DIR_MISSING'
+        }
+        if ($Events) {
+            Write-VerificationEvent ([ordered]@{
+                event             = "check_completed"
+                check_id          = $Id
+                status            = $st
+                exit_code         = $null
+                duration_ms       = 0
+                working_directory = $cwdDisplay
+                reason_code       = 'WORKING_DIR_MISSING'
+            })
         }
         return
     }
@@ -177,10 +260,21 @@ function Invoke-Check {
             id                = $Id
             requirement       = $Requirement
             status            = $st
-            working_directory = $Cwd
+            working_directory = $cwdDisplay
             exit_code         = $null
             duration_ms       = 0
             reason_code       = 'EXECUTABLE_MISSING'
+        }
+        if ($Events) {
+            Write-VerificationEvent ([ordered]@{
+                event             = "check_completed"
+                check_id          = $Id
+                status            = $st
+                exit_code         = $null
+                duration_ms       = 0
+                working_directory = $cwdDisplay
+                reason_code       = 'EXECUTABLE_MISSING'
+            })
         }
         return
     }
@@ -192,8 +286,11 @@ function Invoke-Check {
     if ($Requirement -eq 'required') { $script:RanRequired = $true }
 
     if ($Events) {
-        $jsonEvent = '{"event":"check_started","check_id":"' + $Id + '"}'
-        [System.IO.File]::AppendAllText($Events, $jsonEvent + "`n", [System.Text.UTF8Encoding]::new($false))
+        Write-VerificationEvent ([ordered]@{
+            event             = "check_started"
+            check_id          = $Id
+            working_directory = $cwdDisplay
+        })
     }
 
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
@@ -223,18 +320,26 @@ function Invoke-Check {
             Write-Log "  WARNING: optional check '$Id' failed"
         }
     }
+    $reasonCode = if ($checkFailed) { 'CHECK_FAILED' } else { $null }
     $script:CheckResults += [ordered]@{
         id                = $Id
         requirement       = $Requirement
         status            = $st
-        working_directory = $Cwd
+        working_directory = $cwdDisplay
         exit_code         = $code
         duration_ms       = $durationMs
-        reason_code       = $null
+        reason_code       = $reasonCode
     }
     if ($Events) {
-        $jsonEvent = '{"event":"check_completed","check_id":"' + $Id + '","status":"' + $st + '","exit_code":' + $(if($null -eq $code){'null'}else{$code}) + ',"duration_ms":' + $durationMs + '}'
-        [System.IO.File]::AppendAllText($Events, $jsonEvent + "`n", [System.Text.UTF8Encoding]::new($false))
+        Write-VerificationEvent ([ordered]@{
+            event             = "check_completed"
+            check_id          = $Id
+            status            = $st
+            exit_code         = $code
+            duration_ms       = $durationMs
+            working_directory = $cwdDisplay
+            reason_code       = $reasonCode
+        })
     }
 }
 
@@ -556,6 +661,64 @@ function Assert-VerifierDestination {
         $resolved.StartsWith($rootPrefix, $script:VerifierPathComparison)
 }
 
+# Destination policy for the JSONL events stream: a relative path inside
+# .agentic/runs/ whose nearest existing ancestor physically resolves inside
+# the project root and whose existing leaf is not a symlink/junction. Lexical
+# checks first (absolute paths, '..' segments, prefix), then the physical
+# confinement shared with the generated-candidate write.
+function Test-EventsDestination {
+    param([string] $Destination)
+    if ([System.IO.Path]::IsPathRooted($Destination)) { return $false }
+    $normalized = ($Destination -replace '\\', '/') -replace '^\./', ''
+    if (-not $normalized.StartsWith('.agentic/runs/')) { return $false }
+    foreach ($segment in $normalized.Split('/')) {
+        if ($segment -eq '' -or $segment -eq '.' -or $segment -eq '..') { return $false }
+    }
+    return (Assert-VerifierDestination $normalized)
+}
+
+# Create the events stream with exactly one verification_started object as its
+# first line. The file is built in an unpredictable scratch name next to the
+# destination and moved into place atomically, so a crashed run can never
+# truncate an existing stream before its replacement is complete.
+function Initialize-EventsStream {
+    if (-not (Test-EventsDestination $Events)) {
+        [Console]::Error.WriteLine("ERROR: events destination must be a relative path inside .agentic/runs/. '$Events' is not allowed.")
+        exit 1
+    }
+    if (-not $EventsForce -and (Test-Path -LiteralPath $Events)) {
+        [Console]::Error.WriteLine("ERROR: refusing to overwrite existing event file '$Events'. Use -EventsForce to overwrite.")
+        exit 1
+    }
+    $eventDir = Split-Path -Parent $Events
+    if ($eventDir) { New-Item -ItemType Directory -Path $eventDir -Force | Out-Null }
+    # .NET file APIs ignore PowerShell's current location, so the scratch path
+    # is made absolute against it before writing.
+    $scratchAbsolute = Join-Path (Get-Location).Path (Join-Path $eventDir ('.verify-events.' + [System.IO.Path]::GetRandomFileName()))
+    $startLine = ([ordered]@{ event = "verification_started" } | ConvertTo-Json -Compress) + "`n"
+    [System.IO.File]::WriteAllText($scratchAbsolute, $startLine, [System.Text.UTF8Encoding]::new($false))
+    try {
+        if ($EventsForce) {
+            Move-Item -LiteralPath $scratchAbsolute -Destination $Events -Force -ErrorAction Stop
+        }
+        else {
+            Move-Item -LiteralPath $scratchAbsolute -Destination $Events -ErrorAction Stop
+        }
+        if (-not (Test-Path -LiteralPath $Events -PathType Leaf)) {
+            throw "Event stream promotion produced no destination file."
+        }
+    }
+    catch {
+        [Console]::Error.WriteLine("ERROR: failed to initialize event stream.")
+        exit 1
+    }
+    finally {
+        if (Test-Path -LiteralPath $scratchAbsolute) {
+            Remove-Item -LiteralPath $scratchAbsolute -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function Test-ChecksTsvValidation {
     param([string] $FilePath)
     $lines = Get-Content -LiteralPath $FilePath
@@ -570,8 +733,7 @@ function Test-ChecksTsvValidation {
         }
         $fields = $rawLine -split "`t"
         if ($fields.Count -lt 4) {
-            Write-Log "ERROR: .agentic/checks.tsv line $lineNum has fewer than 4 fields."
-            exit 1
+            throw ".agentic/checks.tsv line $lineNum has fewer than 4 fields."
         }
         $requirement = $fields[0]
         $id = $fields[1]
@@ -579,16 +741,13 @@ function Test-ChecksTsvValidation {
         $exe = $fields[3]
 
         if ($requirement -ne 'required' -and $requirement -ne 'optional') {
-            Write-Log "ERROR: .agentic/checks.tsv line $lineNum has invalid requirement '$requirement' (expected 'required' or 'optional')."
-            exit 1
+            throw ".agentic/checks.tsv line $lineNum has invalid requirement '$requirement' (expected 'required' or 'optional')."
         }
         if ([string]::IsNullOrWhiteSpace($id) -or [string]::IsNullOrWhiteSpace($cwd) -or [string]::IsNullOrWhiteSpace($exe)) {
-            Write-Log "ERROR: .agentic/checks.tsv line $lineNum has empty check ID, working directory, or executable."
-            exit 1
+            throw ".agentic/checks.tsv line $lineNum has empty check ID, working directory, or executable."
         }
         if ($seenIds.ContainsKey($id)) {
-            Write-Log "ERROR: .agentic/checks.tsv line $lineNum has duplicate check ID '$id'."
-            exit 1
+            throw ".agentic/checks.tsv line $lineNum has duplicate check ID '$id'."
         }
         $seenIds[$id] = $true
 
@@ -598,8 +757,7 @@ function Test-ChecksTsvValidation {
             $resolvedRoot = Resolve-PhysicalPath $rootPath
         }
         catch {
-            Write-Log "ERROR: .agentic/checks.tsv line $lineNum working directory '$cwd' cannot be resolved ($($_.Exception.Message))."
-            exit 1
+            throw ".agentic/checks.tsv line $lineNum working directory '$cwd' cannot be resolved ($($_.Exception.Message))."
         }
         # Confinement requires an exact match or root followed by the directory
         # separator; a sibling path sharing the root's name prefix must not pass.
@@ -612,23 +770,15 @@ function Test-ChecksTsvValidation {
             $resolvedCwd.Equals($resolvedRootTrimmed, $script:VerifierPathComparison) -or
             $resolvedCwd.StartsWith($rootPrefix, $script:VerifierPathComparison)
         if (-not $insideRoot) {
-            Write-Log "ERROR: .agentic/checks.tsv line $lineNum working directory '$cwd' escapes project root."
-            exit 1
+            throw ".agentic/checks.tsv line $lineNum working directory '$cwd' escapes project root."
         }
     }
 }
 
-# Initialize the optional JSONL events stream only after all functions are
-# defined (Assert-VerifierDestination lives below) and before any check runs.
-if ($Events) {
-    if (-not (Assert-VerifierDestination $Events)) {
-        [Console]::Error.WriteLine("ERROR: refusing to write events to '$Events': destination is not safely inside the project root.")
-        exit 1
-    }
-    $eventDir = Split-Path -Parent $Events
-    if ($eventDir) { New-Item -ItemType Directory -Path $eventDir -Force | Out-Null }
-    [System.IO.File]::WriteAllText($Events, '{"event":"verification_started"}' + "`n", [System.Text.UTF8Encoding]::new($false))
-}
+# --events is independent of --format: events are emitted in both modes.
+# The stream is initialized later, after contract validation succeeds and just
+# before checks run, so every stream that is created always ends with exactly
+# one terminal verification_completed event.
 
 $checksPath = ".agentic/checks.tsv"
 $checksDefined = $false
@@ -646,7 +796,13 @@ if ($ValidateChecks) {
         Write-Log "ERROR: file '$ValidateChecks' does not exist."
         exit 1
     }
-    Test-ChecksTsvValidation -FilePath $ValidateChecks
+    try {
+        Test-ChecksTsvValidation -FilePath $ValidateChecks
+    }
+    catch {
+        Write-Log "ERROR: $_"
+        exit 1
+    }
     Write-Log "Checks file '$ValidateChecks' is valid."
     exit 0
 }
@@ -696,12 +852,15 @@ if ($DetectChecks) {
 }
 
 if ($checksDefined) {
-    Test-ChecksTsvValidation -FilePath $checksPath
-    Write-Log "Using project checks: $checksPath"
-    $script:Detected = $true
-    Get-Content -LiteralPath $checksPath | ForEach-Object {
-        if ($_ -match '^\s*(#|$)') { return }
-        Invoke-TsvLine -Line $_
+    # Contract validation happens before the events stream is created, so a
+    # malformed project contract can never leave a started-but-unterminated
+    # event file behind.
+    try {
+        Test-ChecksTsvValidation -FilePath $checksPath
+    }
+    catch {
+        Write-Log "ERROR: $_"
+        exit 1
     }
 }
 else {
@@ -722,9 +881,25 @@ else {
             exit 1
         }
         Remove-Item -LiteralPath $tmp -ErrorAction SilentlyContinue
-        $script:Detected = $true
-        foreach ($line in $detectedChecks) { Invoke-TsvLine -Line $line }
     }
+}
+
+# The events stream starts only now — after every early-exit mode and after
+# contract validation succeeded — so any stream that exists is guaranteed to
+# receive exactly one terminal verification_completed event below.
+if ($Events) { Initialize-EventsStream }
+
+if ($checksDefined) {
+    Write-Log "Using project checks: $checksPath"
+    $script:Detected = $true
+    Get-Content -LiteralPath $checksPath | ForEach-Object {
+        if ($_ -match '^\s*(#|$)') { return }
+        Invoke-TsvLine -Line $_
+    }
+}
+elseif ($detectedChecks -and $detectedChecks.Count -gt 0) {
+    $script:Detected = $true
+    foreach ($line in $detectedChecks) { Invoke-TsvLine -Line $line }
 }
 
 Write-Log ""
@@ -733,24 +908,19 @@ Write-Log ""
 # be claimed.
 if ($script:Failed) {
     Write-Log "VERIFICATION FAILED: $($script:Ran) check(s) ran, at least one required check failed."
-    if ($Format -eq 'Json') { Output-VerificationJson "FAIL" 1 }
-    exit 1
+    Complete-Verification "FAIL" 1
 }
 if ($script:Blocked) {
     Write-Log "VERIFICATION BLOCKED: $($script:Ran) check(s) ran; required tooling was unavailable."
-    if ($Format -eq 'Json') { Output-VerificationJson "BLOCKED" 2 }
-    exit 2
+    Complete-Verification "BLOCKED" 2
 }
 if ($script:RanRequired) {
     Write-Log "VERIFICATION PASSED: $($script:Ran) check(s) ran."
-    if ($Format -eq 'Json') { Output-VerificationJson "PASS" 0 }
-    exit 0
+    Complete-Verification "PASS" 0
 }
 if ($script:Detected) {
     Write-Log "VERIFICATION BLOCKED: $($script:Ran) check(s) ran; required tooling was unavailable."
-    if ($Format -eq 'Json') { Output-VerificationJson "BLOCKED" 2 }
-    exit 2
+    Complete-Verification "BLOCKED" 2
 }
 Write-Log "VERIFICATION UNSUPPORTED: no supported project or check configuration found."
-if ($Format -eq 'Json') { Output-VerificationJson "UNSUPPORTED" 3 }
-exit 3
+Complete-Verification "UNSUPPORTED" 3

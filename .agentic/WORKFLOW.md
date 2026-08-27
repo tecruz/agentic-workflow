@@ -20,6 +20,7 @@ DISCOVER → CLASSIFY RISK → PLAN → IMPLEMENT → VERIFY → HANDOFF
    - Inspect `AGENTS.md`, `.agentic/STATUS.md`, and active task files in `.agentic/tasks/`.
    - Inspect package configuration (`package.json`, `Cargo.toml`, `pyproject.toml`, `go.mod`, etc.).
    - Inspect `.agentic/checks.tsv` — it is the project's authoritative definition of done.
+   - Inspect `.agentic/context/INDEX.md` — select every context module whose *Load when* triggers match the task, and record each selection in the task file under `## Context modules` before planning. Load only triggered modules, never all of them.
 2. **Search First**:
    - Search existing patterns before writing new utilities.
    - Respect established naming conventions, linting rules, and directory structure.
@@ -103,15 +104,18 @@ Before planning, classify the task's risk profile per `.agentic/profiles/README.
 1. **Validate the Task File**:
    - Keep the task's `## Status` (`Status:` + `Updated:`) current as work
      progresses.
-   - Before handoff, mark the task `done` and run
-     `.agentic/scripts/validate-task.sh --handoff` or
-     `.agentic/scripts/validate-task.ps1 -Handoff`. The handoff gate requires
-     `Status: done`, resolved evidence, and checked approval gates. Exit codes:
-     `0` VALID, `1` INVALID, `2` BLOCKED (missing/unresolved evidence or
-     unchecked approval on a completed task, or `--handoff` on a task that is
-     not `done`).
-   - Validate the task file with the handoff flag *after* marking it done, so
-     the recorded state is the one that gets reviewed.
+   - Before handoff, mark the task `done` and run the single public gate:
+     `.agentic/scripts/validate-handoff.sh` or
+     `.agentic/scripts/validate-handoff.ps1`. The composite gate runs BOTH
+     production validators in handoff mode — `validate-task` (risk profile,
+     evidence, approvals) and `validate-context` (context-module selections)
+     — against the same file, so results always refer to the same task and
+     profile. It requires `Status: done`, resolved evidence, checked approval
+     gates, known/duplicate-free/rationale-backed module selections, and a
+     task profile that satisfies every selected module's minimum profile.
+     Exit codes: `0` both gates VALID, `1` any INVALID, `2` any BLOCKED.
+   - Validate with the composite gate *after* marking the task done, so the
+     recorded state is the one that gets reviewed.
 2. **Update State**:
    - Mark task status and update `.agentic/STATUS.md`.
    - Record architectural decisions as immutable ADRs in `.agentic/decisions/`.

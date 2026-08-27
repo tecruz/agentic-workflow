@@ -1,10 +1,36 @@
 # Context Module Index
 
-To keep static context small and efficient, specialist knowledge is loaded on demand only when triggered by task characteristics, file paths, or risk profiles.
+> Portable, on-demand specialist context for agentic tasks. Each directory
+> holds one module following the shared contract in `MODULE.md`. Inspect this
+> index during **DISCOVER**, select every module whose *Load when* triggers
+> match the task, and record each selection in the task file under
+> `## Context modules`. Do not load module contents into every session: load
+> only what the task triggers, before planning begins.
+>
+> Selection line format (one bullet per module, recorded in the task file):
+>
+>     - <module-id> v<version> loaded — <selection rationale>
+>
+> Documentation-only or otherwise untriggered work records the sentinel:
+>
+>     - None selected — <why no module applies>
 
-## Available Modules
+## Registry
 
-- [Database Migrations](database-migrations/MODULE.md) — Loaded when migration scripts or schema files are touched.
-- [Security Review](security-review/MODULE.md) — Loaded for authentication, authorization, cryptography, or token handling tasks.
-- [Dependency Changes](dependency-changes/MODULE.md) — Loaded when adding, upgrading, or removing package dependencies.
-- [Infrastructure Change](infrastructure-change/MODULE.md) — Loaded for CI/CD workflows, Dockerfiles, cloud configs, or deployment scripts.
+| ID | Version | Minimum risk profile | Load when (summary) |
+| --- | --- | --- | --- |
+| security-review | 1 | high-assurance | Authentication, authorization, secrets, sessions, permissions, cryptography |
+| database-migrations | 1 | high-assurance | Schema changes, migration files, backfills, destructive data operations |
+| dependency-changes | 1 | standard | Manifest or lockfile changes, dependency upgrades, new external libraries, supply-chain implications |
+| infrastructure-change | 1 | high-assurance | Production-affecting CI/CD, Terraform/OpenTofu, Kubernetes, cloud resources, deployment configuration |
+| public-api-change | 1 | standard | Public endpoints, published interfaces, SDK contracts, backward compatibility |
+
+## Rules
+
+- A selected module must exist in this registry; unknown IDs are rejected by
+  `.agentic/scripts/validate-context.sh` / `validate-context.ps1`.
+- The declared version must match the module's current version.
+- A module's minimum risk profile is a floor: a task may always escalate, but
+  it must not run at a lower profile than any selected module requires.
+- Duplicate selections of the same module are rejected.
+- A completed task may not carry unresolved placeholders in its selections.

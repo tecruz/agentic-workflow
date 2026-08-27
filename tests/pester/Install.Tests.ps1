@@ -80,11 +80,13 @@ Describe 'install.ps1' {
             Test-Path (Join-Path $tmp '.agentic\profiles\high-assurance.md') | Should -Be $true
             Test-Path (Join-Path $tmp '.agentic\scripts\validate-task.sh') | Should -Be $true
             Test-Path (Join-Path $tmp '.agentic\scripts\validate-task.ps1') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\scripts\validate-handoff.ps1') | Should -Be $true
             Test-Path (Join-Path $tmp '.agentic\templates\task.md') | Should -Be $true
             # all new files are framework-managed and recorded in the manifest
             $manifest = Get-Content -Raw (Join-Path $tmp '.agentic\install-manifest.tsv')
             $manifest -match "\.agentic/profiles/README\.md`tmanaged" | Should -Be $true
             $manifest -match "\.agentic/scripts/validate-task\.ps1`tmanaged" | Should -Be $true
+            $manifest -match "\.agentic/scripts/validate-handoff\.ps1`tmanaged" | Should -Be $true
             $manifest -match "\.agentic/templates/task\.md`tmanaged" | Should -Be $true
             # the installed validator runs directly and classifies a valid task
             $repoFixture = Join-Path $repoRoot 'tests\fixtures\tasks\standard-valid.md'
@@ -1060,7 +1062,8 @@ Describe 'install.ps1' {
     # -----------------------------------------------------------------------
 
     It 'bundle end-to-end: build, then install from the bundle' {
-        $bash = Get-Command bash -ErrorAction SilentlyContinue
+        $bash = Get-Command "$env:ProgramFiles\Git\bin\bash.exe" -ErrorAction SilentlyContinue
+        if (-not $bash) { $bash = Get-Command bash -ErrorAction SilentlyContinue }
         if (-not $bash) { Set-ItResult -Skipped -Because 'bash (git-bash/WSL) is required to build the bundle' }
         $version = (Get-Content -Raw (Join-Path $repoRoot '.agentic\VERSION')).Trim()
         $dist = Join-Path $repoRoot 'dist'
@@ -1313,7 +1316,8 @@ Describe 'install.ps1' {
     # -----------------------------------------------------------------------
 
     It 'end-to-end: extract zip and install from extracted archive' {
-        $bash = Get-Command bash -ErrorAction SilentlyContinue
+        $bash = Get-Command "$env:ProgramFiles\Git\bin\bash.exe" -ErrorAction SilentlyContinue
+        if (-not $bash) { $bash = Get-Command bash -ErrorAction SilentlyContinue }
         if (-not $bash) { Set-ItResult -Skipped -Because 'bash (git-bash/WSL) is required to build the bundle' }
         $version = (Get-Content -Raw (Join-Path $repoRoot '.agentic\VERSION')).Trim()
         & $bash.Source "scripts/build-bundle.sh" *> $null
@@ -1372,7 +1376,8 @@ Describe 'install.ps1' {
     }
 
     It 'release zip does not leak development-only files' {
-        $bash = Get-Command bash -ErrorAction SilentlyContinue
+        $bash = Get-Command "$env:ProgramFiles\Git\bin\bash.exe" -ErrorAction SilentlyContinue
+        if (-not $bash) { $bash = Get-Command bash -ErrorAction SilentlyContinue }
         if (-not $bash) { Set-ItResult -Skipped -Because 'bash (git-bash/WSL) is required to build the bundle' }
         $version = (Get-Content -Raw (Join-Path $repoRoot '.agentic\VERSION')).Trim()
         & $bash.Source "scripts/build-bundle.sh" *> $null
@@ -1397,6 +1402,7 @@ Describe 'install.ps1' {
             Test-Path (Join-Path $bundleRoot 'tests') | Should -Be $false
             Test-Path (Join-Path $bundleRoot '.github') | Should -Be $false
             Test-Path (Join-Path $bundleRoot 'docs') | Should -Be $false
+            Test-Path (Join-Path $bundleRoot 'evals') | Should -Be $false
             Test-Path (Join-Path $bundleRoot '.agentic\checks.tsv') | Should -Be $false
             Test-Path (Join-Path $bundleRoot 'CHANGELOG.md') | Should -Be $false
             Test-Path (Join-Path $bundleRoot 'README.md') | Should -Be $false
@@ -1408,6 +1414,16 @@ Describe 'install.ps1' {
             Test-Path (Join-Path $bundleRoot '.agentic\profiles\high-assurance.md') | Should -Be $true
             Test-Path (Join-Path $bundleRoot '.agentic\scripts\validate-task.ps1') | Should -Be $true
             Test-Path (Join-Path $bundleRoot '.agentic\templates\task.md') | Should -Be $true
+            # v1.5.0 payload: context registry, validators, and schema ship;
+            # the evaluation harness does not.
+            Test-Path (Join-Path $bundleRoot '.agentic\context\INDEX.md') | Should -Be $true
+            foreach ($mod in @('security-review','database-migrations','dependency-changes','infrastructure-change','public-api-change')) {
+                Test-Path (Join-Path $bundleRoot ".agentic\context\$mod\MODULE.md") | Should -Be $true
+            }
+            Test-Path (Join-Path $bundleRoot '.agentic\scripts\validate-context.ps1') | Should -Be $true
+            Test-Path (Join-Path $bundleRoot '.agentic\scripts\validate-handoff.sh') | Should -Be $true
+            Test-Path (Join-Path $bundleRoot '.agentic\scripts\validate-handoff.ps1') | Should -Be $true
+            Test-Path (Join-Path $bundleRoot '.agentic\schemas\context-selection-v1.schema.json') | Should -Be $true
         }
         finally { Remove-Item -Recurse -Force $extractDir -ErrorAction SilentlyContinue }
     }
@@ -1418,7 +1434,8 @@ Describe 'install.ps1' {
     # -----------------------------------------------------------------------
 
     It 'upgrade from v1.2.2 bundle to the current bundle preserves project state and adds v1.3.0 profiles and validators' {
-        $bash = Get-Command bash -ErrorAction SilentlyContinue
+        $bash = Get-Command "$env:ProgramFiles\Git\bin\bash.exe" -ErrorAction SilentlyContinue
+        if (-not $bash) { $bash = Get-Command bash -ErrorAction SilentlyContinue }
         if (-not $bash) { Set-ItResult -Skipped -Because 'bash (git-bash/WSL) is required to build the bundle' }
 
         # Verify the v1.2.2 tag exists and has the expected VERSION
@@ -1433,7 +1450,11 @@ Describe 'install.ps1' {
         # Extract the actual v1.2.2 source tree and build its bundle
         $v122Src = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-v122-src-' + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $v122Src -Force | Out-Null
-        & git -C $repoRoot archive v1.2.2 | tar -x -C $v122Src
+        $v122Archive = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-v122-' + [guid]::NewGuid().ToString('N') + '.tar')
+        & git -C $repoRoot archive --format=tar --output=$v122Archive v1.2.2
+        if ($LASTEXITCODE -ne 0) { throw 'git archive v1.2.2 failed' }
+        tar -xf $v122Archive -C $v122Src
+        Remove-Item -LiteralPath $v122Archive -Force
         if ($LASTEXITCODE -ne 0) { throw 'git archive v1.2.2 failed' }
         & $bash.Source (Join-Path $v122Src 'scripts/build-bundle.sh') --no-archives *> $null
         if ($LASTEXITCODE -ne 0) { throw 'v1.2.2 build-bundle.sh failed' }
@@ -1473,8 +1494,8 @@ Describe 'install.ps1' {
             & (Join-Path $currentBundle 'install.ps1') -Target $tmp -Tools all *> $null
             $LASTEXITCODE | Should -Be 0
 
-            # Step 6: Verify v1.3.0 additions and preservation
-            (Get-Content -Raw (Join-Path $tmp '.agentic\VERSION')).Trim() | Should -Be '1.3.0'
+            # Step 6: Verify post-1.2.2 additions and preservation
+            (Get-Content -Raw (Join-Path $tmp '.agentic\VERSION')).Trim() | Should -Be $version
             Test-Path (Join-Path $tmp '.agentic\profiles\README.md') | Should -Be $true
             Test-Path (Join-Path $tmp '.agentic\profiles\prototype.md') | Should -Be $true
             Test-Path (Join-Path $tmp '.agentic\profiles\standard.md') | Should -Be $true
@@ -1501,12 +1522,14 @@ Describe 'install.ps1' {
             $blockedFixture = Join-Path $repoRoot 'tests\fixtures\tasks\completed-with-pending-evidence.md'
             $invalidFixture = Join-Path $repoRoot 'tests\fixtures\tasks\unknown-profile.md'
 
-            if (Get-Command bash -ErrorAction SilentlyContinue) {
-                & bash $valSh $validFixture *> $null
+            $shBash = Get-Command "$env:ProgramFiles\Git\bin\bash.exe" -ErrorAction SilentlyContinue
+            if (-not $shBash) { $shBash = Get-Command bash -ErrorAction SilentlyContinue }
+            if ($shBash) {
+                & $shBash.Source $valSh $validFixture *> $null
                 $LASTEXITCODE | Should -Be 0
-                & bash $valSh $blockedFixture *> $null
+                & $shBash.Source $valSh $blockedFixture *> $null
                 $LASTEXITCODE | Should -Be 2
-                & bash $valSh $invalidFixture *> $null
+                & $shBash.Source $valSh $invalidFixture *> $null
                 $LASTEXITCODE | Should -Be 1
             }
 
@@ -1551,6 +1574,155 @@ Describe 'install.ps1' {
         }
         finally {
             Remove-Item -Recurse -Force $v122Src -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+        }
+    }
+
+    # -----------------------------------------------------------------------
+    # Release-to-release upgrade test: install from a v1.4.0 bundle, modify
+    # project state, then upgrade using the current bundle. Proves the N-1
+    # migration adds the v1.5.0 context registry and validators without
+    # disturbing adopter content.
+    # -----------------------------------------------------------------------
+
+    It 'upgrade from v1.4.0 bundle to the current bundle preserves project state and adds context modules and validators' {
+        $bash = Get-Command "$env:ProgramFiles\Git\bin\bash.exe" -ErrorAction SilentlyContinue
+        if (-not $bash) { $bash = Get-Command bash -ErrorAction SilentlyContinue }
+        if (-not $bash) { Set-ItResult -Skipped -Because 'bash (git-bash/WSL) is required to build the bundle' }
+
+        $v140Version = & git -C $repoRoot show 'v1.4.0:.agentic/VERSION' 2>$null
+        if ($LASTEXITCODE -ne 0 -or $v140Version.Trim() -ne '1.4.0') {
+            if ($env:CI -eq 'true') {
+                throw 'required migration tag v1.4.0 is unavailable in CI'
+            }
+            Set-ItResult -Skipped -Because 'v1.4.0 tag not found or VERSION mismatch'
+            return
+        }
+
+        $v140Src = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-v140-src-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $v140Src -Force | Out-Null
+        $v140Archive = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-v140-' + [guid]::NewGuid().ToString('N') + '.tar')
+        & git -C $repoRoot archive --format=tar --output=$v140Archive v1.4.0
+        if ($LASTEXITCODE -ne 0) { throw 'git archive v1.4.0 failed' }
+        tar -xf $v140Archive -C $v140Src
+        Remove-Item -LiteralPath $v140Archive -Force
+        if ($LASTEXITCODE -ne 0) { throw 'git archive v1.4.0 extraction failed' }
+        Push-Location $v140Src
+        try {
+            & $bash.Source 'scripts/build-bundle.sh' --no-archives *> $null
+            if ($LASTEXITCODE -ne 0) { throw 'v1.4.0 build-bundle.sh failed' }
+        }
+        finally { Pop-Location }
+        $v140Dir = Join-Path $v140Src 'dist' 'agentic-workflow-1.4.0'
+
+        $version = (Get-Content -Raw (Join-Path $repoRoot '.agentic\VERSION')).Trim()
+        Push-Location $repoRoot
+        try {
+            & $bash.Source 'scripts/build-bundle.sh' --no-archives *> $null
+            if ($LASTEXITCODE -ne 0) { throw 'build-bundle.sh failed' }
+        }
+        finally { Pop-Location }
+        $currentBundle = Join-Path $repoRoot "dist\agentic-workflow-$version"
+
+        # Precondition: the v1.4.0 bundle predates the context registry.
+        Test-Path (Join-Path $v140Dir '.agentic\context') | Should -Be $false
+
+        $tmp = New-TestDir
+        try {
+            # Step 1: Install from the real v1.4.0 bundle.
+            & (Join-Path $v140Dir 'install.ps1') -Target $tmp *> $null
+            $LASTEXITCODE | Should -Be 0
+            (Get-Content -Raw (Join-Path $tmp '.agentic\VERSION')).Trim() | Should -Be '1.4.0'
+
+            # Step 2: Adopter state that must survive the upgrade.
+            Add-Content -LiteralPath (Join-Path $tmp 'AGENTS.md') -Value "`n## Team notes`nkeep this content"
+            New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic\tasks') -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\tasks\TASK-900-adopter.md') -Value '# TASK-900: adopter task evidence'
+
+            # Step 3: Modify a managed file to produce a conflict candidate.
+            Add-Content -LiteralPath (Join-Path $tmp '.agentic\WORKFLOW.md') -Value '# adopter workflow override'
+
+            # Step 4: Upgrade using the current bundle.
+            & (Join-Path $currentBundle 'install.ps1') -Target $tmp *> $null
+            $LASTEXITCODE | Should -Be 0
+
+            # Step 5: v1.5.0 additions landed as managed files.
+            (Get-Content -Raw (Join-Path $tmp '.agentic\VERSION')).Trim() | Should -Be $version
+            Test-Path (Join-Path $tmp '.agentic\context\INDEX.md') | Should -Be $true
+            foreach ($mod in @('security-review','database-migrations','dependency-changes','infrastructure-change','public-api-change')) {
+                Test-Path (Join-Path $tmp ".agentic\context\$mod\MODULE.md") | Should -Be $true
+            }
+            Test-Path (Join-Path $tmp '.agentic\scripts\validate-context.ps1') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\scripts\validate-handoff.ps1') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\scripts\validate-handoff.sh') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\schemas\context-selection-v1.schema.json') | Should -Be $true
+            foreach ($p in @('.agentic/context/INDEX.md', '.agentic/scripts/validate-context.sh', '.agentic/scripts/validate-handoff.sh', '.agentic/schemas/context-selection-v1.schema.json')) {
+                (Get-Content -Raw (Join-Path $tmp '.agentic\install-manifest.tsv')) -match [regex]::Escape("$p`tmanaged`t") | Should -Be $true
+            }
+
+            # Step 6: Adopter content preserved; conflict candidate written.
+            Test-Path (Join-Path $tmp '.agentic\tasks\TASK-900-adopter.md') | Should -Be $true
+            (Get-Content -Raw (Join-Path $tmp 'AGENTS.md')) -match 'keep this content' | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\WORKFLOW.md.new') | Should -Be $true
+
+            # Step 7: The installed validator works against the installed registry.
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\tasks\TASK-901-context.md') -Value @'
+# TASK-901: context smoke
+
+## Status
+
+Status: done
+Updated: 2026-08-24
+
+## Risk profile
+
+Profile: high-assurance
+
+## Acceptance criteria
+
+- AC-1: smoke condition
+
+## Required evidence
+
+| AC ID | Evidence | Result |
+| --- | --- | --- |
+| AC-1 | smoke evidence recorded | passed |
+
+## Approval gates
+
+- [x] AG-1: Approved by Maintainer on 2026-08-24
+
+## Context modules
+
+- security-review v1 loaded — upgrade smoke selection
+
+## Verification
+
+### Baseline
+
+Baseline run.
+
+### Final
+
+Final run.
+
+## Remaining risks
+
+- None identified
+'@
+            $valCtx = Join-Path $tmp '.agentic\scripts\validate-context.ps1'
+            & pwsh -NoProfile -File $valCtx (Join-Path $tmp '.agentic\tasks\TASK-901-context.md') *> $null
+            $LASTEXITCODE | Should -Be 0
+
+            # Step 8: Uninstall removes the registry but preserves seeds.
+            & (Join-Path $currentBundle 'install.ps1') -Target $tmp -Uninstall *> $null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path (Join-Path $tmp '.agentic\context') | Should -Be $false
+            Test-Path (Join-Path $tmp '.agentic\ARCHITECTURE.md') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\tasks\TASK-900-adopter.md') | Should -Be $true
+        }
+        finally {
+            Remove-Item -Recurse -Force $v140Src -ErrorAction SilentlyContinue
             Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
         }
     }

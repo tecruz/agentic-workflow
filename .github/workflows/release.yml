@@ -193,7 +193,7 @@ jobs:
           VERSION="$(cat .agentic/VERSION)"
           BUNDLE="dist/agentic-workflow-$VERSION"
           FAIL=0
-          for leak in tests .github docs .agentic/checks.tsv CHANGELOG.md README.md CONTRIBUTING.md SECURITY.md; do
+          for leak in tests .github docs evals .agentic/checks.tsv CHANGELOG.md README.md CONTRIBUTING.md SECURITY.md; do
             if [ -e "$BUNDLE/$leak" ]; then
               echo "::error Bundle leaked '$leak'"
               FAIL=1

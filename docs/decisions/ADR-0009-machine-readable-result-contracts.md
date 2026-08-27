@@ -38,3 +38,72 @@ Anticipating extension versioning (ADR-0007), we need stable, versioned JSON res
 - CI systems and external harnesses can reliably consume machine-readable verification and task validation results.
 - Strict stdout separation ensures JSON documents are never contaminated by tool warnings or progress bars.
 - Strict redaction protects secrets and environment details from leaking into observable outputs.
+
+## Amendment (v1.4.0 review response)
+
+Decision item 6 originally deferred persistent logs and trajectory event files.
+During the v1.4.0 implementation cycle this partially changed: an opt-in JSONL
+event stream (`verify.sh --events <path>` / `verify.ps1 -Events <path>`) shipped
+in v1.4.0, governed by `.agentic/schemas/verification-events-v1.schema.json`.
+What remains deferred: persistent run logs and trajectory recording beyond the
+single-run event stream.
+
+Amended decisions:
+
+1. **Result/exit-code invariants are schema-enforced**: every JSON document
+   pairs its `result` with the ADR-0002 state-model exit code (`PASS`=0,
+   `FAIL`=1, `BLOCKED`=2, `UNSUPPORTED`=3 for verifiers; `VALID`=0, `INVALID`=1,
+   `BLOCKED`=2 for task validators). These pairings, plus
+   diagnostics-present-for-failure rules, are encoded as draft-07 `if/then`
+   invariants inside each schema, so conforming documents cannot disagree with
+   the state model.
+
+2. **Diagnostic codes are closed-set and schema-enumerated**: the authoritative
+   diagnostic code list lives in the `code` enum of
+   `.agentic/schemas/task-validation-result-v1.schema.json`; both validator
+   implementations emit only these codes at every failure site (verified
+   cross-language by the fixture parity suite).
+
+3. **Event-stream policy**:
+   - The destination must be a relative path under `.agentic/runs/`
+     (git-ignored); absolute paths and traversal outside the runs directory are
+     rejected after lexical and physical containment checks.
+   - The stream file is created atomically after argument parsing and
+     project-contract validation succeed; contract failures therefore never
+     leave a truncated or unterminated stream behind:
+     - **Bash no-force:** scratch file (`mktemp` beside destination, same filesystem) + atomic exclusive hard-link creation (`ln` without `-f`; fails with `EEXIST` if destination exists).
+     - **Bash force:** scratch file (`mktemp` beside destination) + checked replacement rename (`mv -f`); failure cleans up scratch and exits non-zero.
+     - **PowerShell:** scratch file (`.verify-events.` + `GetRandomFileName()` beside destination, absolute via `Get-Location`) + checked `Move-Item` promotion (`-Force` only when `-EventsForce`); both modes use `-ErrorAction Stop` with `try/catch/finally` scratch cleanup and post-move leaf verification.
+   - Existing event files are refused unless `--events-force` /
+     `-EventsForce` is given.
+   - Each run emits exactly one terminal `verification_completed` event as the
+     final line, pairing `result` with the verifier exit code; single-event
+     pairing is schema-enforced (`exit_code` enum per result), while
+     cross-event ordering (exactly one terminal event last, `check_started` before `check_completed` for executed checks, no `check_started` for `BLOCKED`/`SKIPPED_OPTIONAL`, one-to-one result/check correspondence, and Bash/PS semantic parity after duration normalization) is covered by Pester (`JsonContracts.Tests.ps1`) and Bats (`verify_test.bats`) suites — JSON Schema cannot express ordering across JSONL lines.
+   - Events carry check identifiers, statuses, durations, and redacted
+     working-directory labels only — never command lines, arguments, child
+     output, environment details, or absolute user paths.
+   - **Combined mode rejection**: `--format json` / `-Format Json` and
+     `--events` / `-Events` cannot be used together; each output mode is
+     reliable independently.
+
+4. **Task-validator JSON mode requires Python 3**: the Bash validator's
+   `--format json` mode needs `python3` and fails fast with a clear error when
+   it is absent; text mode has no such dependency. Serializer failures are
+   propagated as nonzero exits rather than emitting empty or malformed
+   documents.
+
+5. **Summary semantics distinguish required from optional failures**: the
+   verification `summary.failed` field counts failed *required* checks only,
+   while failed optional checks are reported in `summary.optional_failed` and
+   never affect the result or exit code. This keeps a run whose optional check
+   failed schema-valid as `PASS`. The schema additionally requires any `PASS`
+   document to have run at least one required check (`required_run >= 1`) with
+   zero required failures and zero blocked checks, encoding the ADR-0002
+   invariant that PASS is impossible unless a required check actually ran.
+
+6. **Output format is strict in both languages**: unknown or missing
+   `--format` values are rejected with a clear error by both verifiers and
+   both task validators (PowerShell via ValidateSet, Bash via explicit
+   post-parse validation), so the versioned CLI contract cannot silently
+   degrade to text mode.

@@ -64,6 +64,52 @@ configure_test_git_identity() {
     grep -q $'\.agentic/templates/task\.md\tmanaged' .agentic/install-manifest.tsv
 }
 
+@test "fresh install creates the context registry and context validators" {
+    bash "$INSTALL" . >/dev/null 2>&1
+    [ -f .agentic/context/INDEX.md ]
+    for mod in security-review database-migrations dependency-changes infrastructure-change public-api-change; do
+        [ -f ".agentic/context/$mod/MODULE.md" ]
+    done
+    [ -f .agentic/scripts/validate-context.sh ]
+    [ -f .agentic/scripts/validate-context.ps1 ]
+    [ -f .agentic/scripts/validate-handoff.sh ]
+    [ -f .agentic/scripts/validate-handoff.ps1 ]
+    [ -f .agentic/schemas/context-selection-v1.schema.json ]
+    grep -q $'\.agentic/context/INDEX\.md\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/context/security-review/MODULE\.md\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/scripts/validate-context\.sh\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/scripts/validate-handoff\.sh\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/scripts/validate-handoff\.ps1\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/schemas/context-selection-v1\.schema\.json\tmanaged' .agentic/install-manifest.tsv
+}
+
+@test "installed handoff gate keeps its executable bit and gates a completed task" {
+    bash "$INSTALL" . >/dev/null 2>&1
+    [ -x .agentic/scripts/validate-handoff.sh ]
+    run ./.agentic/scripts/validate-handoff.sh "$REPO_ROOT/tests/fixtures/context-tasks/context-full-contract-ha.md"
+    [ "$status" -eq 0 ]
+}
+
+@test "installed context validator keeps its executable bit and runs directly" {
+    bash "$INSTALL" . >/dev/null 2>&1
+    [ -x .agentic/scripts/validate-context.sh ]
+    printf '# TASK-T: t\n\n## Status\n\nStatus: done\nUpdated: 2026-08-24\n\n## Risk profile\n\nProfile: high-assurance\n\n## Context modules\n\n- security-review v1 loaded — smoke\n' > TASK-SMOKE.md
+    run ./.agentic/scripts/validate-context.sh TASK-SMOKE.md
+    [ "$status" -eq 0 ]
+}
+
+@test "uninstall removes the context registry but leaves adopter tasks" {
+    bash "$INSTALL" . >/dev/null 2>&1
+    mkdir -p .agentic/tasks
+    printf 'adopter evidence\n' > .agentic/tasks/TASK-900-adopter.md
+    bash "$INSTALL" . --uninstall >/dev/null 2>&1
+    [ ! -d .agentic/context ]
+    [ ! -f .agentic/scripts/validate-handoff.sh ]
+    [ ! -f .agentic/scripts/validate-handoff.ps1 ]
+    [ ! -f .agentic/scripts/validate-context.sh ]
+    [ -f .agentic/tasks/TASK-900-adopter.md ]
+}
+
 @test "adopter task files in .agentic/tasks are never overwritten" {
     mkdir -p .agentic/tasks
     printf '# TASK-900: adopter task\nkeep me\n' > .agentic/tasks/TASK-900-adopter.md
@@ -935,6 +981,8 @@ SHIM
     [ -f "$BUNDLE/.agentic/profiles/high-assurance.md" ]
     [ -f "$BUNDLE/.agentic/scripts/validate-task.sh" ]
     [ -f "$BUNDLE/.agentic/scripts/validate-task.ps1" ]
+    [ -f "$BUNDLE/.agentic/scripts/validate-handoff.sh" ]
+    [ -f "$BUNDLE/.agentic/scripts/validate-handoff.ps1" ]
     [ -f "$BUNDLE/.agentic/templates/task.md" ]
 }
 
@@ -1024,6 +1072,9 @@ SHIM
     [ -f "$EXTRACTED_BUNDLE/.agentic/scripts/validate-task.sh" ]
     [ -x "$EXTRACTED_BUNDLE/.agentic/scripts/validate-task.sh" ]
     [ -f "$EXTRACTED_BUNDLE/.agentic/scripts/validate-task.ps1" ]
+    [ -f "$EXTRACTED_BUNDLE/.agentic/scripts/validate-handoff.sh" ]
+    [ -x "$EXTRACTED_BUNDLE/.agentic/scripts/validate-handoff.sh" ]
+    [ -f "$EXTRACTED_BUNDLE/.agentic/scripts/validate-handoff.ps1" ]
     [ -f "$EXTRACTED_BUNDLE/.agentic/templates/task.md" ]
     grep -q "Profile" "$EXTRACTED_BUNDLE/.agentic/templates/task.md"
     grep -q "Required evidence" "$EXTRACTED_BUNDLE/.agentic/templates/task.md"
@@ -1079,6 +1130,8 @@ SHIM
     [ -f "$BUNDLE/.agentic/profiles/README.md" ]
     [ -f "$BUNDLE/.agentic/scripts/validate-task.sh" ]
     [ -x "$BUNDLE/.agentic/scripts/validate-task.sh" ]
+    [ -f "$BUNDLE/.agentic/scripts/validate-handoff.sh" ]
+    [ -x "$BUNDLE/.agentic/scripts/validate-handoff.sh" ]
     [ -f "$BUNDLE/.agentic/templates/task.md" ]
 
     PROJECT="$TMP/project"
@@ -1259,8 +1312,9 @@ SH
     V122_DIR="$V122_SRC/dist/agentic-workflow-1.2.2"
 
     # Build the current bundle
+    CURRENT_VERSION="$(cat "$REPO_ROOT/.agentic/VERSION")"
     bash "$REPO_ROOT/scripts/build-bundle.sh" --no-archives
-    CURRENT_BUNDLE="$REPO_ROOT/dist/agentic-workflow-$(cat "$REPO_ROOT/.agentic/VERSION")"
+    CURRENT_BUNDLE="$REPO_ROOT/dist/agentic-workflow-$CURRENT_VERSION"
 
     PROJECT="$TMP/upgrade-project"
     mkdir -p "$PROJECT"
@@ -1293,8 +1347,9 @@ SH
     run bash "$CURRENT_BUNDLE/install.sh" . --tools all
     [ "$status" -eq 0 ]
 
-    # Step 6: Verify v1.3.0 additions and preservation
-    [ "$(cat .agentic/VERSION)" = "1.3.0" ]
+    # Step 6: Verify post-1.2.2 additions and preservation (current version is
+    # read from the repo, not hardcoded — it advances with protocol releases)
+    [ "$(cat .agentic/VERSION)" = "$CURRENT_VERSION" ]
     [ -f .agentic/profiles/README.md ]
     [ -f .agentic/profiles/prototype.md ]
     [ -f .agentic/profiles/standard.md ]

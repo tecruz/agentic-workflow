@@ -106,6 +106,51 @@ The verifier runs the checks defined in `.agentic/checks.tsv` (project-owned,
 authoritative). If that file defines no checks, it auto-detects the stack as a
 bootstrap.
 
+### Machine-readable JSON output
+
+Both verifiers and task validators can emit versioned JSON documents for CI
+systems, dashboards, and automated agents:
+
+```bash
+# Linux / macOS
+./.agentic/scripts/verify.sh --format json
+./.agentic/scripts/validate-task.sh --format json .agentic/tasks/TASK-001.md
+
+# Windows (PowerShell 7+)
+./.agentic/scripts/verify.ps1 -Format Json
+./.agentic/scripts/validate-task.ps1 -Format Json .agentic/tasks/TASK-001.md
+```
+
+- In JSON mode stdout contains exactly one JSON document; all progress and
+  child-process output goes to stderr. Text mode remains the default and is
+  unchanged.
+- Every document pairs its `result` with its exit code (`PASS`=0, `FAIL`=1,
+  `BLOCKED`=2, `UNSUPPORTED`=3; task validation uses `VALID`=0, `INVALID`=1,
+  `BLOCKED`=2). These pairings are enforced as invariants inside the managed
+  schemas in `.agentic/schemas/`, which also enumerate the stable diagnostic
+  codes emitted by both task-validator implementations.
+- The verification summary distinguishes failure kinds: `failed` counts failed
+  **required** checks only, while `optional_failed` counts failed optional
+  checks, which never fail a run. The schemas enforce that a `PASS` document
+  ran at least one required check (`required_run >= 1`) with zero required
+  failures, so optional-check failures stay fully representable in valid
+  `PASS` results.
+- JSON diagnostics are redacted: no command lines, arguments, child output,
+  environment details, absolute user paths, or raw task lines. This applies
+  to every serialized field, including diagnostic messages.
+- The Bash validator's JSON mode requires `python3` and fails fast with a clear
+  error when it is missing; text mode has no such dependency.
+- Verifiers additionally support an opt-in JSONL event stream
+  (`--events <path>` / `-Events <path>`). The path must be relative to
+  `.agentic/runs/` (git-ignored); existing files require `--events-force` /
+  `-EventsForce`; each run ends with exactly one `verification_completed`
+  event whose `result` matches the verifier's exit code. Contract-validation
+  failures exit before the stream file is created, so no run ever leaves an
+  unterminated stream behind. **In v1.4.0, `--format json` / `-Format Json`
+  and `--events` / `-Events` cannot be used together — each output mode is
+  reliable independently.** See
+  [ADR-0009](docs/decisions/ADR-0009-machine-readable-result-contracts.md).
+
 ### The checks candidate lifecycle
 
 Stack detection never writes directly into `.agentic/checks.tsv`; it produces a
@@ -146,7 +191,7 @@ the framework's own checks, tests, CI, and docs so adopters start clean:
 
 ```bash
 bash scripts/build-bundle.sh                    # assemble + archive
-bash dist/agentic-workflow-1.3.0/install.sh /path/to/your-project
+bash dist/agentic-workflow-1.4.0/install.sh /path/to/your-project
 ```
 
 ---
@@ -173,13 +218,16 @@ DISCOVER → CLASSIFY RISK → PLAN → IMPLEMENT → VERIFY → HANDOFF
 4. **Implement** — minimal, style-matching changes per `.agentic/rules/`.
 5. **Verify** — run the project's checks. Self-heal failures with at most
    three evidence-based repair cycles; never weaken a test to go green.
-6. **Handoff** — mark the task `done` under `## Status`, then validate it with
-   `.agentic/scripts/validate-task.sh --handoff` / `validate-task.ps1 -Handoff`
-   (the handoff gate requires `Status: done`, resolved evidence, and checked
-   approval gates), then report files changed, verification commands with exit
-   codes and results, pre-existing failures, environment blockers, remaining
-   risks, and commit status. Commits happen only when explicitly requested or
-   permitted by project policy.
+ 6. **Handoff** — mark the task `done` under `## Status`, then validate it with
+    `.agentic/scripts/validate-handoff.sh` / `validate-handoff.ps1`. The
+    composite gate runs both production validators in handoff mode —
+    `validate-task --handoff` (requires `Status: done`, resolved evidence, and
+    checked approval gates) and `validate-context --handoff` (known,
+    rationale-backed module selections at a compatible risk profile) — then
+    report files changed, verification commands with exit
+    codes and results, pre-existing failures, environment blockers, remaining
+    risks, and commit status. Commits happen only when explicitly requested or
+    permitted by project policy.
 
 Full details: [`.agentic/WORKFLOW.md`](.agentic/WORKFLOW.md). Canonical agent
 instructions: [`AGENTS.md`](AGENTS.md).
@@ -211,6 +259,37 @@ carry, the verification depth, the handoff contents, and the approval gates:
 
 ---
 
+## Context Modules
+
+Specialist knowledge lives in portable, on-demand modules under
+`.agentic/context/` instead of the always-loaded protocol:
+
+| Module | Minimum profile | Load when |
+| :--- | :--- | :--- |
+| `security-review` | `high-assurance` | authentication, authorization, secrets, sessions, permissions, cryptography |
+| `database-migrations` | `high-assurance` | schema changes, migration files, backfills, destructive data operations |
+| `dependency-changes` | `standard` | manifest/lockfile changes, dependency upgrades, supply-chain implications |
+| `infrastructure-change` | `high-assurance` | CI/CD, Terraform/OpenTofu, Kubernetes, cloud resources, deployment config |
+| `public-api-change` | `standard` | public endpoints, published interfaces, SDK contracts, backward compatibility |
+
+- During **DISCOVER** agents inspect `.agentic/context/INDEX.md`, select every
+  module whose *Load when* triggers match the task, and record each selection
+  under `## Context modules` in the task file — known ID, recognized version,
+  a `loaded` confirmation, and a real rationale.
+- Only triggered modules are loaded; nothing imports every module into every
+  session. Documentation-only work records `- None selected`.
+- A module's minimum risk profile is a floor for the task's profile: selecting
+  `security-review` on a `standard` task fails validation.
+- `.agentic/scripts/validate-context.sh` / `validate-context.ps1` structurally
+  validate selections (exit `0` VALID, `1` INVALID, `2` BLOCKED) with stable
+  diagnostic codes (`MODULE_UNKNOWN`, `MODULE_DUPLICATE`,
+  `MODULE_RATIONALE_MISSING`, `MODULE_VERSION_UNSUPPORTED`,
+  `MODULE_PROFILE_TOO_LOW`, `MODULE_SELECTION_UNRESOLVED`,
+  `CONTEXT_SECTION_MISSING`) and JSON output validated by
+  `.agentic/schemas/context-selection-v1.schema.json`.
+
+---
+
 ## Verification State Model
 
 The verifier reports one of four states and never reports `PASS` unless at
@@ -224,6 +303,11 @@ least one required check actually ran:
 | 3 | **UNSUPPORTED** | No supported project or check configuration found |
 
 `optional` checks run when their tooling is available but never fail a run.
+
+JSON results (`--format json` / `-Format Json`) encode the same state model:
+`result` and `exit_code` are always paired per the table above, and the
+schemas in [`.agentic/schemas/`](.agentic/schemas/) enforce that pairing
+structurally so conforming documents cannot disagree with it.
 
 ---
 
@@ -284,6 +368,7 @@ CI on any mismatch. Both the Bats and Pester suites run on all three platforms;
 ├── install.sh / install.ps1       # Non-destructive cross-platform installers
 ├── scripts/
 │   └── build-bundle.sh            # Packages the clean adopter distribution
+├── evals/                         # Offline behavioral evaluations (dev-repo only, never bundled)
 ├── tests/
 │   ├── bats/                      # Bats suites (verify.sh + install.sh + validate-task.sh)
 │   ├── pester/                    # Pester suites (verify.ps1 + install.ps1 + validate-task.ps1)
@@ -295,8 +380,10 @@ CI on any mismatch. Both the Bats and Pester suites run on all three platforms;
     ├── ARCHITECTURE.md            # Fill-in template describing the host project
     ├── STATUS.md                  # Index of current project state
     ├── checks.tsv                 # Authoritative check list (auto-detect fallback)
+    ├── schemas/                   # Versioned JSON contracts for verifier/validator output
     ├── rules/                     # Technology-agnostic standards
     ├── profiles/                  # Risk profiles (prototype, standard, high-assurance)
+    ├── context/                   # Portable, on-demand specialist modules + INDEX
     ├── tasks/                     # One file per task
     ├── decisions/                 # Immutable Architecture Decision Records
     ├── templates/                 # Feature spec, bug report, refactor plan, task file
@@ -304,7 +391,11 @@ CI on any mismatch. Both the Bats and Pester suites run on all three platforms;
         ├── verify.sh              # Verifier (Linux/macOS)
         ├── verify.ps1             # Verifier (Windows)
         ├── validate-task.sh       # Task-file validator (Linux/macOS)
-        └── validate-task.ps1      # Task-file validator (Windows)
+        ├── validate-task.ps1      # Task-file validator (Windows)
+        ├── validate-context.sh    # Context-selection validator (Linux/macOS)
+        ├── validate-context.ps1   # Context-selection validator (Windows)
+        ├── validate-handoff.sh    # Composite handoff gate (Linux/macOS)
+        └── validate-handoff.ps1   # Composite handoff gate (Windows)
 ```
 
 ---
