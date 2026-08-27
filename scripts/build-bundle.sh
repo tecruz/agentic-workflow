@@ -74,12 +74,13 @@ mkdir -p "$BUNDLE/.agentic/rules" \
          "$BUNDLE/.agentic/tasks" \
          "$BUNDLE/.agentic/decisions" \
          "$BUNDLE/.agentic/schemas" \
-         "$BUNDLE/.agentic/context" \
+<         "$BUNDLE/.agentic/context" \
          "$BUNDLE/.agentic/context/security-review" \
          "$BUNDLE/.agentic/context/database-migrations" \
          "$BUNDLE/.agentic/context/dependency-changes" \
          "$BUNDLE/.agentic/context/infrastructure-change" \
-         "$BUNDLE/.agentic/context/public-api-change"
+         "$BUNDLE/.agentic/context/public-api-change" \
+         "$BUNDLE/.agentic/orchestration"
 
 # Root-level protocol entry points and installers.
 cp "$ROOT/AGENTS.md" "$ROOT/CLAUDE.md" "$ROOT/GEMINI.md" "$ROOT/.aider.conf.yml" "$BUNDLE/"
@@ -101,9 +102,11 @@ cp "$ROOT/.agentic/tasks/README.md" "$BUNDLE/.agentic/tasks/"
 cp "$ROOT/.agentic/decisions/README.md" "$BUNDLE/.agentic/decisions/"
 cp "$ROOT"/.agentic/schemas/*.json "$BUNDLE/.agentic/schemas/"
 cp "$ROOT/.agentic/context/INDEX.md" "$BUNDLE/.agentic/context/"
-for _mod in security-review database-migrations dependency-changes infrastructure-change public-api-change; do
+<for _mod in security-review database-migrations dependency-changes infrastructure-change public-api-change; do
     cp "$ROOT/.agentic/context/$_mod/MODULE.md" "$BUNDLE/.agentic/context/$_mod/"
 done
+cp "$ROOT/.agentic/orchestration/README.md" "$BUNDLE/.agentic/orchestration/"
+cp "$ROOT/.agentic/orchestration/coordinator.sh" "$BUNDLE/.agentic/orchestration/"
 
 # Safety: the bundle must never leak the framework's own checks, dev-only
 # dirs, or the behavioral-evaluation harness (evals are framework-development

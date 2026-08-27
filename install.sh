@@ -180,7 +180,7 @@ MANAGED_FILES=(
     ".agentic/decisions/README.md"
     ".agentic/schemas/verification-result-v1.schema.json"
     ".agentic/schemas/task-validation-result-v1.schema.json"
-    ".agentic/schemas/verification-events-v1.schema.json"
+<    ".agentic/schemas/verification-events-v1.schema.json"
     ".agentic/schemas/context-selection-v1.schema.json"
     ".agentic/context/INDEX.md"
     ".agentic/context/security-review/MODULE.md"
@@ -192,6 +192,8 @@ MANAGED_FILES=(
     ".agentic/scripts/validate-context.ps1"
     ".agentic/scripts/validate-handoff.sh"
     ".agentic/scripts/validate-handoff.ps1"
+    ".agentic/orchestration/README.md"
+    ".agentic/orchestration/coordinator.sh"
 )
 
 # Seed-once, project-owned: never overwritten after creation.
