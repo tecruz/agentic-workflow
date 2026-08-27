@@ -80,4 +80,4 @@ PR head `cfd1649`: `validate-context.ps1` classified `context-sentinel-hyphen-no
 ## Remaining risks
 
 - The Bash validator changes are not executed in this sandbox; CI (Full) must run green on the new HEAD (bats + full Pester incl. the parity and golden tests).
-- Accepted follow-ups from the PR review, deliberately not fixed here: JSON `identifier`/`section` shape differs across languages (`""` vs `null`, both schema-valid); `FORBIDDEN_ACTIONS_ABSENT` is a substring scan and several eval checks are vacuously satisfied by the shipped scenarios; the `loaded`-token diagnostics are unreachable dead code; TASK-006/PR-body fixture-count drift.
+- Accepted follow-ups from the PR review, deliberately not fixed here: JSON `identifier`/`section` shape differs across languages (`""` vs `null`, both schema-valid); `FORBIDDEN_ACTIONS_ABSENT` is a substring scan and several eval checks are vacuously satisfied by the shipped scenarios; the `loaded`-token diagnostics are unreachable dead code. (Fixture/test-count drift in TASK-006 and the PR body was corrected in TASK-008.)

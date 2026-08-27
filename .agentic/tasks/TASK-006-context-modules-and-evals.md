@@ -69,15 +69,15 @@ workflow edits only run this framework repository's own test suites.
 - .agentic/VERSION — 1.5.0. CHANGELOG.md — `[1.5.0]` section.
 - .agentic/scripts/verify.sh / verify.ps1 / validate-task.sh / validate-task.ps1 — protocol_version sweep to 1.5.0; mutually-exclusive-modes message made version-neutral.
 - .agentic/schemas/verification-result-v1.schema.json, task-validation-result-v1.schema.json — protocol_version const 1.5.0.
-- install.sh / install.ps1 — nine managed-file registrations.
+- install.sh / install.ps1 — eleven managed-file registrations.
 - scripts/build-bundle.sh — context dirs + copies, validator copies, evals leak gate.
 - .github/workflows/ci.yml — shellcheck/bash -n/PSA lists extended; offline eval steps on both fast legs.
 - .github/workflows/release.yml — bundle leak list includes evals.
 - evals/ — schemas, eight scenario fixtures (full production-contract artifacts), cross-platform runners enforcing the real contracts, README, generator script (new).
-- tests/fixtures/context-tasks/*.md — fourteen shared fixtures (new).
-- tests/bats/validate_context_test.bats — 21 structural cases (new).
+- tests/fixtures/context-tasks/*.md — forty-two shared fixtures (new).
+- tests/bats/validate_context_test.bats — 57 structural/golden cases (new).
 - tests/bats/install_test.bats — fresh-install/exec-bit/uninstall coverage for the registry and validators.
-- tests/pester/ValidateContext.Tests.ps1 — 19 cases incl. full fixture parity (new).
+- tests/pester/ValidateContext.Tests.ps1 — 41 cases incl. full fixture parity (new).
 - tests/pester/JsonContracts.Tests.ps1 — four context JSON contract legs.
 - tests/pester/Install.Tests.ps1 — v1.4.0→v1.5.0 migration test; bundle presence/leak assertions.
 - README.md — Context Modules section, What's Included tree. docs/decisions/ADR-0010-context-modules-and-evaluations.md (new).
