@@ -109,7 +109,9 @@ Describe 'validate-context.ps1 context-selection validator' {
         $doc.exit_code | Should -Be 1
         @($doc.diagnostics).Count | Should -Be 1
         $doc.diagnostics[0].code | Should -Be 'MODULE_UNKNOWN'
-        $doc.diagnostics[0].identifier | Should -Be 'mystery-module'
+        # JSON diagnostics deliberately redact task content: identifiers are
+        # neutral (null/empty), never task-provided text.
+        $doc.diagnostics[0].identifier | Should -BeNullOrEmpty
     }
 }
 
@@ -417,6 +419,14 @@ Describe 'validate-context golden expected outcomes for new fixtures' {
 
     It 'INVALID (1) for None selected-but-not-really malformed sentinel' {
         Invoke-Validator 'context-sentinel-hyphen-nospace.md' | Select-Object -ExpandProperty Code | Should -Be 1
+    }
+
+    It 'INVALID (1) for a None selected sentinel with no separator' {
+        Invoke-Validator 'context-sentinel-because.md' | Select-Object -ExpandProperty Code | Should -Be 1
+    }
+
+    It 'VALID (0) for a double-space sentinel separator' {
+        Invoke-Validator 'context-sentinel-double-space.md' | Select-Object -ExpandProperty Code | Should -Be 0
     }
 }
 

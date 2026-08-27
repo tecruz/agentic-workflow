@@ -471,3 +471,13 @@ assert doc["exit_code"] == 0, doc
     classify context-sentinel-hyphen-nospace.md
     [ "$status" -eq 1 ]
 }
+
+@test "INVALID (1) for a 'None selected because ...' sentinel with no separator (context-sentinel-because.md)" {
+    classify context-sentinel-because.md
+    [ "$status" -eq 1 ]
+}
+
+@test "VALID (0) for a double-space sentinel separator (context-sentinel-double-space.md)" {
+    classify context-sentinel-double-space.md
+    [ "$status" -eq 0 ]
+}
