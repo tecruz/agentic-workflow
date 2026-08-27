@@ -96,6 +96,20 @@ Describe 'install.ps1' {
         finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
     }
 
+    It 'fresh install creates the orchestration stub and records it as managed' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp *> $null
+            Test-Path (Join-Path $tmp '.agentic\orchestration\README.md') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\orchestration\coordinator.sh') | Should -Be $true
+            # the manifest records both files as framework-managed
+            $manifest = Get-Content -Raw (Join-Path $tmp '.agentic\install-manifest.tsv')
+            $manifest -match "\.agentic/orchestration/README\.md`tmanaged" | Should -Be $true
+            $manifest -match "\.agentic/orchestration/coordinator\.sh`tmanaged" | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
     It 'adopter task files in .agentic/tasks are never overwritten' {
         $tmp = New-TestDir
         try {
@@ -1424,6 +1438,8 @@ Describe 'install.ps1' {
             Test-Path (Join-Path $bundleRoot '.agentic\scripts\validate-handoff.sh') | Should -Be $true
             Test-Path (Join-Path $bundleRoot '.agentic\scripts\validate-handoff.ps1') | Should -Be $true
             Test-Path (Join-Path $bundleRoot '.agentic\schemas\context-selection-v1.schema.json') | Should -Be $true
+            Test-Path (Join-Path $bundleRoot '.agentic\orchestration\README.md') | Should -Be $true
+            Test-Path (Join-Path $bundleRoot '.agentic\orchestration\coordinator.sh') | Should -Be $true
         }
         finally { Remove-Item -Recurse -Force $extractDir -ErrorAction SilentlyContinue }
     }

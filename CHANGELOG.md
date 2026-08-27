@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove stale duplicate `ADR-0010-dynamic-context-modules-and-behavioral-evaluations.md` that duplicated `ADR-0010-context-modules-and-evaluations.md` after the orchestration merge.
 - Correct stray leading `<` markers left in `install.sh`, `install.ps1`, and `scripts/build-bundle.sh` from the merge.
 - Make `.agentic/orchestration/coordinator.sh` executable and index ADR-0009..0011 in `docs/decisions/README.md`.
+- Register `bash -n` syntax coverage for `.agentic/orchestration/coordinator.sh` in `.agentic/checks.tsv` and add Bats/Pester coverage asserting the orchestration stub ships as managed files in fresh installs and bundles.
 
 ## [1.5.0] - 2026-08-24
 

@@ -83,6 +83,16 @@ configure_test_git_identity() {
     grep -q $'\.agentic/schemas/context-selection-v1\.schema\.json\tmanaged' .agentic/install-manifest.tsv
 }
 
+@test "fresh install creates the orchestration stub and records it as managed" {
+    bash "$INSTALL" . >/dev/null 2>&1
+    [ -f .agentic/orchestration/README.md ]
+    [ -f .agentic/orchestration/coordinator.sh ]
+    # coordinator.sh must be executable in the installed tree
+    [ -x .agentic/orchestration/coordinator.sh ]
+    grep -q $'\.agentic/orchestration/README\.md\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/orchestration/coordinator\.sh\tmanaged' .agentic/install-manifest.tsv
+}
+
 @test "installed handoff gate keeps its executable bit and gates a completed task" {
     bash "$INSTALL" . >/dev/null 2>&1
     [ -x .agentic/scripts/validate-handoff.sh ]
@@ -983,6 +993,8 @@ SHIM
     [ -f "$BUNDLE/.agentic/scripts/validate-task.ps1" ]
     [ -f "$BUNDLE/.agentic/scripts/validate-handoff.sh" ]
     [ -f "$BUNDLE/.agentic/scripts/validate-handoff.ps1" ]
+    [ -f "$BUNDLE/.agentic/orchestration/README.md" ]
+    [ -x "$BUNDLE/.agentic/orchestration/coordinator.sh" ]
     [ -f "$BUNDLE/.agentic/templates/task.md" ]
 }
 
