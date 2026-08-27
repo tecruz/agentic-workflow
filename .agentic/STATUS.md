@@ -17,6 +17,7 @@
 - [x] TASK-004 — PR #9 second-review blocker: Bash `--events-force` rejected directory destinations and stranded the scratch stream (see `.agentic/tasks/TASK-004-bash-events-force-directory.md`)
 - [x] TASK-005 — v1.4.0 publication: changelog publication-date alignment (`b4f1248`), annotated `v1.4.0` tag, workflow-built and published assets, and supersede bookkeeping (see `.agentic/tasks/TASK-005-v140-release-publication.md`)
 - [x] TASK-006 — PR #10 portable context modules and offline behavioral evaluations (`v1.5.0`): five-module registry under `.agentic/context/`, `validate-context.sh`/`.ps1` with cross-language parity and stable diagnostics, `context-selection-v1` schema, eight-scenario offline eval harness (no LLM/network), installer/bundle/CI registration with `evals/` leak gates, real v1.4.0→v1.5.0 migration test, protocol_version sweep to 1.5.0 (see `.agentic/tasks/TASK-006-context-modules-and-evals.md`)
+- [x] TASK-007 — PR #10 review fixes: PowerShell sentinel grammar aligned with the Bash anchored grammar (malformed `None selected-but-not-really` / `None selected because ...` now INVALID in both languages), stale Pester JSON-identifier assertion corrected to the documented redaction contract, missing perl reclassified as BLOCKED with schema-valid code `TOOLING_UNAVAILABLE`, regression fixtures + golden tests added (see `.agentic/tasks/TASK-007-pr10-review-fixes.md`)
 
 ## Recent Decisions
 
