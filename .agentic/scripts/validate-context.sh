@@ -554,7 +554,7 @@ handle_entry() {
     # Canonical grammar (ADR-0010): <id> v<N> loaded — <rationale>
     # Requires exactly: valid id, version, lowercase 'loaded', a separator
     # (em dash / en dash / hyphen) and a substantive rationale.
-    local id="" ver="" loaded_token="" rest="" separator=""
+    local id="" ver="" loaded_token="" rest=""
     id="$(printf '%s' "$entry" | awk '{print $1}')"
     ver="$(printf '%s' "$entry" | awk '{print $2}')"
     loaded_token="$(printf '%s' "$entry" | awk '{print $3}')"
