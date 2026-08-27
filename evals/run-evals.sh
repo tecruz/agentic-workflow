@@ -313,10 +313,10 @@ def authoritative_sections(task_text):
         line = raw.rstrip("\r")
         stripped = line.strip()
         if in_fence:
-            if stripped.startswith("```"):
+            if "```" in stripped or "~~~" in stripped:
                 in_fence = False
             continue
-        if stripped.startswith("```"):
+        if "```" in stripped or "~~~" in stripped:
             in_fence = True
             continue
         if in_comment:

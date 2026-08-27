@@ -154,7 +154,9 @@ function New-VerificationDoc {
     # A schema-valid PASS document: every required field present, and the
     # summary counts agree with the actual checks array.
     param([string]$CheckA, [string]$CheckB)
-    @{
+    # Ordered so regeneration is byte-stable: ConvertTo-Json preserves the
+    # insertion order of [ordered] dictionaries.
+    [ordered]@{
         schema_version   = 1
         protocol_version = '1.5.0'
         kind             = 'verification_result'

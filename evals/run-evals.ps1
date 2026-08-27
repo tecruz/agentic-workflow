@@ -1,4 +1,5 @@
 #!/usr/bin/env pwsh
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     run-evals.ps1 — offline deterministic runner for behavioral evaluations.
@@ -219,10 +220,10 @@ function ConvertTo-AuthoritativeSections([string]$TaskText) {
     foreach ($raw in ($TaskText -split "`r?`n")) {
         $stripped = $raw.Trim()
         if ($inFence) {
-            if ($stripped.StartsWith('```', [System.StringComparison]::Ordinal)) { $inFence = $false }
+            if ($stripped.Contains('```') -or $stripped.Contains('~~~')) { $inFence = $false }
             continue
         }
-        if ($stripped.StartsWith('```', [System.StringComparison]::Ordinal)) { $inFence = $true; continue }
+        if ($stripped.Contains('```') -or $stripped.Contains('~~~')) { $inFence = $true; continue }
         if ($inComment) {
             if ($stripped.Contains('-->')) { $inComment = $false }
             continue
