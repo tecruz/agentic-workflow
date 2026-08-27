@@ -74,7 +74,7 @@ mkdir -p "$BUNDLE/.agentic/rules" \
          "$BUNDLE/.agentic/tasks" \
          "$BUNDLE/.agentic/decisions" \
          "$BUNDLE/.agentic/schemas" \
-<         "$BUNDLE/.agentic/context" \
+         "$BUNDLE/.agentic/context" \
          "$BUNDLE/.agentic/context/security-review" \
          "$BUNDLE/.agentic/context/database-migrations" \
          "$BUNDLE/.agentic/context/dependency-changes" \
@@ -102,7 +102,7 @@ cp "$ROOT/.agentic/tasks/README.md" "$BUNDLE/.agentic/tasks/"
 cp "$ROOT/.agentic/decisions/README.md" "$BUNDLE/.agentic/decisions/"
 cp "$ROOT"/.agentic/schemas/*.json "$BUNDLE/.agentic/schemas/"
 cp "$ROOT/.agentic/context/INDEX.md" "$BUNDLE/.agentic/context/"
-<for _mod in security-review database-migrations dependency-changes infrastructure-change public-api-change; do
+for _mod in security-review database-migrations dependency-changes infrastructure-change public-api-change; do
     cp "$ROOT/.agentic/context/$_mod/MODULE.md" "$BUNDLE/.agentic/context/$_mod/"
 done
 cp "$ROOT/.agentic/orchestration/README.md" "$BUNDLE/.agentic/orchestration/"

@@ -201,7 +201,7 @@ $ManagedFiles = @(
     ".agentic/decisions/README.md",
     ".agentic/schemas/verification-result-v1.schema.json",
     ".agentic/schemas/task-validation-result-v1.schema.json",
-<    ".agentic/schemas/verification-events-v1.schema.json",
+    ".agentic/schemas/verification-events-v1.schema.json",
     ".agentic/schemas/context-selection-v1.schema.json",
     ".agentic/context/INDEX.md",
     ".agentic/context/security-review/MODULE.md",
