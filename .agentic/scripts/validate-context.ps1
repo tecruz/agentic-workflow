@@ -407,14 +407,35 @@ foreach ($rawLine in $script:SectionLines) {
     $entry = ($rawLine -creplace '^\s*[-*+]\s+', '').Trim()
     if ([string]::IsNullOrWhiteSpace($entry)) { continue }
 
-    if ($entry -imatch '^none\s+selected\b\s*(.*)$') {
+    # Sentinel: '- None selected' optionally followed by '— <why>'. Mirrors the
+    # Bash validator byte for byte: 'selected' must be followed by end-of-line
+    # or whitespace ('selectedness' and 'selected-but-not-really' are malformed
+    # sentinels, not selections), and any suffix must be whitespace, one
+    # separator (— / – / -), whitespace, then a substantive rationale.
+    # Placeholder suffixes (TBD/TODO/Pending/...) block a completed task.
+    if ($entry -imatch '^none\s+selected') {
+        if ($entry -notmatch '^none\s+selected($|\s+)') {
+            Write-Invalid 'MODULE_SELECTION_UNRESOLVED' '## Context modules' $entry "'None selected' must be followed by end-of-line or a separator ( — / – / - ) with surrounding whitespace: $entry"
+        }
         $noneSentinelSeen = $true
-        # Sentinel suffix must be a substantive rationale: symbol-only
-        # separators are malformed, placeholder suffixes (TBD/TODO/Pending...)
-        # block a completed task.
-        $suffix = $Matches[1].Trim()
-        if ($suffix) {
-            $rationale = $suffix -creplace '^[—–-]\s*', ''
+        $suffix = $entry -creplace '^[Nn][Oo][Nn][Ee]\s+[Ss][Ee][Ll][Ee][Cc][Tt][Ee][Dd]', ''
+        if (-not [string]::IsNullOrWhiteSpace($suffix)) {
+            $afterLeadingWs = $suffix -replace '^\s+', ''
+            if ($afterLeadingWs.Length -eq $suffix.Length) {
+                Write-Invalid 'MODULE_SELECTION_UNRESOLVED' '## Context modules' 'None selected' "'None selected' must use a separator ( — / – / - ) with surrounding whitespace before rationale: $entry"
+            }
+            $sep = $null
+            foreach ($s in @([string][char]0x2014, [string][char]0x2013, [string]'-')) {
+                if ($afterLeadingWs.StartsWith($s)) { $sep = $s; break }
+            }
+            if ($null -eq $sep) {
+                Write-Invalid 'MODULE_SELECTION_UNRESOLVED' '## Context modules' 'None selected' "'None selected' must use a separator ( — / – / - ) with surrounding whitespace before rationale: $entry"
+            }
+            $afterSep = $afterLeadingWs.Substring($sep.Length)
+            $rationale = $afterSep -replace '^\s+', ''
+            if ($rationale.Length -eq $afterSep.Length) {
+                Write-Invalid 'MODULE_SELECTION_UNRESOLVED' '## Context modules' 'None selected' "'None selected' carries a separator but no rationale."
+            }
             if (-not (Test-MeaningfulChar $rationale)) {
                 Write-Invalid 'MODULE_SELECTION_UNRESOLVED' '## Context modules' 'None selected' "'None selected' carries a separator but no rationale."
             }

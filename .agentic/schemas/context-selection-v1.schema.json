@@ -44,7 +44,8 @@
               "MODULE_RATIONALE_MISSING",
               "MODULE_VERSION_UNSUPPORTED",
               "MODULE_PROFILE_TOO_LOW",
-              "MODULE_SELECTION_UNRESOLVED"
+              "MODULE_SELECTION_UNRESOLVED",
+              "TOOLING_UNAVAILABLE"
             ]
           },
           "section": { "type": ["string", "null"] },

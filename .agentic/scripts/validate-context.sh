@@ -235,6 +235,8 @@ fail_blocked() {
                 json_msg="Context module registry is unusable." ;;
             "MODULE_SELECTION_UNRESOLVED")
                 json_msg="Completed task carries an unresolved selection placeholder." ;;
+            "TOOLING_UNAVAILABLE")
+                json_msg="Tooling required to classify content is unavailable." ;;
             *)
                 json_msg="Completion gate not satisfied." ;;
         esac
@@ -276,7 +278,7 @@ has_meaningful_char() {
         return 1
     fi
     command -v perl >/dev/null 2>&1 \
-        || fail_invalid "TOOLING_UNAVAILABLE" "" "" "perl is required to classify non-ASCII content; install perl or keep evidence ASCII-only."
+        || fail_blocked "TOOLING_UNAVAILABLE" "" "" "perl is required to classify non-ASCII content; install perl or keep evidence ASCII-only."
     perl -CS -0777 -ne 'exit(/[\p{L}\p{N}]/ ? 0 : 1)' <<< "$1" 2>/dev/null
 }
 
@@ -519,25 +521,33 @@ handle_entry() {
         local suffix
         suffix="$(printf '%s' "$entry" | sed -E 's/^[Nn][Oo][Nn][Ee][[:space:]]+[Ss][Ee][Ll][Ee][Cc][Tt][Ee][Dd]//')"
         
-        # If there's a suffix, it MUST match the separator+rationale pattern
+        # If there's a suffix, it MUST match the separator+rationale pattern:
+        # whitespace, one separator (—/–/-), whitespace, then a substantive
+        # rationale (anchored grammar ^none\s+selected(?:\s+[—–-]\s+.+)?$).
         if [ -n "$(printf '%s' "$suffix" | tr -d '[:space:]')" ]; then
-            local rationale
-            # Parse separator explicitly using actual UTF-8 bytes (Bash 3.2 compatible)
+            local rationale="" leading_ws="" after_ws="" sep="" after_sep="" sep_tail_ws=""
+            # Strip the leading whitespace run with parameter expansion so the
+            # separator check is locale- and byte-independent (no sed brackets
+            # over multibyte UTF-8, which breaks under MSYS/C locales).
+            leading_ws="${suffix%%[![:space:]]*}"
+            [ -n "$leading_ws" ] || fail_invalid "MODULE_SELECTION_UNRESOLVED" "## Context modules" "None selected" "'None selected' must use a separator ( — / – / - ) with surrounding whitespace before rationale: $entry"
+            after_ws="${suffix#"$leading_ws"}"
             local em_dash=$'\xe2\x80\x94'
             local en_dash=$'\xe2\x80\x93'
-            case "$suffix" in
-                " $em_dash "*) rationale="${suffix# $em_dash }" ;;
-                " $en_dash "*) rationale="${suffix# $en_dash }" ;;
-                " - "*) rationale="${suffix# - }" ;;
-                "- "*) rationale="${suffix#- }" ;;
-                " $em_dash"*) rationale="${suffix# $em_dash}" ;;
-                " $en_dash"*) rationale="${suffix# $en_dash}" ;;
-                " -"*) rationale="${suffix# -}" ;;
-                "-$"*) rationale="${suffix#-}" ;;
+            case "$after_ws" in
+                "$em_dash"*) sep="$em_dash" ;;
+                "$en_dash"*) sep="$en_dash" ;;
+                "-"*) sep="-" ;;
                 *)
                     fail_invalid "MODULE_SELECTION_UNRESOLVED" "## Context modules" "None selected" "'None selected' must use a separator ( — / – / - ) with surrounding whitespace before rationale: $entry"
                     ;;
             esac
+            after_sep="${after_ws#"$sep"}"
+            sep_tail_ws="${after_sep%%[![:space:]]*}"
+            if [ -z "$sep_tail_ws" ]; then
+                fail_invalid "MODULE_SELECTION_UNRESOLVED" "## Context modules" "None selected" "'None selected' carries a separator but no rationale."
+            fi
+            rationale="${after_sep#"$sep_tail_ws"}"
             if ! has_meaningful_char "$rationale"; then
                 fail_invalid "MODULE_SELECTION_UNRESOLVED" "## Context modules" "None selected" "'None selected' carries a separator but no rationale."
             fi
