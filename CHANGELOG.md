@@ -7,6 +7,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-08-24
+
+### Added
+- **Portable context modules and offline behavioral evaluations (PR #10).**
+  Specialist knowledge moves out of the always-loaded protocol into an
+  on-demand registry that agents consult during DISCOVER.
+  - `.agentic/context/` ships five portable modules — `security-review`,
+    `database-migrations`, `dependency-changes`, `infrastructure-change`, and
+    `public-api-change` — each declaring ID, version, load triggers, minimum
+    risk profile, required context, approval gates, required evidence, and
+    prohibited shortcuts, indexed by `.agentic/context/INDEX.md`.
+  - The task contract records selections under `## Context modules`:
+    known module ID, recognized version, a `loaded` confirmation, and a real
+    rationale; the `None selected` sentinel covers untriggered work. A
+    module's minimum risk profile is a floor for the task's profile.
+  - New structural validators `.agentic/scripts/validate-context.sh` /
+    `validate-context.ps1` (exit codes: 0 VALID, 1 INVALID, 2 BLOCKED) reject
+    unknown (`MODULE_UNKNOWN`), duplicate (`MODULE_DUPLICATE`),
+    rationale-missing (`MODULE_RATIONALE_MISSING`), version-unsupported
+    (`MODULE_VERSION_UNSUPPORTED`), profile-incompatible
+    (`MODULE_PROFILE_TOO_LOW`), unresolved (`MODULE_SELECTION_UNRESOLVED`),
+    and section-less (`CONTEXT_SECTION_MISSING`) selections; both
+    implementations are held to identical classifications by shared fixtures,
+    and JSON output follows the v1.4.0 result-contract principles validated by
+    `.agentic/schemas/context-selection-v1.schema.json`.
+  - Offline deterministic behavioral evaluations under `evals/`: scenario
+    schema, evaluation-result schema, eight scenarios covering expected and
+    forbidden observable behavior (authentication change, database migration,
+    dependency bump, infrastructure change, public API change,
+    documentation-only edit, untrusted issue instruction, test-weakening
+    attempt), and cross-platform runners (`run-evals.sh` / `run-evals.ps1`).
+    No scenario calls an external model; no API keys are required.
+  - Adopter bundles ship the registry, validators, and schema but exclude the
+    evaluation harness: `evals/` is enforced as a leak in `build-bundle.sh`
+    and the release workflow's bundle gate.
+  - New ADR-0010 records file categories, schema fields, and migration rules.
+
+### Changed
+- **Review hardening for the context and evaluation layer.**
+  - The handoff gate is now a single public command:
+    `.agentic/scripts/validate-handoff.sh` / `.ps1` run BOTH
+    `validate-task --handoff` and `validate-context --handoff` against one
+    task file (exit 0/1/2), so context validation can no longer be skipped at
+    handoff; WORKFLOW.md, AGENTS.md, checks.tsv, and both fast CI legs use it.
+  - `validate-context` validates its own registry before use: declared IDs
+    must match `^[a-z0-9][a-z0-9-]*$`, equal their directory name, be unique,
+    carry a positive-integer version and a recognized minimum profile, declare
+    each required heading exactly once, and keep substantive documentation
+    content; violations block wholesale as `CONTEXT_REGISTRY_INVALID`, and
+    task-provided IDs never construct filesystem paths.
+  - Fixed a PowerShell regex typo that crashed fenced-code handling
+    (`'^```\)'`); new shared fixtures pin identical classification of
+    fenced/commented/blockquoted/unclosed-fence content in both validators.
+  - JSON output redacts absolute task paths identically on both platforms
+    (project-relative inside the project, basename outside).
+  - Successful-leg Bash JSON serialization is checked like every failure leg;
+    an unwritable destination or failing interpreter exits non-zero instead of
+    reporting VALID with no document.
+
+### Fixed
+- Behavioral evaluations now enforce the real production contracts: scenario
+  definitions validate against `scenario-v1.schema.json`, artifact tasks must
+  pass BOTH validators in handoff mode, verification artifacts must satisfy
+  `verification-result-v1.schema.json` with summary counts agreeing with their
+  checks array, and approvals/evidence are parsed only from authoritative
+  sections. Positive fixtures are full production-contract high-assurance /
+  standard tasks; the negative control is valid in every other respect and
+  fails only its intended forbidden-action check.
+- Evaluation result documents separate observation from harness verdict
+  (`observed_result` / `expected_result` / `expectation_matched` / `result` /
+  `exit_code`) so negative controls no longer violate their own schema; every
+  emitted document is schema-checked before emission and revalidated by CI's
+  pinned-jsonschema job.
+
 ## [1.4.0] - 2026-08-24
 
 ### Added

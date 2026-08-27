@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "public-api-change",
+  "description": "Changing a public response field must select public-api-change with compatibility evidence.",
+  "input": {
+    "task": "Add pagination metadata to the public orders endpoint response.",
+    "changed_paths": [
+      "src/api/orders.ts"
+    ]
+  },
+  "expected": {
+    "minimum_profile": "standard",
+    "required_modules": [
+      "public-api-change"
+    ],
+    "required_approval_gates": [
+      "api-policy"
+    ],
+    "required_evidence": [
+      "compatibility-evidence"
+    ]
+  }
+}

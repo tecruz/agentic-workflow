@@ -475,6 +475,77 @@ Describe 'v1.4.0 JSON result contracts and schema validation' {
     }
 }
 
+Describe 'Context selection JSON contracts and schema validation' {
+
+    BeforeAll {
+        $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+        $contextSchema = Join-Path $repoRoot '.agentic/schemas/context-selection-v1.schema.json'
+        $contextValidatePs = Join-Path $repoRoot '.agentic/scripts/validate-context.ps1'
+        $contextValidateSh = Join-Path $repoRoot '.agentic/scripts/validate-context.sh'
+        $contextFixtures = Join-Path $repoRoot 'tests/fixtures/context-tasks'
+
+        # Self-contained: Pester 5 It-blocks cannot call helpers defined at
+        # other scopes, so this mirrors Test-JsonAgainstSchema locally and
+        # returns the python exit code.
+        function Test-ContextSchemaValid([string]$JsonPath, [string]$SchemaPath) {
+            $cmd = "import json, jsonschema, sys; jsonschema.validate(instance=json.load(open(sys.argv[1], encoding='utf-8')), schema=json.load(open(sys.argv[2], encoding='utf-8')))"
+            $null = python -c $cmd $JsonPath $SchemaPath 2>&1
+            return $LASTEXITCODE
+        }
+
+        function Test-ContextJsonContract([string]$fixture, [int]$expectedExit) {
+            $tmpOut = [System.IO.Path]::GetTempFileName()
+            try {
+                $outLines = & pwsh -NoProfile -File $contextValidatePs -Format Json (Join-Path $contextFixtures $fixture) 2> $null
+                $code = $LASTEXITCODE
+                [System.IO.File]::WriteAllLines($tmpOut, @($outLines), [System.Text.UTF8Encoding]::new($false))
+                $code | Should -Be $expectedExit
+                (Test-ContextSchemaValid -JsonPath $tmpOut -SchemaPath $contextSchema) | Should -Be 0
+                return (Get-Content -LiteralPath $tmpOut -Raw | ConvertFrom-Json)
+            }
+            finally { Remove-Item -LiteralPath $tmpOut -ErrorAction SilentlyContinue }
+        }
+    }
+
+    It 'context validation result JSON validates against context-selection-v1.schema.json (PowerShell, valid)' {
+        $doc = Test-ContextJsonContract 'context-valid-single.md' 0
+        $doc.kind | Should -Be 'context_validation_result'
+        $doc.result | Should -Be 'VALID'
+        @($doc.selected_modules).Count | Should -Be 1
+        $doc.selected_modules[0].id | Should -Be 'security-review'
+    }
+
+    It 'context validation result JSON validates against context-selection-v1.schema.json (PowerShell, invalid)' {
+        $doc = Test-ContextJsonContract 'context-unknown-module.md' 1
+        $doc.result | Should -Be 'INVALID'
+        @($doc.diagnostics).Count | Should -BeGreaterThan 0
+        $doc.diagnostics[0].code | Should -Be 'MODULE_UNKNOWN'
+    }
+
+    It 'context validation result JSON validates against context-selection-v1.schema.json (Bash, valid)' {
+        if ($IsWindows) { return }
+        # CI runs this leg on Linux where the checkout path is already POSIX.
+        $taskPath = (Join-Path $contextFixtures 'context-valid-single.md') -replace '\\', '/'
+        $outLines = & bash $contextValidateSh --format json $taskPath 2> $null
+        $code = $LASTEXITCODE
+        $code | Should -Be 0
+        $doc = (@($outLines) -join "`n") | ConvertFrom-Json
+        $doc.kind | Should -Be 'context_validation_result'
+        $doc.result | Should -Be 'VALID'
+    }
+
+    It 'context validation result JSON validates against context-selection-v1.schema.json (Bash, invalid)' {
+        if ($IsWindows) { return }
+        $taskPath = (Join-Path $contextFixtures 'context-unknown-module.md') -replace '\\', '/'
+        $outLines = & bash $contextValidateSh --format json $taskPath 2> $null
+        $code = $LASTEXITCODE
+        $code | Should -Be 1
+        $doc = (@($outLines) -join "`n") | ConvertFrom-Json
+        $doc.diagnostics.Count | Should -BeGreaterThan 0
+        $doc.diagnostics[0].code | Should -Be 'MODULE_UNKNOWN'
+    }
+}
+
 Describe 'Event schema validation' {
     BeforeEach {
         $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
@@ -1046,5 +1117,268 @@ Describe 'Event schema validation' {
         $scratchLeft = @(Get-ChildItem -LiteralPath $runsDir -Filter '.verify-events.*' -ErrorAction SilentlyContinue)
         $scratchLeft.Count | Should -Be 0
         Remove-Item -LiteralPath $proj -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Describe 'Behavioral evaluation contracts and schema validation' {
+
+    BeforeAll {
+        $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+        $script:evalsDir = Join-Path $repoRoot 'evals'
+        $script:runEvalsSh = Join-Path $evalsDir 'run-evals.sh'
+        $script:runEvalsPs = Join-Path $evalsDir 'run-evals.ps1'
+        $script:evaluationSchema = Join-Path $evalsDir 'schemas' 'evaluation-result-v1.schema.json'
+        $script:scenarioSchema = Join-Path $evalsDir 'schemas' 'scenario-v1.schema.json'
+        $script:verificationSchema = Join-Path $repoRoot '.agentic' 'schemas' 'verification-result-v1.schema.json'
+
+        # Self-contained: Pester 5 It-blocks cannot call helpers defined at
+        # other scopes, so this mirrors Test-JsonAgainstSchema locally.
+        function Test-EvalSchemaValid([string]$JsonPath, [string]$SchemaPath) {
+            $cmd = "import json, jsonschema, sys; jsonschema.validate(instance=json.load(open(sys.argv[1], encoding='utf-8')), schema=json.load(open(sys.argv[2], encoding='utf-8')))"
+            $null = python -c $cmd $JsonPath $SchemaPath 2>&1
+            return $LASTEXITCODE
+        }
+
+        function Invoke-EvalRunner([string]$Runner, [string]$Format, [string]$ScenariosDir = '') {
+            # Explicit ordered array: hashtable splatting onto a native
+            # command does not guarantee parameter order.
+            $pwshArgs = @('-NoProfile', '-File', $Runner, '-Format', $Format)
+            if ($ScenariosDir) { $pwshArgs += @('-ScenariosDir', $ScenariosDir) }
+            if ($Runner -like '*.ps1') {
+                $out = & pwsh @pwshArgs 2>$null
+                return @{ Lines = @($out); Code = $LASTEXITCODE }
+            }
+            $runnerArgs = @()
+            if ($ScenariosDir) { $runnerArgs += $ScenariosDir }
+            if ($Format -eq 'Json') { $runnerArgs = @('--format', 'json') + $runnerArgs }
+            $out = & bash $Runner @runnerArgs 2>$null
+            return @{ Lines = @($out); Code = $LASTEXITCODE }
+        }
+
+        # Builds a temp scenarios ROOT containing <Name>/scenario.json plus
+        # copied valid artifacts, so individual checks can be exercised in
+        # isolation via -ScenariosDir.
+        function New-TempScenario([string]$Name, [hashtable]$Scenario, [string]$FromScenario = 'documentation-only-change') {
+            $root = Join-Path $TestDrive ("eval-" + [guid]::NewGuid().ToString('N'))
+            $dir = Join-Path $root $Name
+            New-Item -ItemType Directory -Path (Join-Path $dir 'artifacts') -Force | Out-Null
+            $Scenario['schema_version'] = 1
+            $Scenario['id'] = $Name
+            [System.IO.File]::WriteAllText((Join-Path $dir 'scenario.json'), (($Scenario | ConvertTo-Json -Depth 8) + "`n"), [System.Text.UTF8Encoding]::new($false))
+            Copy-Item (Join-Path $evalsDir "scenarios\$FromScenario\artifacts\*") (Join-Path $dir 'artifacts') -Force
+            return $root
+        }
+
+        function Get-FirstDoc([object[]]$Lines) {
+            return ($Lines | Where-Object { "$_" -match '^\{' } | Select-Object -First 1) | ConvertFrom-Json
+        }
+
+        function Assert-EvalDocsSchemaValid([object[]]$Lines, [string]$Label) {
+            ($Lines.Count) | Should -Be 8 -Because "one document per scenario ($Label)"
+            foreach ($line in $Lines) {
+                $tmp = [System.IO.Path]::GetTempFileName()
+                try {
+                    [System.IO.File]::WriteAllText($tmp, "$line`n", [System.Text.UTF8Encoding]::new($false))
+                    # Validate against the managed schema with the pinned
+                    # external jsonschema authority while the file exists.
+                    (Test-EvalSchemaValid $tmp $evaluationSchema) | Should -Be 0 -Because "every emitted evaluation document must satisfy its own schema ($Label)"
+                }
+                finally { Remove-Item -LiteralPath $tmp -ErrorAction SilentlyContinue }
+            }
+        }
+    }
+
+    It 'run-evals.sh emits one schema-valid document per scenario and exits 0 (Bash)' {
+        if ($IsWindows) { return }
+        $r = Invoke-EvalRunner $runEvalsSh 'Json'
+        $r.Code | Should -Be 0
+        Assert-EvalDocsSchemaValid $r.Lines 'bash'
+    }
+
+    It 'run-evals.ps1 emits one schema-valid document per scenario and exits 0 (PowerShell)' {
+        $r = Invoke-EvalRunner $runEvalsPs 'Json'
+        $r.Code | Should -Be 0
+        Assert-EvalDocsSchemaValid $r.Lines 'powershell'
+    }
+
+    It 'the negative control is valid in every other respect and fails only FORBIDDEN_ACTIONS_ABSENT (PowerShell)' {
+        $r = Invoke-EvalRunner $runEvalsPs 'Json'
+        $r.Code | Should -Be 0
+        $neg = @($r.Lines | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.scenario_id -eq 'test-weakening-attempt' })
+        ($neg.Count) | Should -Be 1
+        $doc = $neg[0]
+        # Three-way split from the review: observed FAIL, expected FAIL,
+        # expectation matched — so the HARNESS verdict is PASS/exit 0 even
+        # though the scenario artifact itself failed its checks.
+        $doc.observed_result | Should -Be 'FAIL'
+        $doc.expected_result | Should -Be 'FAIL'
+        $doc.expectation_matched | Should -BeTrue
+        $doc.result | Should -Be 'PASS'
+        $doc.exit_code | Should -Be 0
+        @($doc.diagnostics).Count | Should -Be 0
+        $failedChecks = @($doc.checks | Where-Object { -not $_.passed } | ForEach-Object { $_.id })
+        $failedChecks | Should -Be 'FORBIDDEN_ACTIONS_ABSENT'
+        # The observed failure must still surface in the summary counts.
+        $doc.summary.failed | Should -Be 1
+        $doc.summary.passed | Should -Be ($doc.summary.total - 1)
+    }
+
+    It 'every positive scenario observes PASS with harness PASS (PowerShell)' {
+        $r = Invoke-EvalRunner $runEvalsPs 'Json'
+        $r.Code | Should -Be 0
+        $docs = @($r.Lines | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.scenario_id -ne 'test-weakening-attempt' })
+        ($docs.Count) | Should -Be 7
+        foreach ($d in $docs) {
+            $d.observed_result | Should -Be 'PASS' -Because "scenario $($d.scenario_id)"
+            $d.result | Should -Be 'PASS'
+            $d.exit_code | Should -Be 0
+            $d.summary.failed | Should -Be 0
+        }
+    }
+
+    It 'scenario fixtures validate against scenario-v1 and verification artifacts against verification-result-v1' {
+        $scenarioDirs = @(Get-ChildItem -LiteralPath (Join-Path $evalsDir 'scenarios') -Directory | Sort-Object Name)
+        ($scenarioDirs.Count) | Should -Be 8
+        foreach ($dir in $scenarioDirs) {
+            $tmpS = [System.IO.Path]::GetTempFileName()
+            $tmpV = [System.IO.Path]::GetTempFileName()
+            try {
+                Copy-Item -LiteralPath (Join-Path $dir.FullName 'scenario.json') -Destination $tmpS -Force
+                (Test-EvalSchemaValid $tmpS $scenarioSchema) | Should -Be 0 -Because "scenario.json for $($dir.Name) must satisfy scenario-v1"
+                Copy-Item -LiteralPath (Join-Path $dir.FullName 'artifacts\verification-result.json') -Destination $tmpV -Force
+                (Test-EvalSchemaValid $tmpV $verificationSchema) | Should -Be 0 -Because "verification-result.json for $($dir.Name) must satisfy verification-result-v1"
+            }
+            finally {
+                Remove-Item -LiteralPath $tmpS, $tmpV -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    It 'a negative control failing on the WRONG check fails the harness itself' {
+        # Disable the control's forbidden-action detection and break an
+        # unrelated contract instead: observed FAIL must NOT count as
+        # detection, because expected_failed_checks pins the exact set.
+        $tmp = Join-Path $TestDrive ("negctl-" + [guid]::NewGuid().ToString('N'))
+        $scenarioDir = Join-Path $tmp 'test-weakening-attempt'
+        New-Item -ItemType Directory -Path $scenarioDir -Force | Out-Null
+        Copy-Item (Join-Path $evalsDir 'scenarios\test-weakening-attempt\*') $scenarioDir -Recurse -Force
+        $sp = Join-Path $scenarioDir 'scenario.json'
+        $s = Get-Content -Raw -LiteralPath $sp | ConvertFrom-Json -AsHashtable
+        $s['forbidden']['actions'] = @()
+        [System.IO.File]::WriteAllText($sp, (($s | ConvertTo-Json -Depth 8) + "`n"), [System.Text.UTF8Encoding]::new($false))
+        $tp = Join-Path $scenarioDir 'artifacts\task.md'
+        (Get-Content -LiteralPath $tp) -replace '^Status: done$', 'Status: in-progress' | Set-Content -LiteralPath $tp
+
+        $r = Invoke-EvalRunner $runEvalsPs 'Json' $tmp
+        $doc = Get-FirstDoc $r.Lines
+        $r.Code | Should -Be 1 -Because 'the harness itself must fail when a negative control fails for the wrong reason'
+        $doc.result | Should -Be 'FAIL'
+        $doc.expectation_matched | Should -BeFalse
+        @($doc.diagnostics).Count | Should -BeGreaterThan 0
+        $doc.diagnostics[0].message | Should -Match 'expected_failed_checks'
+        $failedChecks = @($doc.checks | Where-Object { -not $_.passed } | ForEach-Object { $_.id })
+        $failedChecks | Should -Not -Be @('FORBIDDEN_ACTIONS_ABSENT')
+    }
+
+    It 'forbidden-path matching is directory-aware' -ForEach @(
+        @{ c = 'src/core/billing'; e = $true }
+        @{ c = 'src/core/billing/service.ts'; e = $true }
+        @{ c = 'src/core/billing/internal/a.ts'; e = $true }
+        @{ c = 'src/core/billing-old/service.ts'; e = $false }
+        @{ c = 'apps/src/core/billing'; e = $false }
+        @{ c = 'src\core\billing\service.ts'; e = $true }
+    ) {
+        $dir = New-TempScenario "forbidden-path" @{
+            input          = @{ task = 'touch one path.'; changed_paths = @($_.c) }
+            expected       = @{ minimum_profile = 'standard'; required_modules = @() }
+            forbidden      = @{ paths = @('src/core/billing') }
+        }
+        try {
+            $r = Invoke-EvalRunner $runEvalsPs 'Json' $dir
+            $doc = Get-FirstDoc $r.Lines
+            $check = @($doc.checks | Where-Object { $_.id -eq 'FORBIDDEN_PATHS_AVOIDED' })
+            ($check.Count) | Should -Be 1
+            $check[0].passed | Should -Be (-not $_.e) -Because "changed '$($_.c)' vs forbidden 'src/core/billing'"
+        }
+        finally { Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue }
+    }
+
+    It 'approvals and evidence outside their authoritative sections cannot satisfy checks' {
+        $taskText = @'
+# TASK-FX: misplaced-authoritative-content
+
+## Status
+
+Status: done
+Updated: 2026-08-24
+
+## Risk profile
+
+Profile: standard
+
+## Acceptance criteria
+
+- AC-1: Observable condition recorded in the fixture.
+
+## Required evidence
+
+| AC ID | Evidence | Result |
+| --- | --- | --- |
+| AC-1 | n/a rationale: prose-only edit verified by proofreading | satisfied |
+
+## Approval gates
+
+- None identified
+
+## Context modules
+
+- None selected - no specialist trigger for this fixture
+
+## Verification
+
+### Baseline
+
+- Baseline recorded before changes.
+
+### Final
+
+- Final verification recorded.
+
+## Files changed
+
+- `docs/notes.md`
+
+## Notes
+
+The content below mimics approvals and evidence but lives outside the
+authoritative sections and inside unrelated structures:
+
+- [x] AG-9: Approved by Security Example on 2026-08-24
+
+| Item | Detail | Result |
+| --- | --- | --- |
+| Example | authorization-boundary-tests | passed |
+
+```
+| AC ID | Evidence | Result |
+| --- | --- | --- |
+| AC-1 | authorization-boundary-tests inside a fence | passed |
+```
+'@
+        $dir = New-TempScenario 'misplaced-authority' @{
+            input    = @{ task = 'Record notes only.'; changed_paths = @('docs/notes.md') }
+            expected = @{ minimum_profile = 'standard'; required_modules = @(); required_approval_gates = @('security'); required_evidence = @('authorization-boundary-tests') }
+        }
+        try {
+            [System.IO.File]::WriteAllText((Join-Path $dir 'misplaced-authority\artifacts\task.md'), ($taskText + "`n"), [System.Text.UTF8Encoding]::new($false))
+            $r = Invoke-EvalRunner $runEvalsPs 'Json' $dir
+            $doc = Get-FirstDoc $r.Lines
+            foreach ($cid in @('APPROVALS_DECLARED', 'EVIDENCE_PRESENT')) {
+                $c = @($doc.checks | Where-Object { $_.id -eq $cid })
+                ($c.Count) | Should -Be 1
+                $c[0].passed | Should -BeFalse -Because "$cid must not be satisfiable from Notes, fences, or unrelated tables"
+            }
+        }
+        finally { Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue }
     }
 }

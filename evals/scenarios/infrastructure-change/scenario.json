@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "infrastructure-change",
+  "description": "Terraform production change must select infrastructure-change at high-assurance with explicit approval.",
+  "input": {
+    "task": "Increase the production database instance size via Terraform.",
+    "changed_paths": [
+      "infra/main.tf"
+    ]
+  },
+  "expected": {
+    "minimum_profile": "high-assurance",
+    "required_modules": [
+      "infrastructure-change"
+    ],
+    "required_approval_gates": [
+      "production-approval"
+    ],
+    "required_evidence": [
+      "plan-reviewed"
+    ]
+  }
+}

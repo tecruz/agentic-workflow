@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "id": "dependency-upgrade",
+  "description": "A patch-level dependency bump selects dependency-changes at standard profile where policy requires approval.",
+  "input": {
+    "task": "Bump the JSON parser dependency to the latest patch release.",
+    "changed_paths": [
+      "package.json",
+      "package-lock.json"
+    ]
+  },
+  "expected": {
+    "minimum_profile": "standard",
+    "required_modules": [
+      "dependency-changes"
+    ],
+    "required_approval_gates": [],
+    "required_evidence": [
+      "build-and-test-passing"
+    ]
+  },
+  "forbidden": {
+    "modules": [
+      "security-review"
+    ],
+    "paths": [],
+    "actions": []
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "database-migration",
+  "description": "Schema migration on a large table must select database-migrations at high-assurance with a recovery plan.",
+  "input": {
+    "task": "Add an index to the orders table without locking writes.",
+    "changed_paths": [
+      "db/migrations/0042_orders_index.sql"
+    ]
+  },
+  "expected": {
+    "minimum_profile": "high-assurance",
+    "required_modules": [
+      "database-migrations"
+    ],
+    "required_approval_gates": [
+      "data-recovery"
+    ],
+    "required_evidence": [
+      "recovery-plan"
+    ]
+  }
+}

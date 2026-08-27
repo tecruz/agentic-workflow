@@ -1,0 +1,81 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "EvaluationScenario",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "input", "expected"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "description": { "type": "string" },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task", "changed_paths"],
+      "properties": {
+        "task": { "type": "string" },
+        "changed_paths": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "expected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum_profile", "required_modules"],
+      "properties": {
+        "minimum_profile": { "enum": ["prototype", "standard", "high-assurance"] },
+        "required_modules": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" }
+        },
+        "required_approval_gates": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "required_evidence": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "forbidden": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "modules": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" }
+        },
+        "paths": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "actions": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "fixture_expected_result": {
+      "description": "Offline harness only: the classification the runner must produce for this saved-artifact fixture (PASS by default). A FAIL fixture is a negative control proving the runner detects forbidden behavior.",
+      "enum": ["PASS", "FAIL"]
+    },
+    "expected_failed_checks": {
+      "description": "Offline harness only: the EXACT set of check ids that must fail. Negative controls must pin their intended violation so a failure of any other check cannot masquerade as detection.",
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "fixture_expected_result": { "const": "FAIL" } }, "required": ["fixture_expected_result"] },
+      "then": { "required": ["schema_version", "id", "input", "expected", "fixture_expected_result", "expected_failed_checks"], "properties": { "expected_failed_checks": { "minItems": 1 } } }
+    },
+    {
+      "if": { "properties": { "fixture_expected_result": { "const": "PASS" } }, "required": ["fixture_expected_result"] },
+      "then": { "properties": { "expected_failed_checks": { "maxItems": 0 } } }
+    }
+  ]
+}

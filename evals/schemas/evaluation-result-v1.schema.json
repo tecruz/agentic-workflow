@@ -1,0 +1,91 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "BehavioralEvaluationResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "protocol_version", "kind", "mode", "observed_result", "expected_result", "expectation_matched", "result", "exit_code", "scenario_id", "summary", "checks", "diagnostics"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "protocol_version": { "type": "string", "const": "1.5.0" },
+    "kind": { "type": "string", "const": "behavioral_evaluation_result" },
+    "mode": { "type": "string", "enum": ["offline-fixture"] },
+    "observed_result": {
+      "type": "string",
+      "enum": ["PASS", "FAIL"],
+      "description": "Classification of the scenario's fixture artifacts: PASS when every check passed, FAIL otherwise."
+    },
+    "expected_result": {
+      "type": "string",
+      "enum": ["PASS", "FAIL"],
+      "description": "The classification the scenario demands (negative controls demand FAIL)."
+    },
+    "expectation_matched": {
+      "type": "boolean",
+      "description": "True when observed_result equals expected_result, i.e. the harness evaluated the fixture correctly."
+    },
+    "result": {
+      "type": "string",
+      "enum": ["PASS", "FAIL"],
+      "description": "Harness verdict: PASS only when the fixture was evaluated correctly (expectation matched)."
+    },
+    "exit_code": { "type": "integer", "enum": [0, 1] },
+    "scenario_id": { "type": ["string", "null"] },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "passed", "failed"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "passed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "passed"],
+        "properties": {
+          "id": { "type": "string" },
+          "detail": { "type": "string" },
+          "passed": { "type": "boolean" }
+        }
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "message"],
+        "properties": {
+          "code": { "type": "string" },
+          "message": { "type": "string" }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "observed_result": { "const": "FAIL" } }, "required": ["observed_result"] },
+      "then": { "properties": { "summary": { "properties": { "failed": { "type": "integer", "minimum": 1 } } } } }
+    },
+    {
+      "if": { "properties": { "expectation_matched": { "const": true } }, "required": ["expectation_matched"] },
+      "then": { "properties": { "result": { "const": "PASS" }, "exit_code": { "const": 0 }, "diagnostics": { "type": "array", "maxItems": 0 } } }
+    },
+    {
+      "if": { "properties": { "expectation_matched": { "const": false } }, "required": ["expectation_matched"] },
+      "then": { "properties": { "result": { "const": "FAIL" }, "exit_code": { "const": 1 }, "diagnostics": { "type": "array", "minItems": 1 } } }
+    },
+    {
+      "if": { "properties": { "result": { "const": "PASS" } }, "required": ["result"] },
+      "then": { "properties": { "expectation_matched": { "const": true } } }
+    },
+    {
+      "if": { "properties": { "result": { "const": "FAIL" } }, "required": ["result"] },
+      "then": { "properties": { "expectation_matched": { "const": false } } }
+    }
+  ]
+}
