@@ -15,3 +15,6 @@ project-owned copy of this layout under `.agentic/decisions/`.
 | [ADR-0006](ADR-0006-installer-lifecycle-hardening.md) | Installer lifecycle hardening: read-only plans, confined manifests, proven legacy ownership | Accepted |
 | [ADR-0007](ADR-0007-extension-versioning.md) | Extension versioning: how future protocol extensions evolve | Accepted |
 | [ADR-0008](ADR-0008-risk-profiles-and-evidence-contracts.md) | Risk profiles and evidence contracts: prototype/standard/high-assurance with a structural task validator | Accepted |
+| [ADR-0009](ADR-0009-machine-readable-result-contracts.md) | Machine-readable result contracts: versioned JSON results and observable events | Accepted |
+| [ADR-0010](ADR-0010-context-modules-and-evaluations.md) | Portable context modules and offline behavioral evaluations | Accepted |
+| [ADR-0011](ADR-0011-isolated-multi-agent-task-coordination.md) | Isolated multi-agent task coordination (prototype stub) | Accepted |

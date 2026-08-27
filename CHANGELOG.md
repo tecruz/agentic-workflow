@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Isolated multi-agent task coordination stub (PR #11).** Ships `.agentic/orchestration/README.md` (principles) and `coordinator.sh` (placeholder) as managed files, registered in both installers and `build-bundle.sh`; adds ADR-0011. Current scope is a prototype stub — no worktree creation, worker spawning, or approval enforcement yet.
+
+### Fixed
+- Remove stale duplicate `ADR-0010-dynamic-context-modules-and-behavioral-evaluations.md` that duplicated `ADR-0010-context-modules-and-evaluations.md` after the orchestration merge.
+- Correct stray leading `<` markers left in `install.sh`, `install.ps1`, and `scripts/build-bundle.sh` from the merge.
+- Make `.agentic/orchestration/coordinator.sh` executable and index ADR-0009..0011 in `docs/decisions/README.md`.
+
 ## [1.5.0] - 2026-08-24
 
 ### Added
