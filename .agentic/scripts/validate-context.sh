@@ -521,19 +521,19 @@ handle_entry() {
         
         # If there's a suffix, it MUST match the separator+rationale pattern
         if [ -n "$(printf '%s' "$suffix" | tr -d '[:space:]')" ]; then
-            local rationale separator
+            local rationale
             # Parse separator explicitly using actual UTF-8 bytes (Bash 3.2 compatible)
             local em_dash=$'\xe2\x80\x94'
             local en_dash=$'\xe2\x80\x93'
             case "$suffix" in
-                " $em_dash "*) separator=" $em_dash "; rationale="${suffix# $em_dash }" ;;
-                " $en_dash "*) separator=" $en_dash "; rationale="${suffix# $en_dash }" ;;
-                " - "*) separator=" - "; rationale="${suffix# - }" ;;
-                "- "*) separator="- "; rationale="${suffix#- }" ;;
-                " $em_dash"*) separator=" $em_dash"; rationale="${suffix# $em_dash}" ;;
-                " $en_dash"*) separator=" $en_dash"; rationale="${suffix# $en_dash}" ;;
-                " -"*) separator=" -"; rationale="${suffix# -}" ;;
-                "-$"*) separator="-"; rationale="${suffix#-}" ;;
+                " $em_dash "*) rationale="${suffix# $em_dash }" ;;
+                " $en_dash "*) rationale="${suffix# $en_dash }" ;;
+                " - "*) rationale="${suffix# - }" ;;
+                "- "*) rationale="${suffix#- }" ;;
+                " $em_dash"*) rationale="${suffix# $em_dash}" ;;
+                " $en_dash"*) rationale="${suffix# $en_dash}" ;;
+                " -"*) rationale="${suffix# -}" ;;
+                "-$"*) rationale="${suffix#-}" ;;
                 *)
                     fail_invalid "MODULE_SELECTION_UNRESOLVED" "## Context modules" "None selected" "'None selected' must use a separator ( — / – / - ) with surrounding whitespace before rationale: $entry"
                     ;;
@@ -565,9 +565,9 @@ handle_entry() {
     local em_dash=$'\xe2\x80\x94'
     local en_dash=$'\xe2\x80\x93'
     case "$after_loaded" in
-        "$em_dash "*) separator="$em_dash "; rest="${after_loaded#$em_dash }" ;;
-        "$en_dash "*) separator="$en_dash "; rest="${after_loaded#$en_dash }" ;;
-        "- "*) separator="- "; rest="${after_loaded#- }" ;;
+        "$em_dash "*) rest="${after_loaded#$em_dash }" ;;
+        "$en_dash "*) rest="${after_loaded#$en_dash }" ;;
+        "- "*) rest="${after_loaded#- }" ;;
         *)
             fail_invalid "MODULE_SELECTION_UNRESOLVED" "## Context modules" "$entry" "Selection entry is not in the canonical form '<module-id> v<N> loaded — <rationale>': $entry"
             ;;
