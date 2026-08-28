@@ -218,12 +218,13 @@ function ConvertTo-AuthoritativeSections([string]$TaskText) {
     $inComment = $false
     $current = $null
     foreach ($raw in ($TaskText -split "`r?`n")) {
-        $stripped = $raw.Trim()
+        $line = $raw.TrimEnd("`r")
+        $stripped = $line.Trim()
         if ($inFence) {
-            if ($stripped.Contains('```') -or $stripped.Contains('~~~')) { $inFence = $false }
+            if ($line.StartsWith('```', [System.StringComparison]::Ordinal)) { $inFence = $false }
             continue
         }
-        if ($stripped.Contains('```') -or $stripped.Contains('~~~')) { $inFence = $true; continue }
+        if ($line.StartsWith('```', [System.StringComparison]::Ordinal)) { $inFence = $true; continue }
         if ($inComment) {
             if ($stripped.Contains('-->')) { $inComment = $false }
             continue
@@ -318,6 +319,7 @@ function Invoke-ContextValidatorContract([string]$TaskPath) {
     $code = $LASTEXITCODE
     $profile = $null
     $ids = @()
+    $ok = ($code -eq 0)
     try {
         $joined = ($out | Out-String).Trim()
         $firstLine = ($joined -split "`n")[0]
@@ -325,8 +327,10 @@ function Invoke-ContextValidatorContract([string]$TaskPath) {
         $profile = $doc['profile']
         $ids = @($doc['selected_modules'] | ForEach-Object { $_['id'] })
     }
-    catch { }
-    return @{ Ok = ($code -eq 0); Profile = $profile; Ids = $ids }
+    catch {
+        $ok = $false
+    }
+    return @{ Ok = $ok; Profile = $profile; Ids = $ids }
 }
 
 $summaryFields = @('checks_defined', 'checks_run', 'required_run',

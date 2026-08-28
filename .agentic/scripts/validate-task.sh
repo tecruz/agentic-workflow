@@ -75,7 +75,7 @@ while [ $# -gt 0 ]; do
         --format=*) FORMAT="${1#*=}"; shift ;;
         --handoff) HANDOFF=1; shift ;;
         -h|--help) usage; exit 0 ;;
-        -*) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
+        -*) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
         *)
             if [ -n "$TASK_FILE" ]; then
                 echo "Error: expected a single task file." >&2
@@ -517,18 +517,16 @@ validate_date() {
 # TBD / TODO / Pending, or blank do not count, so a table of template
 # placeholders is not treated as real evidence.
 table_row_has_content() {
-    local line="$1" oldifs cell
+    local line="$1" cell
     line="$(printf '%s' "$line" | sed -E 's/^[[:space:]]*\|//; s/\|[[:space:]]*$//')"
-    oldifs="$IFS"
-    IFS='|'
-    for cell in $line; do
+    local -a cells
+    IFS='|' read -ra cells <<< "$line"
+    for cell in "${cells[@]}"; do
         cell="$(printf '%s' "$cell" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
         if [ -n "$cell" ] && [ "$(content_class "$cell")" = "content" ]; then
-            IFS="$oldifs"
             return 0
         fi
     done
-    IFS="$oldifs"
     return 1
 }
 
@@ -558,7 +556,7 @@ has_meaningful_char() {
     # silently rejecting content the PowerShell validator would accept. The
     # parent-process pre-flight below guarantees this branch is never reached
     # with perl missing, so the error cannot be swallowed by a subshell.
-    command -v perl >/dev/null 2>&1 \
+    command -v perl >/dev/null 2>&1 || \
         fail_invalid "TOOLING_UNAVAILABLE" "" "" "perl is required to classify non-ASCII content; install perl or keep evidence ASCII-only."
     perl -CS -0777 -ne 'exit(/[\p{L}\p{N}]/ ? 0 : 1)' <<< "$1" 2>/dev/null
 }

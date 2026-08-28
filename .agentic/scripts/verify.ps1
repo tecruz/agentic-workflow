@@ -295,16 +295,131 @@ function Invoke-Check {
 
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     Push-Location $Cwd
+    $code = $null
+    $prevEAP = $ErrorActionPreference
+    # On Windows, extensionless executables (e.g. bats) are POSIX shell scripts that cannot be
+    # executed directly via CreateProcess. Proactively route them through bash when available,
+    # preferring Git Bash (handles Windows paths natively) over WSL bash (requires /mnt/c/...).
+    $isExtensionless = -not [System.IO.Path]::GetExtension($resolvedExe)
+    $bashCmd = $null
+    $bashResolvedExe = $null
+    $useBash = $false
+    $effectiveExe = $resolvedExe
+    $effectiveArgs = $ArgsList
+    $effectiveBashTarget = $null
+    if ($IsWindows -and $isExtensionless -and (Test-Path -LiteralPath $resolvedExe)) {
+        $gitBashPaths = @('C:\Program Files\Git\bin\bash.exe', 'C:\Program Files\Git\usr\bin\bash.exe')
+        foreach ($p in $gitBashPaths) {
+            if (Test-Path -LiteralPath $p) { $bashCmd = Get-Command $p -ErrorAction SilentlyContinue; if ($bashCmd) { break } }
+        }
+        if (-not $bashCmd) { $bashCmd = Get-Command bash -ErrorAction SilentlyContinue }
+        if ($bashCmd) {
+            $useBash = $true
+            $effectiveExe = $bashCmd.Source
+            $bashResolvedExe = $resolvedExe
+            if ($bashCmd.Source -like '*System32*bash.exe*') {
+                if ($resolvedExe -match '^([A-Za-z]):(.*)') {
+                    $drive = $matches[1].ToLowerInvariant()
+                    $rest = $matches[2] -replace '\\', '/'
+                    $bashResolvedExe = "/mnt/$drive$rest"
+                }
+            }
+            $effectiveBashTarget = $bashResolvedExe
+            $effectiveArgs = @($bashResolvedExe) + $ArgsList
+        }
+    }
     try {
-        if ($Format -eq 'Json') {
-            & $resolvedExe @ArgsList 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
+        $ErrorActionPreference = 'Stop'
+        $global:LASTEXITCODE = $null
+        $prevErrorCount = $Error.Count
+        if ($useBash) {
+            if ($Format -eq 'Json') {
+                & $effectiveExe -- $effectiveBashTarget @ArgsList 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
+            }
+            else {
+                & $effectiveExe -- $effectiveBashTarget @ArgsList
+            }
         }
         else {
-            & $resolvedExe @ArgsList
+            if ($Format -eq 'Json') {
+                & $resolvedExe @ArgsList 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
+            }
+            else {
+                & $resolvedExe @ArgsList
+            }
         }
         $code = $LASTEXITCODE
+        if ($null -eq $code) {
+            if ($Error.Count -gt $prevErrorCount) { $code = 1 } else {
+                # Direct launch of extensionless file on Windows yields $null with no error but did not execute.
+                if ($IsWindows -and $isExtensionless) { $code = 1 } else { $code = 0 }
+            }
+        }
+        # If we used bash, ensure the bash launch itself did not silently fail (WSL path conversion etc.)
+        if ($useBash -and $null -ne $code -and $code -eq 127) {
+            # 127 from bash means "command not found" — likely path conversion issue; do not silently pass
+        }
+    }
+    catch {
+        # If we already tried bash, report directly; otherwise try bash fallback for extensionless Windows files
+        if ($useBash) {
+            $code = 1
+            Write-Log "  ERROR: failed to run '$Exe' via bash: $($_.Exception.Message)"
+        }
+        else {
+            $bashFallback = $false
+            if ($IsWindows -and $isExtensionless) {
+                if (-not $bashCmd) {
+                    $gitBashPaths = @('C:\Program Files\Git\bin\bash.exe', 'C:\Program Files\Git\usr\bin\bash.exe')
+                    foreach ($p in $gitBashPaths) {
+                        if (Test-Path -LiteralPath $p) { $bashCmd = Get-Command $p -ErrorAction SilentlyContinue; if ($bashCmd) { break } }
+                    }
+                    if (-not $bashCmd) { $bashCmd = Get-Command bash -ErrorAction SilentlyContinue }
+                }
+                if ($bashCmd -and (Test-Path -LiteralPath $resolvedExe)) {
+                    $bashFallback = $true
+                    $bashResolvedExe = $resolvedExe
+                    if ($bashCmd.Source -like '*System32*bash.exe*') {
+                        if ($resolvedExe -match '^([A-Za-z]):(.*)') {
+                            $drive = $matches[1].ToLowerInvariant()
+                            $rest = $matches[2] -replace '\\', '/'
+                            $bashResolvedExe = "/mnt/$drive$rest"
+                        }
+                    }
+                }
+            }
+            if ($bashFallback) {
+                $Error.Clear()
+                $global:LASTEXITCODE = $null
+                $prevErrorCount = $Error.Count
+                try {
+                    $ErrorActionPreference = 'Continue'
+                    if ($Format -eq 'Json') {
+                        & $bashCmd.Source -- $bashResolvedExe @ArgsList 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
+                    }
+                    else {
+                        & $bashCmd.Source -- $bashResolvedExe @ArgsList
+                    }
+                    $code = $LASTEXITCODE
+                    if ($null -eq $code) {
+                        if ($Error.Count -gt $prevErrorCount) { $code = 1 } else { $code = 0 }
+                    }
+                    if ($null -ne $code) { $Error.Clear() }
+                }
+                catch {
+                    $code = 1
+                    Write-Log "  ERROR: failed to run '$Exe' via bash: $($_.Exception.Message)"
+                }
+            }
+            else {
+                $code = 1
+                Write-Log "  ERROR: failed to execute '$Exe': $($_.Exception.Message)"
+            }
+        }
+        if ($null -eq $code) { $code = 1 }
     }
     finally {
+        $ErrorActionPreference = $prevEAP
         Pop-Location
     }
     $sw.Stop()
@@ -735,6 +850,9 @@ function Test-ChecksTsvValidation {
         if ($fields.Count -lt 4) {
             throw ".agentic/checks.tsv line $lineNum has fewer than 4 fields."
         }
+        if ($rawLine.EndsWith("`t")) {
+            throw ".agentic/checks.tsv line $lineNum has trailing tab (empty trailing field)."
+        }
         $requirement = $fields[0]
         $id = $fields[1]
         $cwd = $fields[2]
@@ -791,7 +909,11 @@ if ($EmitChecks) {
     exit 0
 }
 
-if ($ValidateChecks) {
+if ($PSBoundParameters.ContainsKey('ValidateChecks')) {
+    if ([string]::IsNullOrWhiteSpace($ValidateChecks)) {
+        Write-Log "ERROR: --validate-checks requires a file path."
+        exit 1
+    }
     if (-not (Test-Path -LiteralPath $ValidateChecks)) {
         Write-Log "ERROR: file '$ValidateChecks' does not exist."
         exit 1
@@ -838,6 +960,18 @@ if ($DetectChecks) {
         "# Auto-generated by detection workflow. Review assumptions and promote to .agentic/checks.tsv"
     ) + $checks
     [System.IO.File]::WriteAllLines($tmp, $content, [System.Text.UTF8Encoding]::new($false))
+    if (Test-Path -LiteralPath $genFile) {
+        if (Test-Path -LiteralPath $genFile -PathType Container) {
+            Write-Log "ERROR: generated candidate exists and is a directory: $genFile"
+            Remove-Item -LiteralPath $tmp -ErrorAction SilentlyContinue
+            exit 1
+        }
+        if (-not (Test-Path -LiteralPath $genFile -PathType Leaf)) {
+            Write-Log "ERROR: generated candidate exists and is not a regular file: $genFile"
+            Remove-Item -LiteralPath $tmp -ErrorAction SilentlyContinue
+            exit 1
+        }
+    }
     try {
         Test-ChecksTsvValidation -FilePath $tmp
         Move-Item -LiteralPath $tmp -Destination $genFile -Force

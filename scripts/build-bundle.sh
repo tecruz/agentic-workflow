@@ -56,7 +56,7 @@ sha256_verify() {
 while [ $# -gt 0 ]; do
     case "$1" in
         --no-archives) NO_ARCHIVES=1 ;;
-        -h|--help) head -30 "$0"; exit 0 ;;
+        -h|--help) head -30 "${BASH_SOURCE[0]}"; exit 0 ;;
         *) echo "Unknown option: $1" >&2; exit 2 ;;
     esac
     shift
