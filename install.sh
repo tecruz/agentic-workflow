@@ -164,11 +164,15 @@ for t in "${TOOLS[@]}"; do
         *) echo "Error: unknown tool '$t' (expected claude, gemini, aider, or all)" >&2; exit 2 ;;
     esac
 done
-# Deduplicate preserving order (prevents duplicate manifest rows)
+# Deduplicate preserving order (prevents duplicate manifest rows).
+# Guarded expansions: bash 3.2 (macOS) treats expanding an empty array
+# under `set -u` as an unbound variable.
 _deduped=()
 for t in "${TOOLS[@]}"; do
     _skip=0
-    for d in "${_deduped[@]}"; do [ "$d" = "$t" ] && _skip=1 && break; done
+    if [ "${#_deduped[@]}" -gt 0 ]; then
+        for d in "${_deduped[@]}"; do [ "$d" = "$t" ] && _skip=1 && break; done
+    fi
     [ "$_skip" -eq 0 ] && _deduped+=("$t")
 done
 TOOLS=("${_deduped[@]}")

@@ -190,6 +190,33 @@ function Get-CwdDisplay {
     return [System.IO.Path]::GetFileName($full)
 }
 
+# On Windows, extensionless executables (e.g. bats) are POSIX shell scripts that
+# cannot be launched via CreateProcess. Returns @{ Bash; Script } (with the script
+# path converted to /mnt/c/... form for WSL bash) when routing through bash applies,
+# or $null when it does not. Prefers Git Bash, which handles Windows paths natively.
+function Get-ExtensionlessBashLauncher {
+    param([string] $Path)
+    if (-not $IsWindows) { return $null }
+    if ([System.IO.Path]::GetExtension($Path)) { return $null }
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
+    $bash = $null
+    foreach ($p in @('C:\Program Files\Git\bin\bash.exe', 'C:\Program Files\Git\usr\bin\bash.exe')) {
+        if (Test-Path -LiteralPath $p) { $bash = $p; break }
+    }
+    if (-not $bash) {
+        $found = Get-Command bash -ErrorAction SilentlyContinue
+        if ($found) { $bash = $found.Source }
+    }
+    if (-not $bash) { return $null }
+    $script = $Path
+    if ($bash -like '*System32*bash.exe*') {
+        if ($Path -match '^([A-Za-z]):(.*)') {
+            $script = "/mnt/$($matches[1].ToLowerInvariant())$($matches[2] -replace '\\', '/')"
+        }
+    }
+    return @{ Bash = $bash; Script = $script }
+}
+
 function Invoke-Check {
     param(
         [string] $Requirement,
@@ -297,126 +324,38 @@ function Invoke-Check {
     Push-Location $Cwd
     $code = $null
     $prevEAP = $ErrorActionPreference
-    # On Windows, extensionless executables (e.g. bats) are POSIX shell scripts that cannot be
-    # executed directly via CreateProcess. Proactively route them through bash when available,
-    # preferring Git Bash (handles Windows paths natively) over WSL bash (requires /mnt/c/...).
-    $isExtensionless = -not [System.IO.Path]::GetExtension($resolvedExe)
-    $bashCmd = $null
-    $bashResolvedExe = $null
-    $useBash = $false
-    $effectiveExe = $resolvedExe
-    $effectiveArgs = $ArgsList
-    $effectiveBashTarget = $null
-    if ($IsWindows -and $isExtensionless -and (Test-Path -LiteralPath $resolvedExe)) {
-        $gitBashPaths = @('C:\Program Files\Git\bin\bash.exe', 'C:\Program Files\Git\usr\bin\bash.exe')
-        foreach ($p in $gitBashPaths) {
-            if (Test-Path -LiteralPath $p) { $bashCmd = Get-Command $p -ErrorAction SilentlyContinue; if ($bashCmd) { break } }
-        }
-        if (-not $bashCmd) { $bashCmd = Get-Command bash -ErrorAction SilentlyContinue }
-        if ($bashCmd) {
-            $useBash = $true
-            $effectiveExe = $bashCmd.Source
-            $bashResolvedExe = $resolvedExe
-            if ($bashCmd.Source -like '*System32*bash.exe*') {
-                if ($resolvedExe -match '^([A-Za-z]):(.*)') {
-                    $drive = $matches[1].ToLowerInvariant()
-                    $rest = $matches[2] -replace '\\', '/'
-                    $bashResolvedExe = "/mnt/$drive$rest"
-                }
-            }
-            $effectiveBashTarget = $bashResolvedExe
-            $effectiveArgs = @($bashResolvedExe) + $ArgsList
-        }
+    $launcher = Get-ExtensionlessBashLauncher -Path $resolvedExe
+    if ($launcher) {
+        $invocationExe = $launcher.Bash
+        $invocationArgs = @('--', $launcher.Script) + @($ArgsList)
+    }
+    else {
+        $invocationExe = $resolvedExe
+        $invocationArgs = @($ArgsList)
     }
     try {
         $ErrorActionPreference = 'Stop'
         $global:LASTEXITCODE = $null
         $prevErrorCount = $Error.Count
-        if ($useBash) {
-            if ($Format -eq 'Json') {
-                & $effectiveExe -- $effectiveBashTarget @ArgsList 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
-            }
-            else {
-                & $effectiveExe -- $effectiveBashTarget @ArgsList
-            }
+        if ($Format -eq 'Json') {
+            & $invocationExe @invocationArgs 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
         }
         else {
-            if ($Format -eq 'Json') {
-                & $resolvedExe @ArgsList 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
-            }
-            else {
-                & $resolvedExe @ArgsList
-            }
+            & $invocationExe @invocationArgs
         }
         $code = $LASTEXITCODE
         if ($null -eq $code) {
-            if ($Error.Count -gt $prevErrorCount) { $code = 1 } else {
-                # Direct launch of extensionless file on Windows yields $null with no error but did not execute.
-                if ($IsWindows -and $isExtensionless) { $code = 1 } else { $code = 0 }
-            }
-        }
-        # If we used bash, ensure the bash launch itself did not silently fail (WSL path conversion etc.)
-        if ($useBash -and $null -ne $code -and $code -eq 127) {
-            # 127 from bash means "command not found" — likely path conversion issue; do not silently pass
+            # A launch that never produced a native process leaves $LASTEXITCODE
+            # untouched (null after the reset): count errors first, then treat a
+            # silent no-op Windows launch as a failure, never as success.
+            if ($Error.Count -gt $prevErrorCount) { $code = 1 }
+            elseif ($IsWindows -and $null -eq [System.IO.Path]::GetExtension($resolvedExe)) { $code = 1 }
+            else { $code = 0 }
         }
     }
     catch {
-        # If we already tried bash, report directly; otherwise try bash fallback for extensionless Windows files
-        if ($useBash) {
-            $code = 1
-            Write-Log "  ERROR: failed to run '$Exe' via bash: $($_.Exception.Message)"
-        }
-        else {
-            $bashFallback = $false
-            if ($IsWindows -and $isExtensionless) {
-                if (-not $bashCmd) {
-                    $gitBashPaths = @('C:\Program Files\Git\bin\bash.exe', 'C:\Program Files\Git\usr\bin\bash.exe')
-                    foreach ($p in $gitBashPaths) {
-                        if (Test-Path -LiteralPath $p) { $bashCmd = Get-Command $p -ErrorAction SilentlyContinue; if ($bashCmd) { break } }
-                    }
-                    if (-not $bashCmd) { $bashCmd = Get-Command bash -ErrorAction SilentlyContinue }
-                }
-                if ($bashCmd -and (Test-Path -LiteralPath $resolvedExe)) {
-                    $bashFallback = $true
-                    $bashResolvedExe = $resolvedExe
-                    if ($bashCmd.Source -like '*System32*bash.exe*') {
-                        if ($resolvedExe -match '^([A-Za-z]):(.*)') {
-                            $drive = $matches[1].ToLowerInvariant()
-                            $rest = $matches[2] -replace '\\', '/'
-                            $bashResolvedExe = "/mnt/$drive$rest"
-                        }
-                    }
-                }
-            }
-            if ($bashFallback) {
-                $Error.Clear()
-                $global:LASTEXITCODE = $null
-                $prevErrorCount = $Error.Count
-                try {
-                    $ErrorActionPreference = 'Continue'
-                    if ($Format -eq 'Json') {
-                        & $bashCmd.Source -- $bashResolvedExe @ArgsList 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
-                    }
-                    else {
-                        & $bashCmd.Source -- $bashResolvedExe @ArgsList
-                    }
-                    $code = $LASTEXITCODE
-                    if ($null -eq $code) {
-                        if ($Error.Count -gt $prevErrorCount) { $code = 1 } else { $code = 0 }
-                    }
-                    if ($null -ne $code) { $Error.Clear() }
-                }
-                catch {
-                    $code = 1
-                    Write-Log "  ERROR: failed to run '$Exe' via bash: $($_.Exception.Message)"
-                }
-            }
-            else {
-                $code = 1
-                Write-Log "  ERROR: failed to execute '$Exe': $($_.Exception.Message)"
-            }
-        }
-        if ($null -eq $code) { $code = 1 }
+        $code = 1
+        Write-Log "  ERROR: failed to execute '$Exe': $($_.Exception.Message)"
     }
     finally {
         $ErrorActionPreference = $prevEAP

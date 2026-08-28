@@ -36,6 +36,7 @@ set -uo pipefail
 FORMAT="text"
 EVENTS_FILE=""
 EVENTS_FORCE=0
+AFTER_DASHDASH=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --format)
@@ -71,6 +72,7 @@ while [ $# -gt 0 ]; do
             ;;
         --)
             shift
+            AFTER_DASHDASH=1
             break
             ;;
         -*)
@@ -83,6 +85,12 @@ while [ $# -gt 0 ]; do
             ;;
     esac
 done
+# verify.sh takes no positional arguments: anything after `--` is an error
+# rather than a silently ignored remainder.
+if [ "$AFTER_DASHDASH" -eq 1 ] && [ $# -gt 0 ]; then
+    echo "ERROR: unexpected argument '$1' after '--'." >&2
+    exit 1
+fi
 
 # The output format is a versioned CLI contract: unknown or missing values are
 # rejected exactly like the PowerShell ValidateSet rejects them instead of
@@ -902,9 +910,13 @@ validate_checks_tsv() {
         fi
 
         local duplicate=0 seen
-        for seen in "${seen_ids[@]}"; do
-            if [ "$seen" = "$id" ]; then duplicate=1; break; fi
-        done
+        # Guarded expansion: bash 3.2 (macOS) treats expanding an empty array
+        # under `set -u` as an unbound variable.
+        if [ "${#seen_ids[@]}" -gt 0 ]; then
+            for seen in "${seen_ids[@]}"; do
+                if [ "$seen" = "$id" ]; then duplicate=1; break; fi
+            done
+        fi
         if [ "$duplicate" -eq 1 ]; then
             echo "ERROR: .agentic/checks.tsv line $line_num has duplicate check ID '$id'." >&2
             exit 1

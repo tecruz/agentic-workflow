@@ -519,8 +519,13 @@ validate_date() {
 table_row_has_content() {
     local line="$1" cell
     line="$(printf '%s' "$line" | sed -E 's/^[[:space:]]*\|//; s/\|[[:space:]]*$//')"
-    local -a cells
+    local -a cells=()
     IFS='|' read -ra cells <<< "$line"
+    # Guarded expansion: bash 3.2 (macOS) treats expanding an empty array
+    # under `set -u` as an unbound variable.
+    if [ "${#cells[@]}" -eq 0 ]; then
+        return 1
+    fi
     for cell in "${cells[@]}"; do
         cell="$(printf '%s' "$cell" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
         if [ -n "$cell" ] && [ "$(content_class "$cell")" = "content" ]; then
@@ -784,12 +789,12 @@ while IFS= read -r line || [ -n "$line" ]; do
     esac
     if [ "$in_fence" -eq 1 ]; then
         case "$line" in
-            *'```'*|*'~~~'*) in_fence=0 ;;
+            '```'*) in_fence=0 ;;
         esac
         continue
     fi
     case "$line" in
-        *'```'*|*'~~~'*) in_fence=1; continue ;;
+        '```'*) in_fence=1; continue ;;
     esac
     if printf '%s' "$line" | grep -qE '^[[:space:]]*>'; then
         continue
