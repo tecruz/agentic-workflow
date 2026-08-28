@@ -7,14 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- **Isolated multi-agent task coordination stub (PR #11).** Ships `.agentic/orchestration/README.md` (principles) and `coordinator.sh` (placeholder) as managed files, registered in both installers and `build-bundle.sh`; adds ADR-0011. Current scope is a prototype stub — no worktree creation, worker spawning, or approval enforcement yet.
+## [1.6.0] - 2026-08-28
 
-### Fixed
-- Remove stale duplicate `ADR-0010-dynamic-context-modules-and-behavioral-evaluations.md` that duplicated `ADR-0010-context-modules-and-evaluations.md` after the orchestration merge.
-- Correct stray leading `<` markers left in `install.sh`, `install.ps1`, and `scripts/build-bundle.sh` from the merge.
-- Make `.agentic/orchestration/coordinator.sh` executable and index ADR-0009..0011 in `docs/decisions/README.md`.
-- Register `bash -n` syntax coverage for `.agentic/orchestration/coordinator.sh` in `.agentic/checks.tsv` and add Bats/Pester coverage asserting the orchestration stub ships as managed files in fresh installs and bundles.
+### Added
+- **Isolated multi-agent task coordination (ADR-0011 realized).** The v1.5.0 stub is replaced by a complete coordinator:
+  - Isolated `git worktree` per task under `.agentic/orchestration/worktrees/<task-id>` on branch `orchestration/<task-id>` with a per-task lock file enforcing explicit ownership and preventing concurrent conflicting mutations.
+  - Generic worker runner (`AGENTIC_WORKER_CMD` or `--worker <cmd>` / `-Worker <cmd>`): any agent CLI may be supplied; the coordinator never logs command text and captures exit code/duration inside the worktree.
+  - Observable handoff & aggregation: versioned JSONL event stream (`orchestration-events-v1.schema.json`: `orchestration_started` → `worker_started` → `worker_completed` → `orchestration_completed`) and aggregated `orchestration-result-v1` contract with `result↔exit_code` pairing invariants; working directories are project-relative redacted and no command lines, args, env vars, or absolute paths leak into events or results.
+  - Approval controls: spawning requires both a checked `AG-N` gate and `--approve` (`-Approve`); remote writes require `--push` (`-Push`) in addition. `None identified` means the flag alone suffices; unchecked or malformed gates `BLOCK` with no worktree and no remote write. `--push` without `--approve` is rejected.
+  - Bash+PowerShell twins (`coordinator.sh` / `coordinator.ps1`, `protocol_version` 1.6.0) held to identical observable behavior by shared fixtures; both plus the two new schemas are managed files (installers, bundle) and are validated by `checks.tsv`/`ps-syntax` and bundle-leak gates.
+  - Operational guards: `git` required for worktrees; events and `--format json` remain mutually exclusive (like `verify`), event destinations confined to `.agentic/runs/` and promoted atomically (scratch + hard-link / `Move-Item -Force` with `EventsForce`); `--cleanup` removes the worktree.
+  - ADR-0011 amended with the realized v1.6.0 design; orchestration `README.md` rewritten with usage and redaction guarantees; `VERSION` and `protocol_version` sweep to `1.6.0` across all emitters and schemas; real v1.5.0→v1.6.0 migration test; eval harness `protocol_version` also swept to `1.6.0` with scenario artifacts updated.
 
 ## [1.5.0] - 2026-08-24
 

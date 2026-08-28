@@ -102,10 +102,16 @@ Describe 'install.ps1' {
             & $install -Target $tmp *> $null
             Test-Path (Join-Path $tmp '.agentic\orchestration\README.md') | Should -Be $true
             Test-Path (Join-Path $tmp '.agentic\orchestration\coordinator.sh') | Should -Be $true
-            # the manifest records both files as framework-managed
+            Test-Path (Join-Path $tmp '.agentic\orchestration\coordinator.ps1') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\schemas\orchestration-result-v1.schema.json') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\schemas\orchestration-events-v1.schema.json') | Should -Be $true
+            # the manifest records files as framework-managed
             $manifest = Get-Content -Raw (Join-Path $tmp '.agentic\install-manifest.tsv')
             $manifest -match "\.agentic/orchestration/README\.md`tmanaged" | Should -Be $true
             $manifest -match "\.agentic/orchestration/coordinator\.sh`tmanaged" | Should -Be $true
+            $manifest -match "\.agentic/orchestration/coordinator\.ps1`tmanaged" | Should -Be $true
+            $manifest -match "\.agentic/schemas/orchestration-result-v1\.schema\.json`tmanaged" | Should -Be $true
+            $manifest -match "\.agentic/schemas/orchestration-events-v1\.schema\.json`tmanaged" | Should -Be $true
         }
         finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
     }

@@ -275,7 +275,7 @@ output_json_checked() {
         source_value="\"source\":\"checks_tsv\""
     fi
 
-    printf '{"schema_version":1,"protocol_version":"1.5.0","kind":"verification_result","result":"%s","exit_code":%d,%s,"summary":%s,"checks":[%s]}\n' \
+    printf '{"schema_version":1,"protocol_version":"1.6.0","kind":"verification_result","result":"%s","exit_code":%d,%s,"summary":%s,"checks":[%s]}\n' \
         "$res_str" "$exit_code" "$source_value" "$summary" "$checks_json"
 }
 

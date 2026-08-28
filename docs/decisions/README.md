@@ -17,4 +17,4 @@ project-owned copy of this layout under `.agentic/decisions/`.
 | [ADR-0008](ADR-0008-risk-profiles-and-evidence-contracts.md) | Risk profiles and evidence contracts: prototype/standard/high-assurance with a structural task validator | Accepted |
 | [ADR-0009](ADR-0009-machine-readable-result-contracts.md) | Machine-readable result contracts: versioned JSON results and observable events | Accepted |
 | [ADR-0010](ADR-0010-context-modules-and-evaluations.md) | Portable context modules and offline behavioral evaluations | Accepted |
-| [ADR-0011](ADR-0011-isolated-multi-agent-task-coordination.md) | Isolated multi-agent task coordination (prototype stub) | Accepted |
+| [ADR-0011](ADR-0011-isolated-multi-agent-task-coordination.md) | Isolated multi-agent task coordination | Accepted (amended v1.6.0) |
