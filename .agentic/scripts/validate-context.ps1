@@ -204,7 +204,7 @@ function Test-MeaningfulChar {
 function Test-PlaceholderText {
     param([string]$Text)
     $trimmed = $Text.Trim()
-    if ($trimmed -match '^[\[\]<].*[\[\]>]$' -and $trimmed.Length -ge 2) { return $true }
+    if ($trimmed -match '^(\[.*\]|<.*>)$' -and $trimmed.Length -ge 2) { return $true }
     $n = (($trimmed -replace '^\s*[-*+]\s+', '').Trim() -replace '\s*[.!?;:,-]+$', '').ToLowerInvariant()
     if (-not $n) { return $true }
     if ($n -in @('tbd', 'todo', 'pending', 'placeholder', 'tbc', 'none', 'n/a')) { return $true }

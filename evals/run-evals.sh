@@ -72,7 +72,7 @@ while [ $# -gt 0 ]; do
             FORMAT="$2"; shift 2 ;;
         --format=*) FORMAT="${1#*=}"; shift ;;
         -h|--help) usage; exit 0 ;;
-        -*) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
+        -*) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
         *)
             if [ -n "$SCENARIOS_DIR" ]; then
                 echo "Error: expected a single scenarios directory." >&2
@@ -313,10 +313,10 @@ def authoritative_sections(task_text):
         line = raw.rstrip("\r")
         stripped = line.strip()
         if in_fence:
-            if "```" in stripped or "~~~" in stripped:
+            if line.startswith("```"):
                 in_fence = False
             continue
-        if "```" in stripped or "~~~" in stripped:
+        if line.startswith("```"):
             in_fence = True
             continue
         if in_comment:
@@ -426,14 +426,16 @@ def run_context_validator(task_path):
     profile = None
     ids = []
     detail = ""
+    ok = proc.returncode == 0
     try:
         doc = json.loads(proc.stdout.decode("utf-8", errors="replace"))
         profile = doc.get("profile")
         ids = [m.get("id") for m in doc.get("selected_modules", []) if isinstance(m, dict)]
     except ValueError:
+        ok = False
         first = proc.stderr.decode("utf-8", errors="replace").strip().splitlines()
         detail = first[0] if first else "validate-context produced no result document (exit %d)" % proc.returncode
-    return proc.returncode == 0, profile, ids, detail
+    return ok, profile, ids, detail
 
 
 SUMMARY_FIELDS = ("checks_defined", "checks_run", "required_run",
@@ -480,11 +482,13 @@ def evaluate_scenario(scenario_path):
         try:
             sschema = load_json(scenario_schema_path)
         except (ValueError, OSError) as exc:
-            fail_fast("cannot load scenario schema: %s" % exc)
-        errs = schema_errors(scenario, sschema)
-        schema_ok = not errs
-        record("SCENARIO_SCHEMA_VALID", schema_ok,
-               "" if schema_ok else "scenario.json violates scenario-v1: %s" % "; ".join(errs[:3]))
+            record("SCENARIO_SCHEMA_VALID", False, "cannot load scenario schema: %s" % exc)
+            schema_ok = False
+        else:
+            errs = schema_errors(scenario, sschema)
+            schema_ok = not errs
+            record("SCENARIO_SCHEMA_VALID", schema_ok,
+                   "" if schema_ok else "scenario.json violates scenario-v1: %s" % "; ".join(errs[:3]))
 
     sid = scenario.get("id") if isinstance(scenario, dict) and schema_ok else \
         os.path.basename(os.path.dirname(scenario_path))

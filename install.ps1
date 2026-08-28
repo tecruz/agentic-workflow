@@ -119,6 +119,7 @@ Usage:
   -AcceptDetectedChecks  Validate and promote the reviewed candidate.
   -ReplaceManaged        Replace modified framework-managed files.
   -ReplaceChecks         Overwrite a project-owned .agentic/checks.tsv.
+  -RegenerateChecks      Alias for -ReplaceChecks (overwrite checks.tsv).
   -Help                  Show this usage summary.
 "@
     exit 0
@@ -127,10 +128,10 @@ Usage:
 if ($Force) { $ReplaceManaged = $true }
 
 $SourceDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ProtocolVersion = (Get-Content -Raw -LiteralPath (Join-Path $SourceDir ".agentic\VERSION")).Trim()
+$ProtocolVersion = (Get-Content -Raw -LiteralPath (Join-Path $SourceDir ".agentic/VERSION")).Trim()
 
-if (-not (Test-Path -LiteralPath $Target)) {
-    Write-Host "Error: target directory '$Target' does not exist."
+if (-not (Test-Path -LiteralPath $Target -PathType Container)) {
+    Write-Host "Error: target directory '$Target' does not exist or is not a directory."
     exit 1
 }
 $TargetDir = (Resolve-Path -LiteralPath $Target).Path
@@ -165,11 +166,22 @@ else {
     $ToolsList = @($Tools -split ',')
 }
 foreach ($t in $ToolsList) {
-    if ($t -notin @("claude", "gemini", "aider")) {
+    if ([string]::IsNullOrWhiteSpace($t) -or $t -notin @("claude", "gemini", "aider")) {
+        if ([string]::IsNullOrWhiteSpace($t)) { $t = '' }
         Write-Host "Error: unknown tool '$t' (expected claude, gemini, aider, or all)."
         exit 2
     }
 }
+# Deduplicate preserving order (prevents duplicate manifest rows and spurious .new candidates)
+$seen = @{}
+$deduped = @()
+foreach ($t in $ToolsList) {
+    if (-not $seen.ContainsKey($t)) {
+        $seen[$t] = $true
+        $deduped += $t
+    }
+}
+$ToolsList = $deduped
 
 $StartMarker = '<!-- @@AGENTIC-PROTOCOL-START@@ -->'
 $EndMarker = '<!-- @@AGENTIC-PROTOCOL-END@@ -->'
@@ -337,7 +349,7 @@ function Get-FileChecksum {
 function Read-ManifestChecksum {
     param([string] $RelativePath)
     $rel = ConvertTo-PortablePath $RelativePath
-    $mf = Join-Path $TargetDir ".agentic\install-manifest.tsv"
+    $mf = Join-Path $TargetDir ".agentic/install-manifest.tsv"
     if (Test-Path -LiteralPath $mf) {
         foreach ($line in Get-Content -LiteralPath $mf) {
             $fields = $line -split "`t"
@@ -674,7 +686,7 @@ function Install-CheckList {
         Add-ManifestEntry $rel "seed" (Get-FileChecksum $dst)
         return
     }
-    Install-Seed -RelativePath $rel -SourcePath (Join-Path $SourceDir ".agentic\templates\checks.tsv")
+    Install-Seed -RelativePath $rel -SourcePath (Join-Path $SourceDir ".agentic/templates/checks.tsv")
 }
 
 function Install-Merge {
@@ -902,7 +914,7 @@ function Assert-SafeDestination {
 # Validates the on-disk install manifest when one exists; throws on any
 # malformed entry. Read-only, so it also runs under -Plan.
 function Assert-PreviousManifestValid {
-    $mf = Join-Path $TargetDir ".agentic\install-manifest.tsv"
+    $mf = Join-Path $TargetDir ".agentic/install-manifest.tsv"
     if (-not (Test-Path -LiteralPath $mf -PathType Leaf)) { return }
     $lineNum = 0
     $seen = [System.Collections.Generic.HashSet[string]]::new($script:PathComparer)
@@ -982,7 +994,7 @@ function Assert-PreviousManifestValid {
 
 # Entries (path<TAB>category<TAB>sha256) recorded by a previous install.
 function Get-PreviousManifestEntries {
-    $mf = Join-Path $TargetDir ".agentic\install-manifest.tsv"
+    $mf = Join-Path $TargetDir ".agentic/install-manifest.tsv"
     if (-not (Test-Path -LiteralPath $mf)) { return }
     foreach ($line in Get-Content -LiteralPath $mf) {
         if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith("#")) { continue }
@@ -1174,7 +1186,7 @@ function Invoke-PruneObsolete {
 # the update path rebuilds the manifest from this install's records instead).
 function Write-PruneManifest {
     if ($script:Plan) { return }
-    $mf = Join-Path $TargetDir ".agentic\install-manifest.tsv"
+    $mf = Join-Path $TargetDir ".agentic/install-manifest.tsv"
     if (-not (Test-Path -LiteralPath $mf)) { return }
     Snapshot-File ".agentic/install-manifest.tsv"
     $lines = @(
@@ -1200,12 +1212,23 @@ function Invoke-Uninstall {
         Invoke-PruneEntry $e.Path $e.Category $e.Checksum
     }
     Invoke-PruneLegacy
-    $mf = Join-Path $TargetDir ".agentic\install-manifest.tsv"
+    $mf = Join-Path $TargetDir ".agentic/install-manifest.tsv"
     if (Test-Path -LiteralPath $mf) {
-        if ($script:Plan) { Write-Host "  prune  .agentic/install-manifest.tsv"; return }
-        Snapshot-File ".agentic/install-manifest.tsv"
-        if (-not (Remove-AgenticFile ".agentic/install-manifest.tsv")) { throw "refusing to remove '.agentic/install-manifest.tsv': destination is not safely inside the project root" }
-        Write-Host "  prune  .agentic/install-manifest.tsv"
+        if ($script:Plan) { Write-Host "  prune  .agentic/install-manifest.tsv" }
+        else {
+            Snapshot-File ".agentic/install-manifest.tsv"
+            if (-not (Remove-AgenticFile ".agentic/install-manifest.tsv")) { throw "refusing to remove '.agentic/install-manifest.tsv': destination is not safely inside the project root" }
+            Write-Host "  prune  .agentic/install-manifest.tsv"
+        }
+    }
+    $gen = Join-Path $TargetDir ".agentic/checks.generated.tsv"
+    if (Test-Path -LiteralPath $gen) {
+        if ($script:Plan) { Write-Host "  prune  .agentic/checks.generated.tsv (generated candidate)" }
+        else {
+            Snapshot-File ".agentic/checks.generated.tsv"
+            if (-not (Remove-AgenticFile ".agentic/checks.generated.tsv")) { throw "refusing to remove '.agentic/checks.generated.tsv': destination is not safely inside the project root" }
+            Write-Host "  prune  .agentic/checks.generated.tsv (generated candidate)"
+        }
     }
     if ($script:Plan) {
         Write-Host "  note   empty framework directories under .agentic/ would be removed"
@@ -1256,7 +1279,7 @@ function Write-GeneratedCandidate {
     $parent = Split-Path -Parent $dst
     if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
     $tmp = New-Tmp $dst
-    $verify = Join-Path $SourceDir ".agentic\scripts\verify.ps1"
+    $verify = Join-Path $SourceDir ".agentic/scripts/verify.ps1"
     $detection = @()
     $emitExit = 0
     Push-Location $TargetDir
@@ -1304,7 +1327,7 @@ function New-Checks {
     $rel = ".agentic/checks.tsv"
     $dst = Join-Path $TargetDir $rel
     if ((Test-Path -LiteralPath $dst) -and (-not $RegenerateChecks) -and (-not $ReplaceChecks)) {
-        if ($script:Plan) { Write-Host "  skip   $rel (project-owned; use -RegenerateChecks to overwrite)"; return }
+        if ($script:Plan) { Write-Host "  skip   $rel (project-owned; use -ReplaceChecks to overwrite)"; return }
         Write-Host "  skip   $rel (project-owned; use -ReplaceChecks to overwrite)"
         return
     }
@@ -1393,7 +1416,7 @@ try {
     if ($DetectChecks) {
         if ($Plan) {
             Write-Host "=== Project Detection Explanation (Plan) ==="
-            $verify = Join-Path $SourceDir ".agentic\scripts\verify.ps1"
+            $verify = Join-Path $SourceDir ".agentic/scripts/verify.ps1"
             Push-Location $TargetDir
             try { & $verify -ExplainDetection } finally { Pop-Location }
             Write-Host "  gen    .agentic/checks.generated.tsv (from detected stack)"
@@ -1427,7 +1450,7 @@ try {
             Write-Host "  promote $gen -> $rel"
             exit 0
         }
-        $verify = Join-Path $SourceDir ".agentic\scripts\verify.ps1"
+        $verify = Join-Path $SourceDir ".agentic/scripts/verify.ps1"
         Push-Location $TargetDir
         try { Invoke-CheckedScript { & $verify -ValidateChecks $gen } "verify.ps1 -ValidateChecks $gen" } finally { Pop-Location }
 

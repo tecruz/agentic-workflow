@@ -84,6 +84,7 @@ Options:
   --detect-checks      Write .agentic/checks.generated.tsv from detected stack.
   --accept-detected-checks Promote .agentic/checks.generated.tsv to .agentic/checks.tsv.
   --replace-checks     Overwrite existing .agentic/checks.tsv when generating checks.
+  --regenerate-checks  Alias for --replace-checks.
   --replace-managed    Replace framework-managed files even when the adopter
                        modified them. Never touches project-owned files.
   --force              Deprecated alias for --replace-managed.
@@ -122,7 +123,7 @@ while [ $# -gt 0 ]; do
         --uninstall) UNINSTALL=1 ;;
         --backup) BACKUP=1 ;;
         --replace-managed|--force) REPLACE_MANAGED=1 ;;
-        --replace-checks) REPLACE_CHECKS=1 ;;
+        --replace-checks|--regenerate-checks) REPLACE_CHECKS=1 ;;
         --generate-checks) GENERATE_CHECKS=1 ;;
         --detect-checks) DETECT_CHECKS=1 ;;
         --accept-detected-checks) ACCEPT_DETECTED_CHECKS=1 ;;
@@ -141,10 +142,21 @@ if [ ! -d "$TARGET_DIR" ]; then
 fi
 TARGET_DIR="$(cd "$TARGET_DIR" && pwd)"
 
-if [ "$TOOLS_RAW" = "all" ]; then
+_tools_lower="$(printf '%s' "$TOOLS_RAW" | tr '[:upper:]' '[:lower:]')"
+if [ "$_tools_lower" = "all" ]; then
     TOOLS=(claude gemini aider)
 else
+    # Detect trailing/leading/double commas which `read` silently drops
+    case "$TOOLS_RAW" in
+        ""|,*|*,|*,,*)
+            echo "Error: unknown tool '' (expected claude, gemini, aider, or all)" >&2; exit 2 ;;
+    esac
     IFS=',' read -r -a TOOLS <<< "$TOOLS_RAW"
+    for t in "${TOOLS[@]}"; do
+        case "$t" in
+            "" ) echo "Error: unknown tool '' (expected claude, gemini, aider, or all)" >&2; exit 2 ;;
+        esac
+    done
 fi
 for t in "${TOOLS[@]}"; do
     case "$t" in
@@ -152,6 +164,18 @@ for t in "${TOOLS[@]}"; do
         *) echo "Error: unknown tool '$t' (expected claude, gemini, aider, or all)" >&2; exit 2 ;;
     esac
 done
+# Deduplicate preserving order (prevents duplicate manifest rows).
+# Guarded expansions: bash 3.2 (macOS) treats expanding an empty array
+# under `set -u` as an unbound variable.
+_deduped=()
+for t in "${TOOLS[@]}"; do
+    _skip=0
+    if [ "${#_deduped[@]}" -gt 0 ]; then
+        for d in "${_deduped[@]}"; do [ "$d" = "$t" ] && _skip=1 && break; done
+    fi
+    [ "$_skip" -eq 0 ] && _deduped+=("$t")
+done
+TOOLS=("${_deduped[@]}")
 
 # Framework-managed files: replaced on update when unchanged, or via
 # --replace-managed. Never project memory/architecture/tasks/decisions.
@@ -523,11 +547,20 @@ manifest_checksum() {
 }
 
 cksum_file() {
+    local f="$1" out
     if command -v sha256sum >/dev/null 2>&1; then
-        sha256sum "$1" | cut -d' ' -f1
+        out="$(sha256sum "$f" 2>/dev/null | cut -d' ' -f1)" || return 1
+    elif command -v shasum >/dev/null 2>&1; then
+        out="$(shasum -a 256 "$f" 2>/dev/null | cut -d' ' -f1)" || return 1
     else
-        shasum -a 256 "$1" | cut -d' ' -f1
+        echo "ERROR: no SHA-256 utility found (install sha256sum or shasum)" >&2
+        return 1
     fi
+    if [ -z "$out" ] || ! printf '%s' "$out" | grep -qE '^[0-9a-f]{64}$'; then
+        echo "ERROR: failed to checksum '$f'" >&2
+        return 1
+    fi
+    printf '%s' "$out"
 }
 
 backup_file() {
@@ -656,7 +689,7 @@ merge_state() {
         MERGE_STATE="valid"
         MS_START="$start_line"
         MS_END="$end_line"
-    elif [ -s "$dst" ]; then
+    elif grep -q '[^[:space:]]' "$dst" 2>/dev/null; then
         MERGE_STATE="plain"
     else
         MERGE_STATE="empty"
@@ -1081,10 +1114,22 @@ uninstall() {
     done < <(prev_manifest_entries)
     prune_legacy
     if [ -f "$(manifest_file)" ]; then
-        [ "$PLAN" -eq 1 ] && { echo "  prune  .agentic/install-manifest.tsv"; return 0; }
-        snapshot_file ".agentic/install-manifest.tsv"
-        safe_remove_file ".agentic/install-manifest.tsv"
-        echo "  prune  .agentic/install-manifest.tsv"
+        if [ "$PLAN" -eq 1 ]; then
+            echo "  prune  .agentic/install-manifest.tsv"
+        else
+            snapshot_file ".agentic/install-manifest.tsv"
+            safe_remove_file ".agentic/install-manifest.tsv"
+            echo "  prune  .agentic/install-manifest.tsv"
+        fi
+    fi
+    if [ -f "$TARGET_DIR/.agentic/checks.generated.tsv" ]; then
+        if [ "$PLAN" -eq 1 ]; then
+            echo "  prune  .agentic/checks.generated.tsv (generated candidate)"
+        else
+            snapshot_file ".agentic/checks.generated.tsv"
+            safe_remove_file ".agentic/checks.generated.tsv"
+            echo "  prune  .agentic/checks.generated.tsv (generated candidate)"
+        fi
     fi
     if [ "$PLAN" -eq 1 ]; then
         echo "  note   empty framework directories under .agentic/ would be removed"
@@ -1270,27 +1315,16 @@ echo "Installing Universal Agentic Development Protocol v$PROTOCOL_VERSION"
 echo "  from: $SOURCE_DIR"
 echo "  into: $TARGET_DIR"
 echo "  tools: ${TOOLS[*]}"
-[ "$PLAN" -eq 1 ] && echo "  mode: plan (dry run, nothing will be modified)"
+if [ "$PLAN" -eq 1 ]; then
+    echo "  mode: plan (dry run, nothing will be modified)"
+elif [ "$UPDATE" -eq 1 ]; then
+    echo "  mode: update"
+fi
 echo ""
 
 # The previous manifest is never trusted implicitly: any malformed entry fails
 # the run before a single file is touched. Read-only, so it also guards --plan.
 validate_previous_manifest || exit 1
-
-if [ "$DETECT_CHECKS" -eq 1 ]; then
-    if [ "$PLAN" -eq 1 ]; then
-        echo "=== Project Detection Explanation (Plan) ==="
-        (cd "$TARGET_DIR" && bash "$SOURCE_DIR/.agentic/scripts/verify.sh" --explain-detection)
-        echo "  gen    .agentic/checks.generated.tsv (from detected stack)"
-        exit 0
-    fi
-    # Snapshot so a failed detection rolls the candidate back to its prior
-    # state (or removes a freshly created one) instead of leaving a partial
-    # file behind.
-    snapshot_file ".agentic/checks.generated.tsv"
-    write_generated_candidate || exit 1
-    exit 0
-fi
 
 if [ "$PRUNE" -eq 1 ]; then
     prune_obsolete
@@ -1306,6 +1340,21 @@ if [ "$UNINSTALL" -eq 1 ]; then
     echo ""
     echo "Uninstall complete. Project-owned seed files (.agentic/ARCHITECTURE.md,"
     echo "STATUS.md, checks.tsv, tasks/, decisions/) were left in place."
+    exit 0
+fi
+
+if [ "$DETECT_CHECKS" -eq 1 ]; then
+    if [ "$PLAN" -eq 1 ]; then
+        echo "=== Project Detection Explanation (Plan) ==="
+        (cd "$TARGET_DIR" && bash "$SOURCE_DIR/.agentic/scripts/verify.sh" --explain-detection)
+        echo "  gen    .agentic/checks.generated.tsv (from detected stack)"
+        exit 0
+    fi
+    # Snapshot so a failed detection rolls the candidate back to its prior
+    # state (or removes a freshly created one) instead of leaving a partial
+    # file behind.
+    snapshot_file ".agentic/checks.generated.tsv"
+    write_generated_candidate || exit 1
     exit 0
 fi
 

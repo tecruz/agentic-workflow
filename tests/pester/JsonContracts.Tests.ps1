@@ -48,7 +48,7 @@ Describe 'v1.4.0 JSON result contracts and schema validation' {
     }
 
     It 'verification result JSON validates against verification-result-v1.schema.json (Bash)' {
-        if ($IsWindows) { return }
+        if ($IsWindows) { Set-ItResult -Skipped -Because 'Bash not available on Windows'; return }
         $fixDir = Join-Path $fixtures 'node-npm'
         $tmpOut = [System.IO.Path]::GetTempFileName()
         Push-Location $fixDir
@@ -125,7 +125,7 @@ Describe 'v1.4.0 JSON result contracts and schema validation' {
         # only progress lines on stderr (captured here as they go to stderr).
         # Skips on Windows like the bash-schema test: git-bash cannot consume
         # the Windows-style script path; Linux/macOS jobs cover this.
-        if ($IsWindows) { return }
+        if ($IsWindows) { Set-ItResult -Skipped -Because 'Bash not available on Windows'; return }
         $fixDir = Join-Path $fixtures 'node-npm'
         $tmpOut = [System.IO.Path]::GetTempFileName()
         Push-Location $fixDir
@@ -137,7 +137,7 @@ Describe 'v1.4.0 JSON result contracts and schema validation' {
         finally { Pop-Location }
         $code | Should -BeIn 0, 1, 2, 3
         # Verify stdout has no JSON document (only plain text or empty)
-        $stdoutContent = (-join $outLines | Select-String -Pattern '^\{' | Measure-Object).Count
+        $stdoutContent = ($outLines | Select-String -Pattern '^\s*\{' | Measure-Object).Count
         $stdoutContent | Should -Be 0
         Remove-Item -LiteralPath $tmpOut -ErrorAction SilentlyContinue
     }
@@ -147,12 +147,13 @@ Describe 'v1.4.0 JSON result contracts and schema validation' {
         # graceful fallbacks; shadow both interpreters with failing stubs and
         # require the JSON contract to remain intact. Mirrors the bash-schema
         # test's platform guard.
-        if ($IsWindows) { return }
+        if ($IsWindows) { Set-ItResult -Skipped -Because 'Bash not available on Windows'; return }
         $fixDir = Join-Path $fixtures 'node-npm'
         $stubDir = Join-Path $TestDrive 'pystub'
         New-Item -ItemType Directory -Path $stubDir -Force | Out-Null
         Set-Content -LiteralPath (Join-Path $stubDir 'python3') -Value "#!/bin/sh`nexit 127" -NoNewline
         Set-Content -LiteralPath (Join-Path $stubDir 'python') -Value "#!/bin/sh`nexit 127" -NoNewline
+        & bash -c "chmod +x `"$stubDir/python3`" `"$stubDir/python`"" 2>$null
         $tmpOut = [System.IO.Path]::GetTempFileName()
         Push-Location $fixDir
         try {
@@ -262,7 +263,7 @@ Describe 'v1.4.0 JSON result contracts and schema validation' {
     # -----------------------------------------------------------------------
 
     It 'PASS with a failing optional check is schema-valid and separates failure counts (Bash)' {
-        if ($IsWindows) { return }
+        if ($IsWindows) { Set-ItResult -Skipped -Because 'Bash not available on Windows'; return }
         $fixDir = Join-Path $fixtures 'checks-tsv-optional'
         $tmpOut = [System.IO.Path]::GetTempFileName()
         Push-Location $fixDir
@@ -287,7 +288,7 @@ Describe 'v1.4.0 JSON result contracts and schema validation' {
     }
 
     It 'PASS with a failing optional check is schema-valid and separates failure counts (PowerShell)' {
-        if (-not (Get-Command sh -ErrorAction SilentlyContinue)) { return }
+        if (-not (Get-Command sh -ErrorAction SilentlyContinue)) { Set-ItResult -Skipped -Because 'sh not available'; return }
         $fixDir = Join-Path $fixtures 'checks-tsv-optional'
         $tmpOut = [System.IO.Path]::GetTempFileName()
         Push-Location $fixDir
@@ -337,7 +338,7 @@ Describe 'v1.4.0 JSON result contracts and schema validation' {
     }
 
     It 'required failure plus passing optional check yields FAIL/1 with schema-valid JSON (Bash)' {
-        if ($IsWindows) { return }
+        if ($IsWindows) { Set-ItResult -Skipped -Because 'Bash not available on Windows'; return }
         $proj = Join-Path $TestDrive "required-fail-$([guid]::NewGuid().ToString('N'))"
         New-Item -ItemType Directory -Path (Join-Path $proj '.agentic') -Force | Out-Null
         @(
@@ -425,7 +426,7 @@ Describe 'v1.4.0 JSON result contracts and schema validation' {
     }
 
     It 'task-validator JSON redacts absolute task paths from every serialized field (Bash)' {
-        if ($IsWindows) { return }
+        if ($IsWindows) { Set-ItResult -Skipped -Because 'Bash not available on Windows'; return }
         $paths = @(
             '/home/alice/private-project/TASK.md',
             'C:\Users\Alice\private-project\TASK.md'
@@ -460,7 +461,7 @@ Describe 'v1.4.0 JSON result contracts and schema validation' {
     }
 
     It 'Bash entry points reject unsupported and missing --format values' {
-        if ($IsWindows) { return }
+        if ($IsWindows) { Set-ItResult -Skipped -Because 'Bash not available on Windows'; return }
         foreach ($argSpec in @('--format yaml', '--format', "--format=banana")) {
             $out = & bash -c "cd '$fixtures/node-npm' && bash '$verifySh' $argSpec" 2>&1
             $LASTEXITCODE | Should -Be 1
@@ -523,7 +524,7 @@ Describe 'Context selection JSON contracts and schema validation' {
     }
 
     It 'context validation result JSON validates against context-selection-v1.schema.json (Bash, valid)' {
-        if ($IsWindows) { return }
+        if ($IsWindows) { Set-ItResult -Skipped -Because 'Bash not available on Windows'; return }
         # CI runs this leg on Linux where the checkout path is already POSIX.
         $taskPath = (Join-Path $contextFixtures 'context-valid-single.md') -replace '\\', '/'
         $outLines = & bash $contextValidateSh --format json $taskPath 2> $null
@@ -535,7 +536,7 @@ Describe 'Context selection JSON contracts and schema validation' {
     }
 
     It 'context validation result JSON validates against context-selection-v1.schema.json (Bash, invalid)' {
-        if ($IsWindows) { return }
+        if ($IsWindows) { Set-ItResult -Skipped -Because 'Bash not available on Windows'; return }
         $taskPath = (Join-Path $contextFixtures 'context-unknown-module.md') -replace '\\', '/'
         $outLines = & bash $contextValidateSh --format json $taskPath 2> $null
         $code = $LASTEXITCODE
@@ -900,7 +901,7 @@ Describe 'Event schema validation' {
     }
 
     It 'Bash and PowerShell event streams are semantically equivalent after normalizing durations' {
-        if ($IsWindows) { return }
+        if ($IsWindows) { Set-ItResult -Skipped -Because 'Bash not available on Windows'; return }
         if (-not (Get-Command bash -ErrorAction SilentlyContinue)) { return }
         $proj = Join-Path $TestDrive "cmp-$([guid]::NewGuid().ToString('N'))"
         New-Item -ItemType Directory -Path (Join-Path $proj '.agentic') -Force | Out-Null
@@ -1032,7 +1033,7 @@ Describe 'Event schema validation' {
     }
 
     It 'Bash verify.sh rejects combined --format json and --events' {
-        if ($IsWindows) { return }
+        if ($IsWindows) { Set-ItResult -Skipped -Because 'Bash not available on Windows'; return }
         $fixDir = Join-Path $fixtures 'checks-tsv-pass'
         $eventFile = Join-Path $fixDir '.agentic/runs/combined-reject-sh.jsonl'
         if (Test-Path -LiteralPath $eventFile) { Remove-Item -LiteralPath $eventFile -Force }
@@ -1189,7 +1190,7 @@ Describe 'Behavioral evaluation contracts and schema validation' {
     }
 
     It 'run-evals.sh emits one schema-valid document per scenario and exits 0 (Bash)' {
-        if ($IsWindows) { return }
+        if ($IsWindows) { Set-ItResult -Skipped -Because 'Bash not available on Windows'; return }
         $r = Invoke-EvalRunner $runEvalsSh 'Json'
         $r.Code | Should -Be 0
         Assert-EvalDocsSchemaValid $r.Lines 'bash'

@@ -84,24 +84,48 @@ Get-ChildItem -LiteralPath $golden -Filter *.tsv | ForEach-Object {
     # Run PowerShell detector
     $psTmp = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())
     New-Item -ItemType Directory -Force -Path $psTmp | Out-Null
-    Copy-Item -LiteralPath "$fixtureDir\*" -Destination $psTmp -Recurse -Force
+    Copy-Item -Path (Join-Path $fixtureDir "*") -Destination $psTmp -Recurse -Force
     Push-Location $psTmp
     try {
         & pwsh -NoProfile -File $verifyPS -DetectChecks 2>&1 | Out-Null
-        $psChecks = (Get-Content -LiteralPath (Join-Path $psTmp '.agentic' 'checks.generated.tsv') |
-            Where-Object { $_ -and -not $_.StartsWith('#') } | Sort-Object) -join "`n"
+        $psExit = $LASTEXITCODE
+        if ($psExit -ne 0) {
+            Write-Host "  DETECTION FAILED (pwsh) for $name : exit $psExit"
+            $script:failures++
+            return
+        }
+        $genFile = Join-Path $psTmp '.agentic' 'checks.generated.tsv'
+        if (-not (Test-Path -LiteralPath $genFile)) {
+            $psChecks = ""
+        }
+        else {
+            $psChecks = (Get-Content -LiteralPath $genFile |
+                Where-Object { $_ -and -not $_.StartsWith('#') } | Sort-Object) -join "`n"
+        }
     }
     finally { Pop-Location; Remove-Item -LiteralPath $psTmp -Recurse -Force -ErrorAction SilentlyContinue }
 
     # Run Bash detector
     $bashTmp = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())
     New-Item -ItemType Directory -Force -Path $bashTmp | Out-Null
-    Copy-Item -LiteralPath "$fixtureDir\*" -Destination $bashTmp -Recurse -Force
+    Copy-Item -Path (Join-Path $fixtureDir "*") -Destination $bashTmp -Recurse -Force
     Push-Location $bashTmp
     try {
         & bash $verifySH --detect-checks 2>&1 | Out-Null
-        $bashChecks = (Get-Content -LiteralPath (Join-Path $bashTmp '.agentic' 'checks.generated.tsv') |
-            Where-Object { $_ -and -not $_.StartsWith('#') } | Sort-Object) -join "`n"
+        $bashExit = $LASTEXITCODE
+        if ($bashExit -ne 0) {
+            Write-Host "  DETECTION FAILED (bash) for $name : exit $bashExit"
+            $script:failures++
+            return
+        }
+        $bashGenFile = Join-Path $bashTmp '.agentic' 'checks.generated.tsv'
+        if (-not (Test-Path -LiteralPath $bashGenFile)) {
+            $bashChecks = ""
+        }
+        else {
+            $bashChecks = (Get-Content -LiteralPath $bashGenFile |
+                Where-Object { $_ -and -not $_.StartsWith('#') } | Sort-Object) -join "`n"
+        }
     }
     finally { Pop-Location; Remove-Item -LiteralPath $bashTmp -Recurse -Force -ErrorAction SilentlyContinue }
 

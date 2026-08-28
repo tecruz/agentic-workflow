@@ -39,12 +39,12 @@ Describe 'verify.ps1 state model' {
     }
 
     It 'PASS (0) when a Node/npm project required checks pass' {
-        if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { return }
+        if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { Set-ItResult -Skipped -Because 'npm not available'; return }
         Invoke-Fixture 'node-npm' | Should -Be 0
     }
 
     It 'FAIL (1) when a required check fails' {
-        if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { return }
+        if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { Set-ItResult -Skipped -Because 'npm not available'; return }
         Invoke-Fixture 'node-npm-fail' | Should -Be 1
     }
 
@@ -65,7 +65,7 @@ Describe 'verify.ps1 state model' {
     }
 
     It '--emit-checks prints the detected npm checks on stdout' {
-        if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { return }
+        if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { Set-ItResult -Skipped -Because 'npm not available'; return }
         Push-Location (Join-Path $fix 'node-npm')
         try { $out = & $verify -EmitChecks 2> $null; $code = $LASTEXITCODE } finally { Pop-Location }
         $code | Should -Be 0

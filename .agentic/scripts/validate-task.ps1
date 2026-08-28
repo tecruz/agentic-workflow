@@ -216,10 +216,10 @@ foreach ($line in $fileLines) {
         continue
     }
     if ($inFence) {
-        if ($line -match '```' -or $line -match '~~~') { $inFence = $false }
+        if ($line -cmatch '^```') { $inFence = $false }
         continue
     }
-    if ($line -match '```' -or $line -match '~~~') { $inFence = $true; continue }
+    if ($line -cmatch '^```') { $inFence = $true; continue }
     if ($line -match '^\s*>') { continue }
     if ($line -match '^###\s') {
         $h = Normalize-Heading $line.Substring(4)

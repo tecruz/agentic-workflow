@@ -71,7 +71,7 @@ while [ $# -gt 0 ]; do
         --format=*) FORMAT="${1#*=}"; shift ;;
         --handoff) HANDOFF=1; shift ;;
         -h|--help) usage; exit 0 ;;
-        -*) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
+        -*) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
         *)
             if [ -n "$TASK_FILE" ]; then
                 echo "Error: expected a single task file." >&2
@@ -413,7 +413,7 @@ registry_index_of() {
 # (Placeholder detection shares the meaningful-char predicate.)
 is_placeholder_text() {
     local n
-    n="$(printf '%s' "$1" | sed -e 's/^[[:space:]-]*+//' -e 's/[[:space:].!?;:,-]*$//' -e 's/^[[:space:]]*//' | tr '[:upper:]' '[:lower:]')"
+    n="$(printf '%s' "$1" | sed -E -e 's/^[[:space:]]*[-*+][[:space:]]+//' -e 's/[[:space:].!?;:,-]*$//' -e 's/^[[:space:]]*//' | tr '[:upper:]' '[:lower:]')"
     case "$n" in
         ""|tbd|todo|pending|placeholder|tbc|none|n/a) return 0 ;;
     esac
@@ -466,9 +466,11 @@ scan_task_file() {
             "profile:"*)
                 PROFILE_COUNT=$((PROFILE_COUNT + 1))
                 PROFILE="$(printf '%s' "$line" | sed -e 's/^[Pp][Rr][Oo][Ff][Ii][Ll][Ee]:[[:space:]]*//' | awk '{print $1}' | tr '[:upper:]' '[:lower:]')"
+                continue
                 ;;
             "status:"*)
                 STATUS="$(printf '%s' "$line" | sed -e 's/^[Ss][Tt][Aa][Tt][Uu][Ss]:[[:space:]]*//' | awk '{print $1}' | tr '[:upper:]' '[:lower:]')"
+                continue
                 ;;
             '## '*)
                 if [ "$in_section" -eq 1 ]; then
@@ -493,7 +495,7 @@ declare -a SELECTED_VERSIONS=()
 
 parse_selection_line() {
     local raw="$1"
-    printf '%s' "$raw" | sed -e 's/^[[:space:]]*[-*+][[:space:]]*//'
+    printf '%s' "$raw" | sed -E -e 's/^[[:space:]]*[-*+][[:space:]]+//'
 }
 
 handle_entry() {

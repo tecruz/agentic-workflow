@@ -48,15 +48,37 @@ for gold in "$GOLDEN"/*.tsv; do
     # Run Bash detector
     bash_tmp="$(mktemp -d)"
     cp -r "$fixture_dir/." "$bash_tmp/"
-    ( cd "$bash_tmp" && bash "$VERIFY_SH" --detect-checks >/dev/null 2>&1 )
-    bash_checks="$(grep -v '^#' "$bash_tmp/.agentic/checks.generated.tsv" 2>/dev/null | sort)"
+    bash_exit=0
+    ( cd "$bash_tmp" && bash "$VERIFY_SH" --detect-checks >/dev/null 2>&1 ) || bash_exit=$?
+    if [ "$bash_exit" -ne 0 ]; then
+        echo "  DETECTION FAILED (bash) for $name : exit $bash_exit" >&2
+        FAILURES=$((FAILURES + 1))
+        rm -rf "$bash_tmp"
+        continue
+    fi
+    if [ -f "$bash_tmp/.agentic/checks.generated.tsv" ]; then
+        bash_checks="$(grep -v '^#' "$bash_tmp/.agentic/checks.generated.tsv" 2>/dev/null | sort)"
+    else
+        bash_checks=""
+    fi
     rm -rf "$bash_tmp"
 
     # Run PowerShell detector
     ps_tmp="$(mktemp -d)"
     cp -r "$fixture_dir/." "$ps_tmp/"
-    ( cd "$ps_tmp" && pwsh -NoProfile -File "$VERIFY_PS" -DetectChecks >/dev/null 2>&1 )
-    ps_checks="$(grep -v '^#' "$ps_tmp/.agentic/checks.generated.tsv" 2>/dev/null | sort)"
+    ps_exit=0
+    ( cd "$ps_tmp" && pwsh -NoProfile -File "$VERIFY_PS" -DetectChecks >/dev/null 2>&1 ) || ps_exit=$?
+    if [ "$ps_exit" -ne 0 ]; then
+        echo "  DETECTION FAILED (pwsh) for $name : exit $ps_exit" >&2
+        FAILURES=$((FAILURES + 1))
+        rm -rf "$ps_tmp"
+        continue
+    fi
+    if [ -f "$ps_tmp/.agentic/checks.generated.tsv" ]; then
+        ps_checks="$(grep -v '^#' "$ps_tmp/.agentic/checks.generated.tsv" 2>/dev/null | sort)"
+    else
+        ps_checks=""
+    fi
     rm -rf "$ps_tmp"
 
     if [ "$bash_checks" != "$ps_checks" ]; then
