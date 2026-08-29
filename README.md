@@ -1,5 +1,7 @@
 # Universal Agentic Development Protocol
 
+![CI](https://github.com/tecruz/agentic-workflow/workflows/CI/badge.svg?branch=master)
+
 A technology-agnostic, tool-agnostic agentic workflow you can drop into your
 project. It gives every AI coding agent the same operating instructions, the
 same development loop, and the same definition of "done" — regardless of

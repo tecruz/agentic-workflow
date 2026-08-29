@@ -478,7 +478,7 @@ run_check() {
     fi
 
     local start_ms
-    start_ms="$(python3 -c 'import time; print(int(time.time()*1000))' 2>/dev/null || python -c 'import time; print(int(time.time()*1000))' 2>/dev/null || echo 0)"
+    start_ms="$(perl -e 'print int(time.time()*1000)' 2>/dev/null || echo 0)"
 
     # bash 3.2 (macOS) treats expanding an empty array under `set -u` as an
     # unbound variable, so branch on whether the check takes arguments.
@@ -505,7 +505,7 @@ run_check() {
     fi
 
     local end_ms
-    end_ms="$(python3 -c 'import time; print(int(time.time()*1000))' 2>/dev/null || python -c 'import time; print(int(time.time()*1000))' 2>/dev/null || echo 0)"
+    end_ms="$(perl -e 'print int(time.time()*1000)' 2>/dev/null || echo 0)"
     local duration_ms=$(( end_ms - start_ms ))
     [ "$duration_ms" -ge 0 ] || duration_ms=0
 

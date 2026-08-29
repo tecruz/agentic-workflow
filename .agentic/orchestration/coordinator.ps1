@@ -153,12 +153,32 @@ function Resolve-PhysicalPath {
         $root = [System.IO.Path]::GetPathRoot($full)
         $current = $root
         $parts = $full.Substring($root.Length) -split '[/\\]' | Where-Object { $_ -ne '' }
+        $maxHops = 32
         foreach ($part in $parts) {
             $current = Join-Path $current $part
-            $item = Get-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
-            if ($null -ne $item -and -not [string]::IsNullOrEmpty($item.Target)) {
-                if ([System.IO.Path]::IsPathRooted($item.Target)) { $current = $item.Target }
-                else { $current = Join-Path (Split-Path -Parent $current) $item.Target }
+            $seen = [System.Collections.Generic.HashSet]::new()
+            $hops = 0
+            while ($true) {
+                $key = [System.IO.Path]::GetFullPath($current)
+                if (-not $seen.Add($key)) {
+                    throw "symbolic-link cycle detected while resolving '$Path'"
+                }
+                if ($hops -gt $maxHops) {
+                    throw "symbolic-link chain exceeds $maxHops hops while resolving '$Path'"
+                }
+                $item = Get-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
+                if (-not $item -or [string]::IsNullOrEmpty($item.Target)) { break }
+                $hops++
+                if ([System.IO.Path]::IsPathRooted($item.Target)) {
+                    $current = $item.Target
+                }
+                else {
+                    $parent = [System.IO.Path]::GetDirectoryName($current)
+                    if ([string]::IsNullOrEmpty($parent)) {
+                        $parent = [System.IO.Path]::GetPathRoot($current)
+                    }
+                    $current = Join-Path $parent $item.Target
+                }
             }
         }
         return [System.IO.Path]::GetFullPath($current)
@@ -189,9 +209,7 @@ function Test-SafeEventsDestination {
     if ([System.IO.Path]::IsPathRooted($d)) { return $false }
     $norm = $d
     if ($norm.StartsWith("./")) { $norm = $norm.Substring(2) }
-    if (-not $norm.StartsWith(" .agentic/runs/".Trim())) {
-        if (-not $norm.StartsWith(".agentic/runs/")) { return $false }
-    }
+    if (-not $norm.StartsWith(".agentic/runs/")) { return $false }
     $segs = $norm.Split('/')
     foreach ($s in $segs) { if ($s -eq "" -or $s -eq "." -or $s -eq "..") { return $false } }
     return Test-SafeDetectDestination $norm
@@ -211,8 +229,7 @@ function Test-SafeWorktreeDestination {
 
 function Write-Log {
     param([string]$Message)
-    if ($Format -ieq "Json") { Write-Host $Message -ForegroundColor Gray | Out-Host
-        # Ensure JSON stdout stays clean: log to stderr via Write-Host
+    if ($Format -ieq "Json") {
         [Console]::Error.WriteLine($Message)
     } else {
         Write-Host $Message
@@ -286,7 +303,7 @@ if (-not (Test-Path -LiteralPath $TaskFile -PathType Leaf)) {
         exit 2
     } else {
         Write-Host "ERROR: task file not found: $TaskFile" -ForegroundColor Red
-        exit 1
+        exit 2
     }
 }
 

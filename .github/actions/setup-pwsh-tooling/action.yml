@@ -1,0 +1,34 @@
+name: 'Setup Pwsh Tooling'
+description: 'Installs Pester and PSScriptAnalyzer with pinned versions'
+runs:
+  using: 'composite'
+  steps:
+    - name: Install Pester 5.6.0
+      run: |
+        if (Get-Module -ListAvailable Pester | Where-Object { $_.Version -eq 5.6.0 }) { return }
+        if (Get-Command Install-PSResource -ErrorAction SilentlyContinue) {
+          Install-PSResource -Name Pester -Version 5.6.0 -Scope CurrentUser -TrustRepository -Reinstall
+        }
+        else {
+          if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) { Register-PSRepository -Default }
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module Pester -RequiredVersion 5.6.0 -Scope CurrentUser -Force -SkipPublisherCheck -AllowClobber
+        }
+        if (-not (Get-Module -ListAvailable Pester | Where-Object { $_.Version -eq 5.6.0 })) {
+          throw "Failed to install Pester 5.6.0"
+        }
+
+    - name: Install PSScriptAnalyzer 1.25.0
+      run: |
+        if (Get-Module -ListAvailable PSScriptAnalyzer | Where-Object { $_.Version -eq 1.25.0 }) { return }
+        if (Get-Command Install-PSResource -ErrorAction SilentlyContinue) {
+          Install-PSResource -Name PSScriptAnalyzer -Version 1.25.0 -Scope CurrentUser -TrustRepository -Reinstall
+        }
+        else {
+          if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) { Register-PSRepository -Default }
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force -SkipPublisherCheck -AllowClobber
+        }
+        if (-not (Get-Module -ListAvailable PSScriptAnalyzer | Where-Object { $_.Version -eq 1.25.0 })) {
+          throw "Failed to install PSScriptAnalyzer 1.25.0"
+        }
