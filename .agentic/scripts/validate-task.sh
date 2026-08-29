@@ -129,7 +129,7 @@ display_path() {
 
 output_task_json() {
     local res_str="$1" exit_code="$2" msg="$3" code="${4:-CRITERION_INVALID}" section="${5:-null}" ident="${6:-null}"
-    python3 -c '
+    if ! python3 -c '
 import json, sys
 
 res_str = sys.argv[1]
@@ -179,8 +179,7 @@ doc = {
 doc["diagnostics"] = diagnostics
 
 print(json.dumps(doc))
-' "$res_str" "$exit_code" "$(display_path "$TASK_FILE")" "${PROFILE:-}" "${STATUS:-}" "$code" "$section" "$ident" "$msg" "$( [ "$HANDOFF" -eq 1 ] && echo handoff || echo standard )"
-    if [ $? -ne 0 ]; then
+' "$res_str" "$exit_code" "$(display_path "$TASK_FILE")" "${PROFILE:-}" "${STATUS:-}" "$code" "$section" "$ident" "$msg" "$( [ "$HANDOFF" -eq 1 ] && echo handoff || echo standard )"; then
         # A failed serialization must never masquerade as a successful
         # validation: propagate the failure with a non-zero exit.
         echo "ERROR: failed to serialize JSON result." >&2
@@ -311,7 +310,7 @@ collect_canonical_ids() {
         n="$(printf '%s' "$lowline" | grep -oE "$idpat" | wc -l | tr -d '[:space:]')"
         [ "$n" -gt 1 ] && { MULTI_IDS=1; continue; }
         [ "$n" -eq 1 ] || { UNNUMBERED=1; continue; }
-        printf '%s' "$lowline" | grep -qE "^[[:space:]]*[-*+][[:space:]]*$idpat[[:space:]]*:[[:space:]]*[^[:space:]]" \
+        printf '%s' "$lowline" | grep -qE "^[[:space:]]*[-*+][[:space:]]*${idpat}[[:space:]]*:[[:space:]]*[^[:space:]]" \
             || { BAD_FORM=1; continue; }
         id="$(printf '%s' "$lowline" | grep -oE "$idpat" | head -1)"
         case " $seen " in
@@ -342,11 +341,11 @@ check_canonical_section() {
         printf '%s' "$line" | grep -q '[^[:space:]]' || continue
         lowline="$(printf '%s' "$line" | lower)"
         if printf '%s' "$lowline" | grep -qE "$idbound"; then
-            printf '%s' "$lowline" | grep -qE "^[-*+][[:space:]]*$idpat[[:space:]]*:[[:space:]]*[^[:space:]]" \
+            printf '%s' "$lowline" | grep -qE "^[-*+][[:space:]]*${idpat}[[:space:]]*:[[:space:]]*[^[:space:]]" \
                 || fail_invalid "CRITERION_INVALID" "$label" "" "$label must contain only canonical '$entryform' list entries; identifiers may not appear in prose or non-canonical lines."
         fi
         printf '%s' "$lowline" | grep -qE '^([-*+][[:space:]]*|[0-9]+[.)][[:space:]]+|(ac|r)-[0-9]+[[:space:]]*:)' || continue
-        printf '%s' "$lowline" | grep -qE "^[-*+][[:space:]]*$idpat[[:space:]]*:[[:space:]]*[^[:space:]]" \
+        printf '%s' "$lowline" | grep -qE "^[-*+][[:space:]]*${idpat}[[:space:]]*:[[:space:]]*[^[:space:]]" \
             || fail_invalid "CRITERION_INVALID" "$label" "" "$label must contain only canonical '$entryform' list entries; identifiers may not appear in prose or non-canonical lines."
     done <<< "$content"
 }
@@ -431,8 +430,9 @@ validate_table() {
             h1="$(printf '%s' "${CELLS[0]:-}" | lower)"
             h2="$(printf '%s' "${CELLS[1]:-}" | lower)"
             h3="$(printf '%s' "${CELLS[2]:-}" | lower)"
-            [ "$h1" = "$hl" ] && [ "$h2" = "evidence" ] && [ "$h3" = "result" ] \
-                || fail_invalid "EVIDENCE_MAPPING_INVALID" "$label" "" "$label table header must be '| $header_label | Evidence | Result |'."
+            if ! { [ "$h1" = "$hl" ] && [ "$h2" = "evidence" ] && [ "$h3" = "result" ]; }; then
+                fail_invalid "EVIDENCE_MAPPING_INVALID" "$label" "" "$label table header must be '| $header_label | Evidence | Result |'."
+            fi
             stage=1
             continue
         fi
@@ -585,6 +585,7 @@ text_is_placeholder() {
     prev=""
     while [ "$n" != "$prev" ]; do
         prev="$n"
+        # shellcheck disable=SC2016
         n="$(printf '%s' "$n" | sed -E 's/^\*\*([^*]+)\*\*$/\1/; s/^\*([^*]+)\*$/\1/; s/^__([^_]+)__$/\1/; s/^_([^_]+)_$/\1/; s/^`([^`]+)`$/\1/; s/^~~([^~]+)~~$/\1/')"
         # Wrapper symbols may trail a marker or token ('TBD_', 'TBD()',
         # '[label]_'); strip them so the underlying value can be classified.
@@ -684,7 +685,7 @@ subsection_content() {
             j=$(( SUB_SECTION_START[i] + 1 ))
             n=${#CONTENT_LINES[@]}
             k=$j
-            while [ $k -lt $n ]; do
+            while [ "$k" -lt "$n" ]; do
                 case "${CONTENT_LINES[$k]}" in
                     '## '*|'### '*) break ;;
                 esac
@@ -741,7 +742,7 @@ check_completion_descriptions() {
         lowline="$(printf '%s' "$line" | lower)"
         id="$(printf '%s' "$lowline" | grep -oE "$idpat" | head -1)"
         [ -n "$id" ] || continue
-        desc="$(printf '%s' "$lowline" | sed -nE "s/^[[:space:]]*[-*+][[:space:]]*$idpat[[:space:]]*:[[:space:]]*(.*)[[:space:]]*$/\1/p")"
+        desc="$(printf '%s' "$lowline" | sed -nE "s/^[[:space:]]*[-*+][[:space:]]*${idpat}[[:space:]]*:[[:space:]]*(.*)[[:space:]]*$/\1/p")"
         if [ -z "$desc" ] || [ "$(content_class "$desc")" = "placeholder" ]; then
             fail_blocked "EVIDENCE_UNRESOLVED" "$kind" "$id" "entry has a placeholder description."
         fi

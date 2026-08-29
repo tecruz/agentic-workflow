@@ -935,7 +935,7 @@ validate_checks_tsv() {
         # run_check reports it as BLOCKED (exit 2).
         if [ -e "$cwd" ]; then
             local resolved_cwd
-            resolved_cwd="$(cd "$cwd" 2>/dev/null && pwd -P || true)"
+            resolved_cwd="$(cd "$cwd" 2>/dev/null && pwd -P)" || true
             if [ -z "$resolved_cwd" ]; then
                 echo "ERROR: .agentic/checks.tsv line $line_num working directory '$cwd' cannot be resolved." >&2
                 exit 1

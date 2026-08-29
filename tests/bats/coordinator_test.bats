@@ -248,7 +248,7 @@ make_git_repo() {
     run bash -c "cd '$TMPD' && bash '$COORD' --approve --worker 'exit 0' --format json .agentic/tasks/TASK-912.md 2>/dev/null"
     [ "$status" -eq 0 ]
     # task_file should be project-relative, not absolute
-    echo "$output" | grep -q '"task_file":"./.agentic/tasks/TASK-912.md"' || echo "$output" | grep -q '"task_file":"TASK-912.md"' || echo "$output" | grep -q '"task_file":"agentic/tasks/TASK-912.md"'
+    echo "$output" | grep -q '"task_file":"./.agentic/tasks/TASK-912.md"' || echo "$output" | grep -q '"task_file":"TASK-912.md"' || echo "$output" | grep -q '"task_file":"agentic/tasks/TASK-912.md"' || echo "$output" | grep -q '"task_file":".agentic/tasks/TASK-912.md"'
     # Should not contain the temp dir absolute path
     ! echo "$output" | grep -q "$TMPD"
     rm -rf "$TMPD"

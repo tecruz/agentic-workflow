@@ -88,7 +88,14 @@ jobs:
   full-pester-windows:
     name: Full Pester (Windows)
     runs-on: windows-latest
-    timeout-minutes: 35
+    # The Windows suite is dominated by install lifecycle tests (each performs
+    # dozens of atomic file operations) and by the bash-leg tests, whose
+    # validators spawn hundreds of small subprocesses that cost ~50ms each
+    # under Git Bash on Windows. Runner images vary widely (some are 3-9x
+    # slower than others for this workload), so the budget is sized for the
+    # slowest observed image rather than the fastest. (The cross-language
+    # context parity test skips its bash leg on Windows; see the test file.)
+    timeout-minutes: 90
     steps:
       # actions/checkout@v5
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1

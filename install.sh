@@ -400,7 +400,9 @@ safe_atomic_write() {
     if [ -e "$dst" ] && command -v stat >/dev/null 2>&1; then
         mode="$(stat -c '%a' "$dst" 2>/dev/null || stat -f '%Lp' "$dst" 2>/dev/null || true)"
     fi
-    [ -n "$mode" ] && chmod "$mode" "$tmp" 2>/dev/null || true
+    if [ -n "$mode" ]; then
+        chmod "$mode" "$tmp" 2>/dev/null || true
+    fi
     if ! mv "$tmp" "$dst"; then
         rm -f "$tmp" 2>/dev/null || true
         return 1
@@ -496,8 +498,12 @@ cleanup() {
     for f in "${TMP_FILES[@]:-}"; do
         rm -f "$f" 2>/dev/null || true
     done
-    [ -n "$SNAP_DIR" ] && rm -rf "$SNAP_DIR" 2>/dev/null || true
-    [ -n "$MANIFEST_TMP" ] && rm -f "$MANIFEST_TMP" 2>/dev/null || true
+    if [ -n "$SNAP_DIR" ]; then
+        rm -rf "$SNAP_DIR" 2>/dev/null || true
+    fi
+    if [ -n "$MANIFEST_TMP" ]; then
+        rm -f "$MANIFEST_TMP" 2>/dev/null || true
+    fi
     exit "$rc"
 }
 trap cleanup EXIT
@@ -732,7 +738,7 @@ lexical_manifest_path_ok() {
     case "$p" in
         /*) return 1 ;;
         *[[:cntrl:]]*) return 1 ;;
-        *'\\'*) return 1 ;;
+        *\\*) return 1 ;;
         [A-Za-z]:*) return 1 ;;
     esac
     while [ -n "$p" ]; do

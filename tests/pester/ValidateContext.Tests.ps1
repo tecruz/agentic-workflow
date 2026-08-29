@@ -138,6 +138,18 @@ Describe 'validate-context cross-language semantic parity' {
             Set-ItResult -Skipped -Because 'bash (git-bash/WSL) is not available'
             return
         }
+        if ($IsWindows) {
+            # The bash validator re-validates the whole module registry on
+            # every invocation through per-line subprocess spawns that cost
+            # ~50ms each under Git Bash on Windows, so a full-corpus bash leg
+            # takes tens of minutes per runner. Cross-language parity for
+            # these fixtures already runs in the Ubuntu and macOS full-suite
+            # legs (same Pester check, cheap subprocess spawns there), so the
+            # bash leg is skipped on Windows like the other bash-leg tests in
+            # this suite.
+            Set-ItResult -Skipped -Because 'bash-leg parity runs on the Ubuntu and macOS full-suite legs; Windows subprocess spawn costs make it prohibitively slow here'
+            return
+        }
 
         # Batched execution: exactly one child process per language covers the
         # whole corpus. Per-fixture spawns cost minutes under CI/job hosts.
@@ -173,15 +185,26 @@ Describe 'validate-context cross-language semantic parity' {
         ')
 
         $posixDir = ConvertTo-PosixPath $fixturesDir
+        # The inner validator runs through the same resolved bash (Git Bash
+        # preferred over the WSL launcher that PATH `bash` resolves to on
+        # Windows hosts with WSL installed; WSL costs seconds per spawn).
+        # Git Bash needs the POSIX form of its own path; WSL's launcher
+        # translates the Windows form itself.
+        $bashArg = if ($script:BashCmd.Source -like '*\System32\bash.exe') {
+            $script:BashCmd.Source
+        }
+        else {
+            ConvertTo-PosixPath $script:BashCmd.Source
+        }
         $shRows = @(& $script:BashCmd.Source -c '
             for f in "$1"/*.md; do
                 [ -e "$f" ] || continue
-                out="$(bash "$VCTX_PARITY_VSH" "$f" 2>&1)"
+                out="$("$2" "$VCTX_PARITY_VSH" "$f" 2>&1)"
                 code=$?
                 first="$(printf "%s" "$out" | head -n 1)"
                 printf "%s\t%s\t%s\n" "$(basename "$f")" "$code" "$first"
             done
-        ' _ "$posixDir")
+        ' _ "$posixDir" "$bashArg")
 
         Remove-Item Env:VCTX_PARITY_VP, Env:VCTX_PARITY_FD, Env:VCTX_PARITY_VSH -ErrorAction SilentlyContinue
 
