@@ -88,7 +88,16 @@ jobs:
   full-pester-windows:
     name: Full Pester (Windows)
     runs-on: windows-latest
-    timeout-minutes: 35
+    # The Windows suite is dominated by install lifecycle tests (each performs
+    # dozens of atomic file operations) and by the bash-leg tests, whose
+    # validators spawn hundreds of small subprocesses that cost ~50ms each
+    # under Git Bash on Windows. Runner images vary widely (some are 3-9x
+    # slower than others for this workload), so the budget is sized for the
+    # slowest observed image rather than the fastest. (The cross-language
+    # context parity test skips its bash leg on Windows; see the test file,
+    # and the bats check is excluded below for the same environmental
+    # reasons.)
+    timeout-minutes: 120
     steps:
       # actions/checkout@v5
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -96,16 +105,6 @@ jobs:
           ref: ${{ inputs.ref || '' }}
           fetch-depth: 0
           persist-credentials: false
-
-      - name: Install bats-core
-        shell: pwsh
-        run: |
-          $tmp = Join-Path $env:RUNNER_TEMP 'bats'
-          New-Item -ItemType Directory -Force $tmp | Out-Null
-          Invoke-WebRequest -Uri 'https://github.com/bats-core/bats-core/archive/refs/tags/v1.11.1.tar.gz' -OutFile (Join-Path $tmp 'bats.tar.gz')
-          tar -xzf (Join-Path $tmp 'bats.tar.gz') -C $tmp
-          $dir = (Get-ChildItem -LiteralPath $tmp -Directory | Select-Object -First 1).FullName
-          Add-Content -LiteralPath $env:GITHUB_PATH -Value (Join-Path $dir 'bin')
 
       - name: Install pinned jsonschema for the JSON contract tests
         shell: pwsh
@@ -136,7 +135,18 @@ jobs:
 
       - name: Run the framework's own checks
         shell: pwsh
-        run: pwsh -NoProfile -File .agentic/scripts/verify.ps1
+        run: |
+          # The bats suite (Bash) is POSIX-first and cannot pass under Git Bash
+          # on Windows runners: msys /tmp paths are invisible to Windows python3
+          # (test 11), `ln -s` degrades to a copy without the symlink privilege
+          # (tests 86-87), and `chmod 555` does not protect directories
+          # (test 88). The same suite runs in the Ubuntu and macOS Full Bats
+          # jobs, so the Windows job runs the remaining checks (syntax, gates,
+          # Pester suite, evals) with the bats row filtered out of its own
+          # checks.tsv.
+          $checks = Get-Content -LiteralPath '.agentic/checks.tsv' | Where-Object { $_ -notmatch '\tbats\t' }
+          Set-Content -LiteralPath '.agentic/checks.tsv' -Value $checks
+          pwsh -NoProfile -File .agentic/scripts/verify.ps1
 
   # ── Full Bats suite (macOS) ────────────────────────────────────────────
   full-macos:

@@ -275,7 +275,7 @@ output_json_checked() {
         source_value="\"source\":\"checks_tsv\""
     fi
 
-    printf '{"schema_version":1,"protocol_version":"1.5.0","kind":"verification_result","result":"%s","exit_code":%d,%s,"summary":%s,"checks":[%s]}\n' \
+    printf '{"schema_version":1,"protocol_version":"1.6.0","kind":"verification_result","result":"%s","exit_code":%d,%s,"summary":%s,"checks":[%s]}\n' \
         "$res_str" "$exit_code" "$source_value" "$summary" "$checks_json"
 }
 
@@ -935,7 +935,7 @@ validate_checks_tsv() {
         # run_check reports it as BLOCKED (exit 2).
         if [ -e "$cwd" ]; then
             local resolved_cwd
-            resolved_cwd="$(cd "$cwd" 2>/dev/null && pwd -P || true)"
+            resolved_cwd="$(cd "$cwd" 2>/dev/null && pwd -P)" || true
             if [ -z "$resolved_cwd" ]; then
                 echo "ERROR: .agentic/checks.tsv line $line_num working directory '$cwd' cannot be resolved." >&2
                 exit 1

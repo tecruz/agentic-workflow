@@ -106,7 +106,7 @@ for _mod in security-review database-migrations dependency-changes infrastructur
     cp "$ROOT/.agentic/context/$_mod/MODULE.md" "$BUNDLE/.agentic/context/$_mod/"
 done
 cp "$ROOT/.agentic/orchestration/README.md" "$BUNDLE/.agentic/orchestration/"
-cp "$ROOT/.agentic/orchestration/coordinator.sh" "$BUNDLE/.agentic/orchestration/"
+cp "$ROOT/.agentic/orchestration/coordinator.sh" "$ROOT/.agentic/orchestration/coordinator.ps1" "$BUNDLE/.agentic/orchestration/"
 
 # Safety: the bundle must never leak the framework's own checks, dev-only
 # dirs, or the behavioral-evaluation harness (evals are framework-development

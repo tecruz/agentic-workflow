@@ -90,7 +90,7 @@ function Output-VerificationJson {
 
     $resultObject = [ordered]@{
         schema_version   = 1
-        protocol_version = "1.5.0"
+        protocol_version = "1.6.0"
         kind             = "verification_result"
         result           = $ResultStr
         exit_code        = $ExitCode
@@ -332,6 +332,14 @@ function Invoke-Check {
     else {
         $invocationExe = $resolvedExe
         $invocationArgs = @($ArgsList)
+        # A bare `bash` on Windows frequently resolves to the WSL launcher
+        # (C:\Windows\System32\bash.exe), which costs seconds per invocation.
+        # Prefer Git Bash when installed; it handles Windows paths natively.
+        if ($IsWindows -and $resolvedExe -like '*\System32\bash.exe') {
+            foreach ($gb in @('C:\Program Files\Git\bin\bash.exe', 'C:\Program Files\Git\usr\bin\bash.exe')) {
+                if (Test-Path -LiteralPath $gb) { $invocationExe = $gb; break }
+            }
+        }
     }
     try {
         $ErrorActionPreference = 'Stop'

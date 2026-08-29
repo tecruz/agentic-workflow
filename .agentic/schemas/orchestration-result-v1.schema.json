@@ -1,0 +1,70 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://tecruz.github.io/agentic-workflow/schemas/orchestration-result-v1.schema.json",
+  "title": "OrchestrationResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "protocol_version", "kind", "result", "exit_code", "task_file", "worktree", "workers", "summary"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "protocol_version": { "type": "string", "const": "1.6.0" },
+    "kind": { "type": "string", "const": "orchestration_result" },
+    "result": { "type": "string", "enum": ["PASS", "FAIL", "BLOCKED"] },
+    "exit_code": { "type": "integer", "enum": [0, 1, 2] },
+    "task_file": { "type": "string" },
+    "worktree": { "type": "string" },
+    "workers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["worker_id", "status", "exit_code", "duration_ms", "reason_code"],
+        "properties": {
+          "worker_id": { "type": "string" },
+          "status": { "type": "string", "enum": ["PASS", "FAIL", "BLOCKED", "SKIPPED"] },
+          "exit_code": { "type": ["integer", "null"] },
+          "duration_ms": { "type": "integer", "minimum": 0 },
+          "reason_code": { "type": ["string", "null"], "enum": ["WORKER_FAILED", "WORKER_BLOCKED", "TOOLING_UNAVAILABLE", null] }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workers_defined", "workers_run", "passed", "failed", "blocked"],
+      "properties": {
+        "workers_defined": { "type": "integer", "minimum": 0 },
+        "workers_run": { "type": "integer", "minimum": 0 },
+        "passed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "blocked": { "type": "integer", "minimum": 0 }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "result": { "const": "PASS" } }, "required": ["result"] },
+      "then": { "properties": { "exit_code": { "const": 0 } } }
+    },
+    {
+      "if": { "properties": { "result": { "const": "FAIL" } }, "required": ["result"] },
+      "then": { "properties": { "exit_code": { "const": 1 } } }
+    },
+    {
+      "if": { "properties": { "result": { "const": "BLOCKED" } }, "required": ["result"] },
+      "then": { "properties": { "exit_code": { "const": 2 } } }
+    },
+    {
+      "if": { "properties": { "exit_code": { "const": 0 } }, "required": ["exit_code"] },
+      "then": { "properties": { "summary": { "properties": { "failed": { "const": 0 }, "blocked": { "const": 0 } } } } }
+    },
+    {
+      "if": { "properties": { "exit_code": { "const": 1 } }, "required": ["exit_code"] },
+      "then": { "properties": { "summary": { "properties": { "failed": { "minimum": 1 } } } } }
+    },
+    {
+      "if": { "properties": { "result": { "const": "PASS" } }, "required": ["result"] },
+      "then": { "properties": { "summary": { "properties": { "workers_run": { "minimum": 1 }, "failed": { "const": 0 }, "blocked": { "const": 0 } } } } }
+    }
+  ]
+}
