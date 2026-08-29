@@ -59,27 +59,7 @@ jobs:
           python -m pip install jsonschema==4.23.0 || python -m pip install --break-system-packages jsonschema==4.23.0
 
       - name: Install Pester and PSScriptAnalyzer
-        shell: pwsh
-        run: |
-          # Image-drift-resilient install: runner images drift between
-          # PowerShellGet (Install-Module) and PSResourceGet, and fresh
-          # images have shipped without a usable PSGallery registration.
-          function Install-CiModule([string]$Name, [string]$Version) {
-            if (Get-Module -ListAvailable $Name | Where-Object { $_.Version -eq $Version }) { return }
-            if (Get-Command Install-PSResource -ErrorAction SilentlyContinue) {
-              Install-PSResource -Name $Name -Version $Version -Scope CurrentUser -TrustRepository -Reinstall
-            }
-            else {
-              if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) { Register-PSRepository -Default }
-              Set-PSRepository PSGallery -InstallationPolicy Trusted
-              Install-Module $Name -RequiredVersion $Version -Scope CurrentUser -Force -SkipPublisherCheck -AllowClobber
-            }
-            if (-not (Get-Module -ListAvailable $Name | Where-Object { $_.Version -eq $Version })) {
-              throw "Failed to install $Name $Version"
-            }
-          }
-          Install-CiModule Pester 5.6.0
-          Install-CiModule PSScriptAnalyzer 1.25.0
+        uses: ./.github/actions/setup-pwsh-tooling
 
       - name: Run the framework's own checks
         run: bash .agentic/scripts/verify.sh
@@ -111,27 +91,7 @@ jobs:
         run: python -m pip install jsonschema==4.23.0
 
       - name: Install Pester and PSScriptAnalyzer
-        shell: pwsh
-        run: |
-          # Image-drift-resilient install: runner images drift between
-          # PowerShellGet (Install-Module) and PSResourceGet, and fresh
-          # images have shipped without a usable PSGallery registration.
-          function Install-CiModule([string]$Name, [string]$Version) {
-            if (Get-Module -ListAvailable $Name | Where-Object { $_.Version -eq $Version }) { return }
-            if (Get-Command Install-PSResource -ErrorAction SilentlyContinue) {
-              Install-PSResource -Name $Name -Version $Version -Scope CurrentUser -TrustRepository -Reinstall
-            }
-            else {
-              if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) { Register-PSRepository -Default }
-              Set-PSRepository PSGallery -InstallationPolicy Trusted
-              Install-Module $Name -RequiredVersion $Version -Scope CurrentUser -Force -SkipPublisherCheck -AllowClobber
-            }
-            if (-not (Get-Module -ListAvailable $Name | Where-Object { $_.Version -eq $Version })) {
-              throw "Failed to install $Name $Version"
-            }
-          }
-          Install-CiModule Pester 5.6.0
-          Install-CiModule PSScriptAnalyzer 1.25.0
+        uses: ./.github/actions/setup-pwsh-tooling
 
       - name: Run the framework's own checks
         shell: pwsh
@@ -171,27 +131,7 @@ jobs:
           python -m pip install jsonschema==4.23.0 || python -m pip install --break-system-packages jsonschema==4.23.0
 
       - name: Install Pester and PSScriptAnalyzer
-        shell: pwsh
-        run: |
-          # Image-drift-resilient install: runner images drift between
-          # PowerShellGet (Install-Module) and PSResourceGet, and fresh
-          # images have shipped without a usable PSGallery registration.
-          function Install-CiModule([string]$Name, [string]$Version) {
-            if (Get-Module -ListAvailable $Name | Where-Object { $_.Version -eq $Version }) { return }
-            if (Get-Command Install-PSResource -ErrorAction SilentlyContinue) {
-              Install-PSResource -Name $Name -Version $Version -Scope CurrentUser -TrustRepository -Reinstall
-            }
-            else {
-              if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) { Register-PSRepository -Default }
-              Set-PSRepository PSGallery -InstallationPolicy Trusted
-              Install-Module $Name -RequiredVersion $Version -Scope CurrentUser -Force -SkipPublisherCheck -AllowClobber
-            }
-            if (-not (Get-Module -ListAvailable $Name | Where-Object { $_.Version -eq $Version })) {
-              throw "Failed to install $Name $Version"
-            }
-          }
-          Install-CiModule Pester 5.6.0
-          Install-CiModule PSScriptAnalyzer 1.25.0
+        uses: ./.github/actions/setup-pwsh-tooling
 
       - name: Run the framework's own checks
         run: bash .agentic/scripts/verify.sh

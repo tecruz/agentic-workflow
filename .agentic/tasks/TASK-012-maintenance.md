@@ -24,14 +24,14 @@ All changes are ordinary maintenance and polishing — bug fixes, hygiene, and C
 
 ## Required evidence
 
-- .agentic/scripts/verify.ps1 PASS (or verify.sh PASS)
-- Targeted bats/pester tests pass (coordinator_test, relevant pester suites)
-- shellcheck passes on all 6 shell scripts
-- checks.tsv contains the 6 shellcheck entries (3 new)
-- tests/ps-syntax.ps1 exists and is valid PowerShell
-- .github/actions/setup-pwsh-tooling/action.yml exists and is valid YAML
-- .gitattributes, CODE_OF_CONDUCT.md, .editorconfig present at repo root
-- README.md contains CI badge
+| AC ID | Evidence | Result |
+| --- | --- | --- |
+| AC-1 | Diff review of coordinator.sh/coordinator.ps1/verify.sh + `bash -n` syntax checks | Passed |
+| AC-2 | `.agentic/checks.tsv` shellcheck row covers 6 scripts | Passed |
+| AC-3 | `tests/ps-syntax.ps1` present; checks.tsv references via `-File` | Passed |
+| AC-4 | `.github/actions/setup-pwsh-tooling/action.yml` present; ci.yml + ci-full.yml use it | Passed |
+| AC-5 | `.gitattributes`, `CODE_OF_CONDUCT.md`, `.editorconfig` present; README badge added | Passed |
+| AC-6 | `CHANGELOG.md` `[Unreleased]` carries Fixed/Changed/Added entries | Passed |
 
 ## Approval gates
 
@@ -49,7 +49,7 @@ None selected
 - .agentic/checks.tsv — extended shellcheck coverage to validate-context.sh, validate-handoff.sh, coordinator.sh; moved ps-syntax to -File tests/ps-syntax.ps1
 - .github/actions/setup-pwsh-tooling/action.yml — new composite action for Pester/PSScriptAnalyzer installation
 - .github/workflows/ci.yml — replaced inline function+ci-module calls with uses of composite action
-- .github/workflows/ci-full.yml — follow-up: wire composite action into three jobs (full-bats-linux, full-pester-windows, full-macos)
+- .github/workflows/ci-full.yml — wired composite action into three jobs (full-bats-linux, full-pester-windows, full-macos)
 - .gitattributes — new file (LF line-ending policy)
 - CODE_OF_CONDUCT.md — new file (community conduct policy)
 - .editorconfig — new file (editor node configuration)
@@ -58,14 +58,14 @@ None selected
 
 ## Verification
 
-### Baseline (before changes)
+### Baseline
 
 - verify.sh exit code: depends on project state
 - shellcheck: not run on validate-context/validate-handoff/coordinator
 - ps-syntax: embedded inline in checks.tsv
 - ci.yml: inline function+ci-module calls
 
-### Final (after changes)
+### Final
 
 - verify.sh/ps1: PASS (must be verified locally)
 - shellcheck: runs on all 6 scripts; any findings addressed
@@ -77,6 +77,5 @@ None selected
 
 ## Remaining risks
 
-- ci-full.yml three job wirings (full-pester-windows, full-macos) require follow-up PR
-- shellcheck findings on the 3 newly covered scripts may surface; address via 3 repair cycles
-- ci-full.yml composite action wiring may need adjustment per CI run
+- shellcheck findings on the 3 newly covered scripts may surface in CI; address via 3 repair cycles
+- Composite action `shell: pwsh` steps and jsonschema install refactor need a CI run to fully confirm

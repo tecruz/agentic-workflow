@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Shellcheck coverage extended in `.agentic/checks.tsv` to `validate-context.sh`, `validate-handoff.sh`, and `coordinator.sh` (3 new scripts)
 - `ps-syntax` inline PowerShell program moved from checks.tsv cell into `tests/ps-syntax.ps1`; checks.tsv now references via `-File` flag
-- Composite CI action `.github/actions/setup-pwsh-tooling/action.yml` created (Pester 5.6.0 + PSScriptAnalyzer 1.25.0, pinned); `ci.yml` updated to use it via `uses:`
+- Composite CI action `.github/actions/setup-pwsh-tooling/action.yml` created (Pester 5.6.0 + PSScriptAnalyzer 1.25.0, pinned); `ci.yml` and `ci-full.yml` updated to use it via `uses:`
 - `.gitattributes` added enforcing LF line endings for `*.sh`/`*.ps1`/`*.md` and retiring the CRLF workaround in `tests/parity/run-golden.sh:71`
 - `CODE_OF_CONDUCT.md` added (Community conduct policy per Contributor Covenant 2.1)
 - `.editorconfig` added (indent style, line-ending policies for `*.sh`/`*.ps1`/`*.md`)

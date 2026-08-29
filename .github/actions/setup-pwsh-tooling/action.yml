@@ -4,6 +4,7 @@ runs:
   using: 'composite'
   steps:
     - name: Install Pester 5.6.0
+      shell: pwsh
       run: |
         if (Get-Module -ListAvailable Pester | Where-Object { $_.Version -eq 5.6.0 }) { return }
         if (Get-Command Install-PSResource -ErrorAction SilentlyContinue) {
@@ -19,6 +20,7 @@ runs:
         }
 
     - name: Install PSScriptAnalyzer 1.25.0
+      shell: pwsh
       run: |
         if (Get-Module -ListAvailable PSScriptAnalyzer | Where-Object { $_.Version -eq 1.25.0 }) { return }
         if (Get-Command Install-PSResource -ErrorAction SilentlyContinue) {
