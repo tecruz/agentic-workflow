@@ -75,9 +75,11 @@ no escalation signals apply.
 - Bats (bats-core 1.11.1): `tests/bats/coordinator_test.bats` 17/17 ok; full corpus under WSL 389 ok with only the four pre-existing `zip`-absent environmental failures (CI Ubuntu/macOS install `zip`).
 - Pester 5.6.0: `ValidateContext.Tests.ps1` 54/0/1-skip in 144s; full `tests/pester` 378 passed / 0 failed / 16 skipped in 17.7 min.
 - `bash .agentic/scripts/validate-handoff.sh .agentic/tasks/TASK-009-orchestration-full-implementation.md` → VALID (104s under Git Bash).
+- Second CI run (run 33249891390, head 52090cf): Full Bats Ubuntu and macOS PASSED (coordinator test 16 fix confirmed on real runners), Validator parity PASSED. Full Pester (Windows) was cancelled at the 90-minute timeout: the bats check consumed ~37 minutes and failed four Windows-incompatible tests (test 11: msys `/tmp` paths invisible to Windows python3; tests 86-88: `ln -s` degrades to a copy without the symlink privilege and `chmod 555` does not protect directories), and the Pester suite itself needed ~65-70 minutes on that runner. `evals/run-evals.sh` verified 8/8 via Git Bash locally (16.9 min).
+- Follow-up on the same head: the Windows job now filters the `bats` row out of its own checks.tsv (the suite runs in the Ubuntu and macOS Full Bats jobs) and the job timeout is 120 minutes; the unused bats-core install step was removed.
 
 ## Remaining risks
 
-- The Full Pester (Windows) job remains inherently slow on some runner images (install tests do dozens of atomic file ops; bash validators spawn hundreds of small subprocesses at ~50ms each under Git Bash). The 90-minute budget covers the slowest observed image; a pathological runner could still approach the limit.
+- The Full Pester (Windows) job remains inherently slow on some runner images (install tests do dozens of atomic file ops; bash validators spawn hundreds of small subprocesses at ~50ms each under Git Bash; `evals-sh` alone takes ~17 minutes). The 120-minute budget covers the slowest observed image (~95 minutes worst case); a pathological runner could still approach the limit.
+- The bats check is excluded from the Windows job only: the four Windows-incompatible tests (msys `/tmp` vs Windows python3, symlink privilege, `chmod 555` semantics) cannot pass on GitHub's runner accounts. Coverage is preserved by the Ubuntu and macOS Full Bats jobs, which run the complete suite and passed on this head.
 - Bats test 11 (`--events creates JSONL stream...`) fails when the suite runs under Git Bash on Windows because msys `/tmp` paths are not visible to Windows python3; it passes on the Ubuntu/macOS CI legs. Pre-existing, unrelated to this change.
-- The four bundle-archive Bats failures only appear where `zip` is absent (e.g., bare WSL); CI installs `zip` on every leg.
