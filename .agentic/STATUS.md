@@ -21,6 +21,7 @@
 - [x] TASK-008 — PR #10 pre-merge polish: final fixture/test/registration counts corrected in TASK-006 and the PR description (42 shared fixtures, 57 Bats cases, 41 Pester cases, 11 registrations); eval harness fence parsing now mirrors the production validator for both ``` and `~~~`; `#Requires -Version 7.0` guard on `run-evals.ps1`; deterministic `[ordered]` JSON in `generate-scenarios.ps1` (see `.agentic/tasks/TASK-008-pr10-polish.md`)
 - [x] TASK-009 — ADR-0011 full orchestration (`v1.6.0`): isolated worktrees, generic worker runner, observable JSONL events and versioned result contracts, approval-gated spawning/remote writes, Bash+PowerShell coordinator twins (see `.agentic/tasks/TASK-009-orchestration-full-implementation.md`)
 - [x] TASK-010 — CI (Full) repair on the orchestration head: shellcheck findings cleared from install.sh / verify.sh / validate-task.sh; Bats coordinator test 16 redaction patterns include the leading-dot relative `task_file` form; Full Pester (Windows) timeout fixed by skipping the redundant bash-leg context parity on Windows, preferring Git Bash over the WSL launcher, and sizing the job budget to the slowest observed runner image (see `.agentic/tasks/TASK-010-ci-full-repair.md`)
+- [x] TASK-011 — v1.6.0 publication: changelog publication-date alignment, annotated tag, workflow release, supersede bookkeeping (see `.agentic/tasks/TASK-011-v160-release-publication.md`)
 
 ## Recent Decisions
 
@@ -31,13 +32,20 @@
 
 ## Notes
 
+- **v1.6.0 released 2026-08-29** as annotated tag `v1.6.0` on commit `0f84cb0`
+  (the master merge of PR #13). The Release workflow passed: metadata
+  validation (VERSION/CHANGELOG/tag agreement), full CI matrix on the tagged
+  SHA, bundle build, leak gate, extracted-archive install tests for both
+  archives, SHA256SUMS verification, and publication as Latest. Published
+  assets (`agentic-workflow-1.6.0.tar.gz`, `.zip`, `SHA256SUMS`). The v1.4.0
+  release is marked as superseded (v1.5.0 was never published).
 - **v1.4.0 released 2026-08-24** as annotated tag `v1.4.0` on commit `b4f1248`.
   The Release workflow passed: metadata validation (VERSION/CHANGELOG/tag
   agreement), full CI on the tagged SHA, bundle build, extracted-archive tests
   for both archives, SHA256SUMS verification with re-download of uploaded
   assets, and publication as Latest. Published assets
   (`agentic-workflow-1.4.0.tar.gz`, `.zip`, `SHA256SUMS`). The v1.3.0 release
-  is marked as superseded.
+  is marked as superseded. Superseded by v1.6.0.
 - **v1.3.0 released 2026-08-21** as annotated tag `v1.3.0`. Introduces risk profiles (`prototype`, `standard`, `high-assurance`), task evidence contracts, structural validators (Bash & PowerShell), and comprehensive release-to-release upgrade testing from v1.2.2. The v1.2.2 release is marked as superseded.
 - **v1.2.2 released 2026-08-18** as annotated tag `v1.2.2` on commit `c835edf`.
   The Release workflow passed on Windows, Ubuntu, and macOS: metadata
