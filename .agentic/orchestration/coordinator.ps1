@@ -156,7 +156,7 @@ function Resolve-PhysicalPath {
         $maxHops = 32
         foreach ($part in $parts) {
             $current = Join-Path $current $part
-            $seen = [System.Collections.Generic.HashSet]::new()
+            $seen = [System.Collections.Generic.HashSet[string]]::new()
             $hops = 0
             while ($true) {
                 $key = [System.IO.Path]::GetFullPath($current)
