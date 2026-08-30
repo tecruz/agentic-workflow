@@ -116,7 +116,29 @@ jobs:
           persist-credentials: false
 
       - name: Install Pester and PSScriptAnalyzer
-        uses: ./.github/actions/setup-pwsh-tooling
+        shell: pwsh
+        run: |
+          # Runner images drift between PowerShellGet (Install-Module) and
+          # PSResourceGet (Install-PSResource); fresh images have shipped
+          # without a usable PSGallery registration, breaking Install-Module.
+          # Prefer PSResourceGet when present, repair/fall back otherwise,
+          # and verify the exact version landed before continuing.
+          function Install-CiModule([string]$Name, [string]$Version) {
+            if (Get-Module -ListAvailable $Name | Where-Object { $_.Version -eq $Version }) { return }
+            if (Get-Command Install-PSResource -ErrorAction SilentlyContinue) {
+              Install-PSResource -Name $Name -Version $Version -Scope CurrentUser -TrustRepository -Reinstall
+            }
+            else {
+              if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) { Register-PSRepository -Default }
+              Set-PSRepository PSGallery -InstallationPolicy Trusted
+              Install-Module $Name -RequiredVersion $Version -Scope CurrentUser -Force -SkipPublisherCheck -AllowClobber
+            }
+            if (-not (Get-Module -ListAvailable $Name | Where-Object { $_.Version -eq $Version })) {
+              throw "Failed to install $Name $Version"
+            }
+          }
+          Install-CiModule Pester 5.6.0
+          Install-CiModule PSScriptAnalyzer 1.25.0
 
       - name: PowerShell syntax check
         shell: pwsh
@@ -218,12 +240,26 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Install Pester and PSScriptAnalyzer
-        uses: ./.github/actions/setup-pwsh-tooling
-
-      - name: Install pinned jsonschema
+      - name: Install Pester and pinned jsonschema
         shell: pwsh
         run: |
+          # Image-drift-resilient install: see Install-CiModule in the
+          # powershell-fast job for the rationale.
+          function Install-CiModule([string]$Name, [string]$Version) {
+            if (Get-Module -ListAvailable $Name | Where-Object { $_.Version -eq $Version }) { return }
+            if (Get-Command Install-PSResource -ErrorAction SilentlyContinue) {
+              Install-PSResource -Name $Name -Version $Version -Scope CurrentUser -TrustRepository -Reinstall
+            }
+            else {
+              if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) { Register-PSRepository -Default }
+              Set-PSRepository PSGallery -InstallationPolicy Trusted
+              Install-Module $Name -RequiredVersion $Version -Scope CurrentUser -Force -SkipPublisherCheck -AllowClobber
+            }
+            if (-not (Get-Module -ListAvailable $Name | Where-Object { $_.Version -eq $Version })) {
+              throw "Failed to install $Name $Version"
+            }
+          }
+          Install-CiModule Pester 5.6.0
           sudo apt-get update -o Acquire::Retries=5 && sudo apt-get install -y python3-pip python-is-python3
           # Plain first (Ubuntu 22.04 pip predates PEP 668); fall back to the
           # --break-system-packages flag for images where the marker exists.

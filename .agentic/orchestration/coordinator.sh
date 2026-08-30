@@ -824,7 +824,7 @@ if [ -n "$EVENTS_FILE" ]; then
     fi
 fi
 
-start_ms="$(perl -e 'print int(time.time()*1000)' 2>/dev/null || echo 0)"
+start_ms="$(python3 -c 'import time; print(int(time.time()*1000))' 2>/dev/null || python -c 'import time; print(int(time.time()*1000))' 2>/dev/null || echo 0)"
 check_ok=0
 worker_exit=0
 
@@ -842,7 +842,7 @@ else
     [ "$worker_exit" -eq 0 ] && worker_exit=1
 fi
 
-end_ms="$(perl -e 'print int(time.time()*1000)' 2>/dev/null || echo 0)"
+end_ms="$(python3 -c 'import time; print(int(time.time()*1000))' 2>/dev/null || python -c 'import time; print(int(time.time()*1000))' 2>/dev/null || echo 0)"
 duration_ms=$(( end_ms - start_ms ))
 [ "$duration_ms" -ge 0 ] || duration_ms=0
 
