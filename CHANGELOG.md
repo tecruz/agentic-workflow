@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **coordinator.sh:620** removed dead `printf` no-op that wrote to stderr then discarded output via `2>/dev/null || true`; the stdout JSON emission at line 622-623 is the intended path
+- **coordinator.ps1:214-219** `Write-Log` double emission in JSON mode removed; kept only `[Console]::Error.WriteLine($Message)` to avoid writing the same message to host and stderr
+- **coordinator.ps1:192-193** `Trim()` no-op removed from `Resolve-PhysicalPath`; the inner symlink-cycle check now stands alone, preventing potential infinite loops on symlink chains
+- **Text/JSON exit-code asymmetry** for missing task file aligned: both text and JSON modes now exit 2 (BLOCKED), matching the `result↔exit_code` invariant and verifier semantics
+
+### Changed
+- Shellcheck coverage extended in `.agentic/checks.tsv` to `validate-context.sh`, `validate-handoff.sh`, and `coordinator.sh` (3 new scripts)
+- `ps-syntax` inline PowerShell program moved from checks.tsv cell into `tests/ps-syntax.ps1`; checks.tsv now references via `-File` flag
+- `.gitattributes` added enforcing LF line endings for `*.sh`/`*.ps1`/`*.md` and retiring the CRLF workaround in `tests/parity/run-golden.sh:71`
+- `CODE_OF_CONDUCT.md` added (Community conduct policy per Contributor Covenant 2.1)
+- `.editorconfig` added (indent style, line-ending policies for `*.sh`/`*.ps1`/`*.md`)
+- `README.md` CI badge added (Shields.io badge linking to GitHub Actions CI)
+
+### Added
+- `.agentic/tasks/TASK-012-maintenance.md` — task file documenting the v1.6.1 fix round, profile: standard, context: None selected
+
 ## [1.6.0] - 2026-08-29
 
 ### Added

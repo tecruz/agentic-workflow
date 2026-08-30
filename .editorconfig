@@ -1,0 +1,19 @@
+# EditorConfig is helpful to enforce consistent coding style between
+# text editors and IDEs. See http://editorconfig.org/
+root = true
+
+[*]
+indent_style = tab
+indent_size = 4
+
+[*.sh]
+end_of_line = lf
+trim_trailing_whitespace = true
+
+[*.ps1]
+end_of_line = lf
+trim_trailing_whitespace = true
+
+[*.md]
+end_of_line = lf
+trim_trailing_whitespace = true

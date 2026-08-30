@@ -486,7 +486,7 @@ if [ ! -f "$TASK_FILE" ]; then
         exit 2
     else
         echo "ERROR: task file not found: $TASK_FILE" >&2
-        exit 1
+        exit 2
     fi
 fi
 
@@ -616,9 +616,6 @@ if [ "$has_none" -eq 0 ] && [ "$gate_count" -gt 0 ]; then
 fi
 if [ "$malformed" -eq 1 ]; then
     if [ "$FORMAT" = "json" ]; then
-        task_disp="$(json_escape "$(display_path "$TASK_FILE")")"
-        printf '{"schema_version":1,"protocol_version":"%s","kind":"orchestration_result","result":"BLOCKED","exit_code":2,"task_file":"%s","worktree":".","workers":[],"summary":{"workers_defined":0,"workers_run":0,"passed":0,"failed":0,"blocked":1}}\n' "$PROTOCOL_VERSION" "$task_disp" >&2 2>/dev/null || true
-        # Still emit json to stdout for machine consumption? Use stdout.
         task_disp="$(json_escape "$(display_path "$TASK_FILE")")"
         printf '{"schema_version":1,"protocol_version":"%s","kind":"orchestration_result","result":"BLOCKED","exit_code":2,"task_file":"%s","worktree":".","workers":[],"summary":{"workers_defined":0,"workers_run":0,"passed":0,"failed":0,"blocked":1}}\n' "$PROTOCOL_VERSION" "$task_disp"
         exit 2

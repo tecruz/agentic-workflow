@@ -1,0 +1,7 @@
+# Normalize line endings; enforce LF for project source files
+* text=auto
+*.sh  text eol=lf
+*.ps1 text eol=lf
+*.md  text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
