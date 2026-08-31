@@ -578,6 +578,45 @@ ruff_configured() {
     return 1
 }
 
+# Returns 0 when $1 is an Android/Kotlin-Android Gradle project.
+# Checks: module build files for Android plugins, version catalogs for Android
+# plugin versions, and convention plugins referenced in build files.
+is_android_project() {
+    local dir="$1"
+    local gradle_files=()
+    [ -f "$dir/build.gradle" ] && gradle_files+=("$dir/build.gradle")
+    [ -f "$dir/build.gradle.kts" ] && gradle_files+=("$dir/build.gradle.kts")
+    [ ${#gradle_files[@]} -eq 0 ] && return 1
+
+    # Direct Android plugin or AndroidManifest.xml in module
+    for gf in "${gradle_files[@]}"; do
+        if grep -q -E 'com\.android|org\.jetbrains\.kotlin\.android' "$gf" 2>/dev/null; then
+            return 0
+        fi
+    done
+    [ -f "$dir/AndroidManifest.xml" ] && return 0
+
+    # Check version catalog at project root (libs.versions.toml)
+    local root_dir
+    root_dir="$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null || pwd)"
+    if [ -f "$root_dir/gradle/libs.versions.toml" ]; then
+        if grep -q -E 'android.*=.*"com\.android|kotlin-android.*=.*"org\.jetbrains\.kotlin' "$root_dir/gradle/libs.versions.toml" 2>/dev/null; then
+            return 0
+        fi
+    fi
+
+    # Check for convention plugin references in module build files
+    # Convention plugins typically look like: id("com.android.application") via pluginManagement or id("my-android-convention")
+    local conv_pat='id\(["][^"]*android[^"]*["]\)'
+    for gf in "${gradle_files[@]}"; do
+        if grep -q -E "$conv_pat" "$gf" 2>/dev/null; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
 # Expands a workspace pattern (literal or glob) to existing directories, one per
 # line. Non-recursive globs use pathname expansion with nullglob; `**` patterns
 # are expanded portably via `find` (works on bash 3.2 / macOS).
@@ -731,7 +770,7 @@ emit_checks_for_dir() {
     if [ -f "$dir/build.gradle" ] || [ -f "$dir/build.gradle.kts" ]; then
         echo "Detected: Workspace Gradle project ($dir)" >&2
         local is_android=0
-        if grep -q -E 'com\.android|org\.jetbrains\.kotlin\.android' "$dir/build.gradle" "$dir/build.gradle.kts" 2>/dev/null || [ -f "$dir/AndroidManifest.xml" ]; then
+        if is_android_project "$dir"; then
             is_android=1
         fi
         if [ "$is_android" -eq 1 ]; then
