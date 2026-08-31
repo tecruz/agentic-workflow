@@ -1223,4 +1223,3 @@ if ($script:Detected) {
 }
 Write-Log "VERIFICATION UNSUPPORTED: no supported project or check configuration found."
 Complete-Verification "UNSUPPORTED" 3
-

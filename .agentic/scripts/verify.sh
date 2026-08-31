@@ -1457,4 +1457,3 @@ if [ "$DETECTED" -ne 0 ]; then
 fi
 log "VERIFICATION UNSUPPORTED: no supported project or check configuration found."
 complete_verification "UNSUPPORTED" 3
-

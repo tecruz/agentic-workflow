@@ -611,4 +611,3 @@ if ($Format -ieq "Json") {
     else { Write-Host "Orchestration BLOCKED: worker blocked in $worktreeRel" -ForegroundColor Yellow }
     Complete-Orchestration $result $exitCode $workersJson $summaryJson $disp $cwdRel
 }
-

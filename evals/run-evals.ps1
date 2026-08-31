@@ -567,4 +567,3 @@ if ($Format -ne 'Json') {
 }
 
 exit $(if ($expectedOk -eq $results.Count) { 0 } else { 1 })
-

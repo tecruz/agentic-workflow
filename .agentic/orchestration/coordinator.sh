@@ -937,4 +937,3 @@ else
     fi
     complete_orchestration "$result" "$exit_code" "$workers_json" "$summary_json"
 fi
-

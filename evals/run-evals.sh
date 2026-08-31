@@ -687,4 +687,3 @@ if fmt != "json":
 
 sys.exit(0 if run_failures == 0 else 1)
 PYEOF
-

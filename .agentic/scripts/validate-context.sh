@@ -737,4 +737,3 @@ else
     echo "VALID: context selections ok ($( [ "$NONE_SENTINEL_SEEN" -eq 1 ] && echo 'none selected' || { printf '%s' "${SELECTED_IDS[*]}"; } ))"
 fi
 exit 0
-
