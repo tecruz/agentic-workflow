@@ -593,7 +593,7 @@ workspace_expand_pattern() {
         local base="${pat%%/**}"
         base="${base%/}"
         [ -d "$base" ] || return
-        find "$base" -type d \
+        find "$base" -mindepth 1 -type d \
             ! -path '*/node_modules/*' ! -name 'node_modules' \
             ! -path '*/target/*' ! -name 'target' \
             ! -path '*/build/*' ! -name 'build' \
