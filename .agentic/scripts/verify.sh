@@ -589,7 +589,7 @@ workspace_expand_pattern() {
     [ -z "$pat" ] && return
     if [[ "$pat" == *$'\t'* ]] || [[ "$pat" == *$'\n'* ]]; then return; fi
     if [[ "$pat" == *'**'* ]]; then
-        # Recursive glob: use find for portability (bash 3.2 lacks globstar)
+        # Recursive glob: use find for portability (bash 3.2 lacks globstar; macOS find lacks -printf)
         local base="${pat%%/**}"
         base="${base%/}"
         [ -d "$base" ] || return
@@ -599,7 +599,7 @@ workspace_expand_pattern() {
             ! -path '*/build/*' ! -name 'build' \
             ! -path '*/.venv/*' ! -name '.venv' \
             ! -path '*/.git/*' ! -name '.git' \
-            -printf '%P\n' 2>/dev/null | sed 's:/*$::' | sort -u | while IFS= read -r rel; do
+            -print 2>/dev/null | sed "s:^$base/::" | sed 's:/*$::' | sort -u | while IFS= read -r rel; do
             [ -z "$rel" ] && continue
             printf '%s/%s\n' "$base" "$rel"
         done
