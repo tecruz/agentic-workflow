@@ -1,0 +1,5 @@
+required	node-test	.	pnpm	test
+required	packages-bar-node-lint	packages/bar	npm	run	lint	--if-present
+required	packages-bar-node-test	packages/bar	npm	test
+required	packages-foo-node-lint	packages/foo	npm	run	lint	--if-present
+required	packages-foo-node-test	packages/foo	npm	test

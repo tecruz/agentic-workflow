@@ -334,7 +334,7 @@ installed, so project type detection never depends on the local machine.
 | Java (Gradle) | `build.gradle` / `build.gradle.kts` | `gradle test`, `gradle check`; `./gradlew` / `gradlew.bat` when a wrapper is present | `gradle-wrapper` |
 | Android / Kotlin (Gradle) | root `build.gradle` / `build.gradle.kts` referencing `com.android` / `org.jetbrains.kotlin.android`, or a root `AndroidManifest.xml` | `test`, `lint`, `assembleDebug` via the Gradle wrapper or `gradle` | `android-gradle` |
 | .NET | `*.sln` / `*.csproj` | `dotnet test`, `dotnet format --verify-no-changes` | `dotnet-sln-only`, `dotnet-csproj-only` |
-| Nested monorepo | manifests in one level below `apps/`, `services/`, `packages/`, `modules/` | merged detection per nested sub-stack | `monorepo`, `nested-monorepo` |
+| Workspace / monorepo | `pnpm-workspace.yaml` (`packages`), `package.json` `workspaces` (array or `{packages:[...]}`), `Cargo.toml` `[workspace]` `members`/`exclude`, `pom.xml` `<modules>`, `settings.gradle(.kts)` `include` (`:a:b` → `a/b`), plus legacy `apps/`, `services/`, `packages/`, `modules/` | merged detection per workspace package, deduplicated | `pnpm-workspace`, `npm-workspaces`, `yarn-workspaces-object`, `cargo-workspace`, `maven-modules`, `gradle-multimodule`, `pnpm-workspace-recursive`, `monorepo`, `nested-monorepo` |
 
 Detection notes:
 
@@ -342,10 +342,7 @@ Detection notes:
   root `build.gradle`/`build.gradle.kts` (and a root `AndroidManifest.xml`). It
   does not yet follow Android plugins declared only in module build files,
   version-catalog aliases, or convention plugins.
-- **Nested discovery is one-level**: it scans only direct children of
-  `apps/`, `services/`, `packages/`, and `modules/`, and does not interpret
-  pnpm/npm/Yarn workspaces, Nx, Turborepo, Cargo members, Gradle subprojects,
-  Maven modules, or Bazel.
+- **Workspace discovery** now interprets `pnpm-workspace.yaml` `packages` (globs, `!` exclusions, `*`/`**`), `package.json` `workspaces` (array and object forms, `!` exclusions), `Cargo.toml` `[workspace]` `members` and `exclude` (globs), `pom.xml` `<modules>` (literal dirs, globs), and `settings.gradle(.kts)` `include` (`:lib:core` → `lib/core`). Results are deduplicated against the legacy one-level scan of `apps/`, `services/`, `packages/`, `modules/`. Nx, Turborepo, and Bazel are not yet interpreted.
 - The Gradle/Maven wrapper emitted is the platform script: `gradlew.bat` /
   `mvnw.cmd` on Windows, `./gradlew` / `./mvnw` on Linux/macOS.
 - **Optional-check gating**: pnpm/yarn/bun `lint` checks are emitted only when
@@ -443,6 +440,11 @@ changes. Tests run on the framework itself via the CI workflow
 
 See [SECURITY.md](SECURITY.md) for the supported version policy and how to
 report a vulnerability.
+
+## Roadmap
+
+See [ROADMAP.md](ROADMAP.md) for the forward-looking plan, known limitations,
+and how upcoming work lands.
 
 ## Changelog
 

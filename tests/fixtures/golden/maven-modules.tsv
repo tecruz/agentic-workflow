@@ -1,0 +1,3 @@
+required	maven-test	.	mvn	test
+required	module-a-maven-test	module-a	mvn	test
+required	module-b-maven-test	module-b	mvn	test

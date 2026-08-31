@@ -22,6 +22,9 @@
 - [x] TASK-009 — ADR-0011 full orchestration (`v1.6.0`): isolated worktrees, generic worker runner, observable JSONL events and versioned result contracts, approval-gated spawning/remote writes, Bash+PowerShell coordinator twins (see `.agentic/tasks/TASK-009-orchestration-full-implementation.md`)
 - [x] TASK-010 — CI (Full) repair on the orchestration head: shellcheck findings cleared from install.sh / verify.sh / validate-task.sh; Bats coordinator test 16 redaction patterns include the leading-dot relative `task_file` form; Full Pester (Windows) timeout fixed by skipping the redundant bash-leg context parity on Windows, preferring Git Bash over the WSL launcher, and sizing the job budget to the slowest observed runner image (see `.agentic/tasks/TASK-010-ci-full-repair.md`)
 - [x] TASK-011 — v1.6.0 publication: changelog publication-date alignment, annotated tag, workflow release, supersede bookkeeping (see `.agentic/tasks/TASK-011-v160-release-publication.md`)
+- [x] TASK-012 — v1.6.1 fix round — bugs + hygiene + CI maintainability (see `.agentic/tasks/TASK-012-maintenance.md`)
+- [x] TASK-013 — Draft ROADMAP.md (see `.agentic/tasks/TASK-013-draft-roadmap.md`)
+- [x] TASK-014 — Workspace and monorepo detection (v1.7.0): manifest-driven discovery for pnpm-workspace.yaml, package.json workspaces, Cargo workspace, pom.xml modules, settings.gradle include, with Bash+PowerShell parity and 7 new fixtures (see `.agentic/tasks/TASK-014-workspace-monorepo-detection.md`)
 
 ## Recent Decisions
 
@@ -29,8 +32,15 @@
 - ADR-0007 — Extension versioning policy for future protocol extensions (see `docs/decisions/ADR-0007-extension-versioning.md`)
 - ADR-0008 — Risk profiles and evidence contracts (see `docs/decisions/ADR-0008-risk-profiles-and-evidence-contracts.md`)
 - ADR-0009 — Machine-readable result contracts (see `docs/decisions/ADR-0009-machine-readable-result-contracts.md`)
+- ADR-0010 — Portable context modules and offline behavioral evaluations (see `docs/decisions/ADR-0010-context-modules-and-evaluations.md`)
+- ADR-0011 — Isolated multi-agent task coordination (see `docs/decisions/ADR-0011-isolated-multi-agent-task-coordination.md`)
+- ADR-0012 — Workspace and monorepo detection (see `docs/decisions/ADR-0012-workspace-monorepo-detection.md`)
 
 ## Notes
+
+- **v1.7.0 — workspace/monorepo detection** (unreleased, on `master`): manifest-driven discovery for `pnpm-workspace.yaml`, `package.json` `workspaces`, `Cargo.toml` `[workspace]`, `pom.xml` `<modules>`, `settings.gradle(.kts)` `include` with `*`/`**`/`!` and deduplication; 7 new fixtures/goldens with Bash+PowerShell parity; `protocol_version` sweep to `1.7.0`; `VERSION` bump to `1.7.0`. See `TASK-014`, `ADR-0012`, `CHANGELOG.md` `[1.7.0]`, and `ROADMAP.md`.
+
+- **v1.6.1 released 2026-08-30** as annotated tag `v1.6.1` on commit `972cfdb` (fix round: coordinator path redaction, double logging, `Trim()` no-op, exit-code alignment, shellcheck/ps-syntax hygiene, `CODE_OF_CONDUCT.md`, `.editorconfig`, `.gitattributes`, `README.md` badge). The v1.6.0 release is marked as superseded.
 
 - **v1.6.0 released 2026-08-29** as annotated tag `v1.6.0` on commit `0f84cb0`
   (the master merge of PR #13). The Release workflow passed: metadata

@@ -5,6 +5,23 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-08-30
+
+### Added
+- **First-class workspace/monorepo detection (ADR-0012).** The one-level scan of `apps/`, `services/`, `packages/`, `modules/` is now augmented by manifest-driven discovery, with Bash+PowerShell parity and golden-locked fixtures:
+  - `pnpm-workspace.yaml` `packages` (globs `*`/`**`, `!` exclusions, single/double-quoted entries, `#` comments)
+  - `package.json` `workspaces` (array `["packages/*"]` and object `{"packages":[...]}` via textual extraction in Bash and `ConvertFrom-Json` in PowerShell, `!` exclusions)
+  - `Cargo.toml` `[workspace]` `members` and `exclude` (globs, quoted-string extraction)
+  - `pom.xml` `<modules>` (`<module>…</module>` literal dirs, globs)
+  - `settings.gradle` / `settings.gradle.kts` `include` (`:lib:core` → `lib/core`, multiple per line, single/double quotes)
+  - Shared helpers `workspace_expand_pattern` / `Expand-WorkspacePattern` (nullglob + globstar, control-char and `node_modules`/`target`/`build`/`.venv`/`.git` filtering) and `emit_checks_for_dir` / `Emit-PackageChecks` (per-stack emission for Node, Go, Rust, Python, Maven, Gradle, .NET, deduplicated via `seen_packages`/`SeenPackages` and `excluded_dirs`/`ExcludedDirs`).
+  - Seven new fixtures and goldens (`pnpm-workspace`, `npm-workspaces`, `yarn-workspaces-object`, `cargo-workspace`, `maven-modules`, `gradle-multimodule`, `pnpm-workspace-recursive`) plus `run-fixtures` smoke coverage for both verifiers.
+  - `ROADMAP.md` workspace item marked done; `README.md` “Supported Stacks” and “Detection notes” rewritten to document the expanded discovery; stale `feat/namespaced-checks-and-monorepo-detection` noted as superseded.
+
+### Changed
+- `README.md` adds a “Roadmap” cross-link and a `ROADMAP.md` forward-looking plan (v1.6.1).
+- `.agentic/VERSION` and `protocol_version` swept to `1.7.0` across all emitters, schemas, and `evals/` artifacts.
+
 ## [1.6.1] - 2026-08-30
 
 ### Fixed

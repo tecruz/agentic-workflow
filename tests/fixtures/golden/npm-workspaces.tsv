@@ -1,0 +1,6 @@
+required	apps-b-node-lint	apps/b	npm	run	lint	--if-present
+required	apps-b-node-test	apps/b	npm	test
+required	node-lint	.	npm	run	lint	--if-present
+required	node-test	.	npm	test
+required	packages-a-node-lint	packages/a	npm	run	lint	--if-present
+required	packages-a-node-test	packages/a	npm	test

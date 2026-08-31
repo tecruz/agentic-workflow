@@ -1,0 +1,6 @@
+required	crates-bar-rust-clippy	crates/bar	cargo	clippy	--	-D	warnings
+required	crates-bar-rust-test	crates/bar	cargo	test
+required	crates-foo-rust-clippy	crates/foo	cargo	clippy	--	-D	warnings
+required	crates-foo-rust-test	crates/foo	cargo	test
+required	rust-clippy	.	cargo	clippy	--	-D	warnings
+required	rust-test	.	cargo	test

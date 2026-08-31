@@ -101,6 +101,13 @@ expect_detect android-gradle      gradlew android-unit
 expect_detect monorepo            pnpm go
 expect_detect polyglot-node-go      node-test go-test
 expect_detect nested-monorepo       apps-web-node-test services-api-go-test
+expect_detect pnpm-workspace        pnpm packages-foo
+expect_detect npm-workspaces        npm packages-a
+expect_detect yarn-workspaces-object npm packages-c
+expect_detect cargo-workspace       cargo crates-foo
+expect_detect maven-modules         mvn module-a
+expect_detect gradle-multimodule    gradle app-gradle
+expect_detect pnpm-workspace-recursive npm packages-foo
 expect_detect unsupported         __none__
 
 # Exact golden contracts for the deterministic fixtures (no platform-dependent

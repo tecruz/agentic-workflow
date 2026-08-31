@@ -1,0 +1,1 @@
+<project><modelVersion>4.0.0</modelVersion><groupId>test</groupId><artifactId>root</artifactId><version>1.0</version><modules><module>module-a</module><module>module-b</module></modules></project>
