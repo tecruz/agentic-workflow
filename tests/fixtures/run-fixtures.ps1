@@ -110,6 +110,13 @@ else {
 Expect-Detect "monorepo" @("pnpm", "go")
 Expect-Detect "polyglot-node-go" @("npm", "go")
 Expect-Detect "nested-monorepo" @("npm", "go")
+Expect-Detect "pnpm-workspace" @("pnpm", "packages-foo")
+Expect-Detect "npm-workspaces" @("npm", "packages-a")
+Expect-Detect "yarn-workspaces-object" @("npm", "packages-c")
+Expect-Detect "cargo-workspace" @("cargo", "crates-foo")
+Expect-Detect "maven-modules" @("mvn", "module-a")
+Expect-Detect "gradle-multimodule" @("gradle", "app-gradle")
+Expect-Detect "pnpm-workspace-recursive" @("npm", "packages-foo")
 Expect-Detect "unsupported" @("__none__")
 
 # Exact golden contracts for the deterministic fixtures (no platform-dependent

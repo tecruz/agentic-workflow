@@ -157,7 +157,7 @@ if profile in ("prototype", "standard", "high-assurance"):
 
 doc = {
     "schema_version": 1,
-    "protocol_version": "1.6.0",
+    "protocol_version": "1.7.0",
     "kind": "context_validation_result",
     "mode": mode,
     "result": res_str,
@@ -714,7 +714,7 @@ for chunk in os.environ.get("AGENTIC_SELECTED", "").split():
     selected.append({"id": mid, "version": int(mver)})
 doc = {
     "schema_version": 1,
-    "protocol_version": "1.6.0",
+    "protocol_version": "1.7.0",
     "kind": "context_validation_result",
     "mode": mode,
     "result": "VALID",
@@ -737,3 +737,4 @@ else
     echo "VALID: context selections ok ($( [ "$NONE_SENTINEL_SEEN" -eq 1 ] && echo 'none selected' || { printf '%s' "${SELECTED_IDS[*]}"; } ))"
 fi
 exit 0
+

@@ -1,0 +1,1 @@
+{"name":"npm-workspaces-root","private":true,"workspaces":["packages/*","apps/*"]}

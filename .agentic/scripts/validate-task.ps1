@@ -74,7 +74,7 @@ function Output-TaskJson {
     $statusOut = if ($script:StatusName -in @('planned', 'in-progress', 'blocked', 'done')) { $script:StatusName } else { $null }
     $resultObject = [ordered]@{
         schema_version   = 1
-        protocol_version = "1.6.0"
+        protocol_version = "1.7.0"
         kind             = "task_validation_result"
         mode             = if ($Handoff) { "handoff" } else { "standard" }
         result           = $Result
@@ -935,3 +935,4 @@ else {
     Write-Host "VALID: profile=$ProfileName"
 }
 exit 0
+

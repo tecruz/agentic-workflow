@@ -90,7 +90,7 @@ function Output-VerificationJson {
 
     $resultObject = [ordered]@{
         schema_version   = 1
-        protocol_version = "1.6.0"
+        protocol_version = "1.7.0"
         kind             = "verification_result"
         result           = $ResultStr
         exit_code        = $ExitCode
@@ -472,8 +472,155 @@ function Test-MavenCheckstyle {
     return (Get-Content -LiteralPath $Path -Raw -ErrorAction SilentlyContinue) -match 'checkstyle'
 }
 
+function Expand-WorkspacePattern {
+    # Expands a workspace pattern (literal or glob) to existing directories.
+    # Globs use Get-ChildItem with nullglob semantics; `**` enables recursion.
+    param([string] $Pattern)
+    $pat = $Pattern.Trim().TrimStart('./').TrimEnd('/','\')
+    if (-not $pat) { return @() }
+    if ($pat -match "[\t\n\r\x1f\p{Cc}]") { return @() }
+    $excludedNames = @('node_modules','target','build','.venv','.git')
+    if ($pat.Contains('*')) {
+        if ($pat.Contains('**')) {
+            $idx = $pat.IndexOf('**')
+            $basePart = $pat.Substring(0, $idx).TrimEnd('/', '\')
+            if ([string]::IsNullOrEmpty($basePart)) { $basePart = '.' }
+            $results = @()
+            try {
+                $allDirs = Get-ChildItem -Path $basePart -Directory -Recurse -ErrorAction SilentlyContinue
+                foreach ($d in $allDirs) {
+                    $full = $d.FullName
+                    $root = (Get-Location).Path
+                    try { $rel = [System.IO.Path]::GetRelativePath($root, $full) } catch { $rel = $d.Name }
+                    $rel = $rel.Replace('\','/')
+                    if ($rel -match "[\t\n\r\x1f\p{Cc}]") { continue }
+                    $bn = $d.Name
+                    if ($excludedNames -contains $bn) { continue }
+                    if ($rel -eq $basePart) { continue }
+                    if (-not $rel.StartsWith($basePart + "/") -and $rel -ne $basePart) {
+                        # For pattern like "packages/**", basePart is "packages", rel must be under it
+                        # For "**" at start, basePart is ".", all dirs qualify
+                        if ($basePart -ne '.' -and -not $rel.StartsWith($basePart + "/")) { continue }
+                    }
+                    $results += $rel
+                }
+            } catch {}
+            return $results
+        } else {
+            $results = @()
+            try {
+                $matched = Get-ChildItem -Path $pat -Directory -ErrorAction SilentlyContinue
+                foreach ($m in $matched) {
+                    $full = $m.FullName
+                    $root = (Get-Location).Path
+                    try { $rel = [System.IO.Path]::GetRelativePath($root, $full) } catch { $rel = $m.Name }
+                    $rel = $rel.Replace('\','/')
+                    if ($rel -match "[\t\n\r\x1f\p{Cc}]") { continue }
+                    if ($excludedNames -contains $m.Name) { continue }
+                    $results += $rel
+                }
+            } catch {}
+            return $results
+        }
+    } else {
+        if (Test-Path -LiteralPath $pat -PathType Container) {
+            $bn = Split-Path -Leaf $pat
+            if ($excludedNames -contains $bn) { return @() }
+            if ($pat -match "[\t\n\r\x1f\p{Cc}]") { return @() }
+            return @($pat)
+        }
+        return @()
+    }
+}
+
 function Get-DetectedChecks {
     [string[]] $lines = @()
+    $script:WorkspaceLines = $lines
+    $script:SeenPackages = @()
+    $script:ExcludedDirs = @()
+    function Emit-PackageChecks {
+        param([string]$Dir)
+        $dir = $Dir.TrimEnd('/','\').TrimStart('./')
+        if (-not $dir) { return }
+        if ($dir -match "[\t\n\r\x1f\p{Cc}]") { return }
+        if (-not (Test-Path -LiteralPath $dir -PathType Container)) { return }
+        $bn = Split-Path -Leaf $dir
+        if ($bn -in @('node_modules','target','build','.venv','.git')) { return }
+        if ($script:SeenPackages -contains $dir) { return }
+        if ($script:ExcludedDirs -contains $dir) { return }
+        $script:SeenPackages += $dir
+        $prefix = $dir.Replace('/','-').Replace('\','-')
+        if (Test-Path -LiteralPath (Join-Path $dir 'package.json')) {
+            Write-Log "Detected: Workspace Node.js project ($dir)"
+            if (Test-Path -LiteralPath (Join-Path $dir 'pnpm-lock.yaml')) {
+                $script:WorkspaceLines += "required`t${prefix}-node-test`t${dir}`tpnpm`ttest"
+                if (Test-PackageScript (Join-Path $dir 'package.json') 'lint') { $script:WorkspaceLines += "required`t${prefix}-node-lint`t${dir}`tpnpm`tlint" }
+            } elseif (Test-Path -LiteralPath (Join-Path $dir 'yarn.lock')) {
+                $script:WorkspaceLines += "required`t${prefix}-node-test`t${dir}`tyarn`ttest"
+                if (Test-PackageScript (Join-Path $dir 'package.json') 'lint') { $script:WorkspaceLines += "required`t${prefix}-node-lint`t${dir}`tyarn`tlint" }
+            } elseif ((Test-Path -LiteralPath (Join-Path $dir 'bun.lock')) -or (Test-Path -LiteralPath (Join-Path $dir 'bun.lockb'))) {
+                $script:WorkspaceLines += "required`t${prefix}-node-test`t${dir}`tbun`ttest"
+                if (Test-PackageScript (Join-Path $dir 'package.json') 'lint') { $script:WorkspaceLines += "required`t${prefix}-node-lint`t${dir}`tbun`trun`tlint" }
+            } else {
+                $script:WorkspaceLines += "required`t${prefix}-node-test`t${dir}`tnpm`ttest"
+                $script:WorkspaceLines += "required`t${prefix}-node-lint`t${dir}`tnpm`trun`tlint`t--if-present"
+            }
+        }
+        if (Test-Path -LiteralPath (Join-Path $dir 'go.mod')) {
+            Write-Log "Detected: Workspace Go project ($dir)"
+            $script:WorkspaceLines += "required`t${prefix}-go-test`t${dir}`tgo`ttest`t./..."
+            $script:WorkspaceLines += "required`t${prefix}-go-vet`t${dir}`tgo`tvet`t./..."
+        }
+        if (Test-Path -LiteralPath (Join-Path $dir 'Cargo.toml')) {
+            Write-Log "Detected: Workspace Rust project ($dir)"
+            $script:WorkspaceLines += "required`t${prefix}-rust-test`t${dir}`tcargo`ttest"
+            $script:WorkspaceLines += "required`t${prefix}-rust-clippy`t${dir}`tcargo`tclippy`t--`t-D`twarnings"
+        }
+        if ((Test-Path -LiteralPath (Join-Path $dir 'pyproject.toml')) -or (Test-Path -LiteralPath (Join-Path $dir 'requirements.txt'))) {
+            Write-Log "Detected: Workspace Python project ($dir)"
+            if (Test-Path -LiteralPath (Join-Path $dir 'poetry.lock')) {
+                $script:WorkspaceLines += "required`t${prefix}-python-test`t${dir}`tpoetry`trun`tpytest"
+                if (Test-RuffConfig $dir) { $script:WorkspaceLines += "required`t${prefix}-python-ruff`t${dir}`tpoetry`trun`truff`tcheck`t." }
+            } elseif (Test-Path -LiteralPath (Join-Path $dir 'uv.lock')) {
+                $script:WorkspaceLines += "required`t${prefix}-python-test`t${dir}`tuv`trun`tpytest"
+                if (Test-RuffConfig $dir) { $script:WorkspaceLines += "required`t${prefix}-python-ruff`t${dir}`tuv`trun`truff`tcheck`t." }
+            } else {
+                $script:WorkspaceLines += "required`t${prefix}-python-test`t${dir}`tpytest"
+                if (Test-RuffConfig $dir) { $script:WorkspaceLines += "required`t${prefix}-python-ruff`t${dir}`truff`tcheck`t." }
+            }
+        }
+        if (Test-Path -LiteralPath (Join-Path $dir 'pom.xml')) {
+            Write-Log "Detected: Workspace Maven project ($dir)"
+            if (Test-Path -LiteralPath (Join-Path $dir 'mvnw')) { $mvn = './mvnw' } elseif (Test-Path -LiteralPath (Join-Path $dir 'mvnw.cmd')) { $mvn = './mvnw.cmd' } else { $mvn = 'mvn' }
+            $script:WorkspaceLines += "required`t${prefix}-maven-test`t${dir}`t${mvn}`ttest"
+            if (Test-MavenCheckstyle (Join-Path $dir 'pom.xml')) { $script:WorkspaceLines += "required`t${prefix}-maven-lint`t${dir}`t${mvn}`tcheckstyle:check" }
+        }
+        if ((Test-Path -LiteralPath (Join-Path $dir 'build.gradle')) -or (Test-Path -LiteralPath (Join-Path $dir 'build.gradle.kts'))) {
+            Write-Log "Detected: Workspace Gradle project ($dir)"
+            $isAndroid = $false
+            $gradleText = ''
+            if (Test-Path -LiteralPath (Join-Path $dir 'build.gradle')) { $gradleText += Get-Content -LiteralPath (Join-Path $dir 'build.gradle') -Raw -ErrorAction SilentlyContinue }
+            if (Test-Path -LiteralPath (Join-Path $dir 'build.gradle.kts')) { $gradleText += Get-Content -LiteralPath (Join-Path $dir 'build.gradle.kts') -Raw -ErrorAction SilentlyContinue }
+            if (Test-Path -LiteralPath (Join-Path $dir 'AndroidManifest.xml')) { $isAndroid = $true }
+            if ($gradleText -match 'com\.android|org\.jetbrains\.kotlin\.android') { $isAndroid = $true }
+            if ($isAndroid) {
+                if (Test-Path -LiteralPath (Join-Path $dir 'gradlew.bat')) { $gradleCmd = './gradlew.bat' } elseif (Test-Path -LiteralPath (Join-Path $dir 'gradlew')) { $gradleCmd = './gradlew' } else { $gradleCmd = 'gradle' }
+                $script:WorkspaceLines += "required`t${prefix}-android-unit`t${dir}`t${gradleCmd}`ttest"
+                $script:WorkspaceLines += "required`t${prefix}-android-lint`t${dir}`t${gradleCmd}`tlint"
+                $script:WorkspaceLines += "required`t${prefix}-android-build`t${dir}`t${gradleCmd}`tassembleDebug"
+                $script:WorkspaceLines += "optional`t${prefix}-android-device`t${dir}`t${gradleCmd}`tconnectedCheck"
+            } else {
+                if (Test-Path -LiteralPath (Join-Path $dir 'gradlew.bat')) { $gradleCmd = './gradlew.bat' } elseif (Test-Path -LiteralPath (Join-Path $dir 'gradlew')) { $gradleCmd = './gradlew' } else { $gradleCmd = 'gradle' }
+                $script:WorkspaceLines += "required`t${prefix}-gradle-test`t${dir}`t${gradleCmd}`ttest"
+                $script:WorkspaceLines += "required`t${prefix}-gradle-lint`t${dir}`t${gradleCmd}`tcheck"
+            }
+        }
+        if ((Get-ChildItem -Path $dir -Filter *.sln -File -ErrorAction SilentlyContinue) -or (Get-ChildItem -Path $dir -Filter *.csproj -File -ErrorAction SilentlyContinue)) {
+            Write-Log "Detected: Workspace .NET project ($dir)"
+            $script:WorkspaceLines += "required`t${prefix}-dotnet-test`t${dir}`tdotnet`ttest"
+            $script:WorkspaceLines += "required`t${prefix}-dotnet-lint`t${dir}`tdotnet`tformat`t--verify-no-changes"
+        }
+    }
 
     if (Test-Path -LiteralPath package.json) {
         Write-Log "Detected: Node.js project (package.json)"
@@ -574,78 +721,149 @@ function Get-DetectedChecks {
         $lines += "required`tdotnet-lint`t.`tdotnet`tformat`t--verify-no-changes"
     }
 
-    foreach ($base in @('apps', 'services', 'packages', 'modules')) {
-        if (Test-Path -LiteralPath $base -PathType Container) {
-            $subs = Get-ChildItem -Path $base -Directory -ErrorAction SilentlyContinue
-            foreach ($sub in $subs) {
-                $subName = $sub.Name
-                if ($subName -match "[\t\n\r\u001f\p{Cc}]") { continue }
-                if ($subName -in @('node_modules', 'target', 'build', '.venv')) { continue }
-                $subRel = "$base/$subName"
-                $prefix = "$base-$subName"
+    # Sync root checks to workspace script vars
+    $script:WorkspaceLines = $lines
 
-                if (Test-Path -LiteralPath (Join-Path $subRel 'package.json')) {
-                    Write-Log "Detected: Nested Node.js project ($subRel)"
-                    if (Test-Path -LiteralPath (Join-Path $subRel 'pnpm-lock.yaml')) {
-                        $lines += "required`t${prefix}-node-test`t${subRel}`tpnpm`ttest"
-                        if (Test-PackageScript (Join-Path $subRel 'package.json') 'lint') {
-                            $lines += "required`t${prefix}-node-lint`t${subRel}`tpnpm`tlint"
-                        }
-                    }
-                    elseif (Test-Path -LiteralPath (Join-Path $subRel 'yarn.lock')) {
-                        $lines += "required`t${prefix}-node-test`t${subRel}`tyarn`ttest"
-                        if (Test-PackageScript (Join-Path $subRel 'package.json') 'lint') {
-                            $lines += "required`t${prefix}-node-lint`t${subRel}`tyarn`tlint"
-                        }
-                    }
-                    elseif ((Test-Path -LiteralPath (Join-Path $subRel 'bun.lock')) -or (Test-Path -LiteralPath (Join-Path $subRel 'bun.lockb'))) {
-                        $lines += "required`t${prefix}-node-test`t${subRel}`tbun`ttest"
-                        if (Test-PackageScript (Join-Path $subRel 'package.json') 'lint') {
-                            $lines += "required`t${prefix}-node-lint`t${subRel}`tbun`trun`tlint"
-                        }
-                    }
-                    else {
-                        $lines += "required`t${prefix}-node-test`t${subRel}`tnpm`ttest"
-                        $lines += "required`t${prefix}-node-lint`t${subRel}`tnpm`trun`tlint`t--if-present"
+    # pnpm-workspace.yaml
+    if (Test-Path -LiteralPath 'pnpm-workspace.yaml') {
+        Write-Log "Detected: pnpm workspace (pnpm-workspace.yaml)"
+        $pnpmIncludes = @()
+        $pnpmExcludes = @()
+        $inPkg = $false
+        $raw = Get-Content -LiteralPath 'pnpm-workspace.yaml' -ErrorAction SilentlyContinue
+        foreach ($line in $raw) {
+            if ($line -match '^\s*packages\s*:') { $inPkg = $true; continue }
+            if ($inPkg) {
+                if ($line -match '^\s*(#|$)') { continue }
+                if ($line -match '^\s*-\s*(.*)') {
+                    $pat = $Matches[1].Trim()
+                    $pat = $pat.Split('#')[0].Trim()
+                    $pat = $pat.Trim("'").Trim('"')
+                    if (-not $pat) { continue }
+                    if ($pat.StartsWith('!')) { $pnpmExcludes += $pat.Substring(1) } else { $pnpmIncludes += $pat }
+                } elseif ($line -match '^\S') { break }
+            }
+        }
+        foreach ($pat in $pnpmExcludes) {
+            $expanded = Expand-WorkspacePattern -Pattern $pat
+            foreach ($d in $expanded) { if (-not ($script:ExcludedDirs -contains $d)) { $script:ExcludedDirs += $d } }
+        }
+        foreach ($pat in $pnpmIncludes) {
+            $expanded = Expand-WorkspacePattern -Pattern $pat
+            foreach ($d in $expanded) { Emit-PackageChecks -Dir $d }
+        }
+    }
+
+    # package.json workspaces (npm / yarn)
+    if (Test-Path -LiteralPath 'package.json') {
+        try {
+            $json = Get-Content -LiteralPath 'package.json' -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json -ErrorAction SilentlyContinue
+            if ($null -ne $json -and $null -ne $json.workspaces) {
+                Write-Log "Detected: npm/yarn workspaces (package.json)"
+                $patterns = @()
+                $ws = $json.workspaces
+                if ($ws -is [Array]) {
+                    $patterns = $ws
+                } elseif ($ws -is [PSCustomObject]) {
+                    if ($null -ne $ws.packages) { $patterns = $ws.packages }
+                }
+                foreach ($pat in $patterns) {
+                    if (-not $pat) { continue }
+                    $patStr = [string]$pat
+                    if ($patStr.StartsWith('!')) {
+                        $p2 = $patStr.Substring(1)
+                        $expanded = Expand-WorkspacePattern -Pattern $p2
+                        foreach ($d in $expanded) { if (-not ($script:ExcludedDirs -contains $d)) { $script:ExcludedDirs += $d } }
+                    } else {
+                        $expanded = Expand-WorkspacePattern -Pattern $patStr
+                        foreach ($d in $expanded) { Emit-PackageChecks -Dir $d }
                     }
                 }
-                if (Test-Path -LiteralPath (Join-Path $subRel 'go.mod')) {
-                    Write-Log "Detected: Nested Go project ($subRel)"
-                    $lines += "required`t${prefix}-go-test`t${subRel}`tgo`ttest`t./..."
-                    $lines += "required`t${prefix}-go-vet`t${subRel}`tgo`tvet`t./..."
+            }
+        } catch {}
+    }
+
+    # Cargo workspace
+    if ((Test-Path -LiteralPath 'Cargo.toml') -and ((Get-Content -LiteralPath 'Cargo.toml' -Raw -ErrorAction SilentlyContinue) -match '(?m)^\[workspace\]')) {
+        Write-Log "Detected: Cargo workspace (Cargo.toml)"
+        $cargoLines = Get-Content -LiteralPath 'Cargo.toml' -ErrorAction SilentlyContinue
+        $inWs = $false
+        $wsBuilder = ""
+        foreach ($l in $cargoLines) {
+            if ($l -match '^\[workspace\]') { $inWs = $true; continue }
+            if ($inWs -and $l -match '^\[.*\]') { break }
+            if ($inWs) { $wsBuilder += $l + "`n" }
+        }
+        $wsSection = $wsBuilder
+        if ($wsSection) {
+            $mEx = [regex]::Match($wsSection, 'exclude\s*=\s*\[(.*?)\]', [System.Text.RegularExpressions.RegexOptions]::Singleline)
+            if ($mEx.Success) {
+                $exContent = $mEx.Groups[1].Value
+                $exMatches = [regex]::Matches($exContent, '"([^"]*)"')
+                foreach ($mm in $exMatches) {
+                    $pat = $mm.Groups[1].Value
+                    $expanded = Expand-WorkspacePattern -Pattern $pat
+                    foreach ($d in $expanded) { if (-not ($script:ExcludedDirs -contains $d)) { $script:ExcludedDirs += $d } }
                 }
-                if (Test-Path -LiteralPath (Join-Path $subRel 'Cargo.toml')) {
-                    Write-Log "Detected: Nested Rust project ($subRel)"
-                    $lines += "required`t${prefix}-rust-test`t${subRel}`tcargo`ttest"
-                    $lines += "required`t${prefix}-rust-clippy`t${subRel}`tcargo`tclippy`t--`t-D`twarnings"
-                }
-                if ((Test-Path -LiteralPath (Join-Path $subRel 'pyproject.toml')) -or (Test-Path -LiteralPath (Join-Path $subRel 'requirements.txt'))) {
-                    Write-Log "Detected: Nested Python project ($subRel)"
-                    # Nested Python projects inherit the root-level Poetry/uv
-                    # detection rather than always falling back to bare pytest.
-                    if (Test-Path -LiteralPath (Join-Path $subRel 'poetry.lock')) {
-                        $lines += "required`t${prefix}-python-test`t${subRel}`tpoetry`trun`tpytest"
-                        if (Test-RuffConfig $subRel) {
-                            $lines += "required`t${prefix}-python-ruff`t${subRel}`tpoetry`trun`truff`tcheck`t."
-                        }
-                    }
-                    elseif (Test-Path -LiteralPath (Join-Path $subRel 'uv.lock')) {
-                        $lines += "required`t${prefix}-python-test`t${subRel}`tuv`trun`tpytest"
-                        if (Test-RuffConfig $subRel) {
-                            $lines += "required`t${prefix}-python-ruff`t${subRel}`tuv`trun`truff`tcheck`t."
-                        }
-                    }
-                    else {
-                        $lines += "required`t${prefix}-python-test`t${subRel}`tpytest"
-                        if (Test-RuffConfig $subRel) {
-                            $lines += "required`t${prefix}-python-ruff`t${subRel}`truff`tcheck`t."
-                        }
-                    }
+            }
+            $mMem = [regex]::Match($wsSection, 'members\s*=\s*\[(.*?)\]', [System.Text.RegularExpressions.RegexOptions]::Singleline)
+            if ($mMem.Success) {
+                $memContent = $mMem.Groups[1].Value
+                $memMatches = [regex]::Matches($memContent, '"([^"]*)"')
+                foreach ($mm in $memMatches) {
+                    $pat = $mm.Groups[1].Value
+                    $expanded = Expand-WorkspacePattern -Pattern $pat
+                    foreach ($d in $expanded) { Emit-PackageChecks -Dir $d }
                 }
             }
         }
     }
 
+    # Maven multi-module
+    if ((Test-Path -LiteralPath 'pom.xml') -and ((Get-Content -LiteralPath 'pom.xml' -Raw -ErrorAction SilentlyContinue) -match '<modules>')) {
+        Write-Log "Detected: Maven multi-module (pom.xml)"
+        $pomRaw = Get-Content -LiteralPath 'pom.xml' -Raw -ErrorAction SilentlyContinue
+        $modMatches = [regex]::Matches($pomRaw, '<module>([^<]+)</module>')
+        foreach ($mm in $modMatches) {
+            $mod = $mm.Groups[1].Value.Trim().TrimStart('./').TrimEnd('/')
+            if (-not $mod) { continue }
+            $expanded = Expand-WorkspacePattern -Pattern $mod
+            foreach ($d in $expanded) { Emit-PackageChecks -Dir $d }
+        }
+    }
+
+    # Gradle settings
+    foreach ($gradleFile in @('settings.gradle','settings.gradle.kts')) {
+        if (Test-Path -LiteralPath $gradleFile) {
+            Write-Log "Detected: Gradle workspace ($gradleFile)"
+            $incLines = Get-Content -LiteralPath $gradleFile -ErrorAction SilentlyContinue | Where-Object { $_ -match '^\s*include' }
+            foreach ($line in $incLines) {
+                $qMatches = [regex]::Matches($line, "['`"]([^'`"]+)['`"]")
+                foreach ($qm in $qMatches) {
+                    $inc = $qm.Groups[1].Value
+                    $pat = $inc.TrimStart(':').Replace(':','/').Trim()
+                    if (-not $pat) { continue }
+                    $expanded = Expand-WorkspacePattern -Pattern $pat
+                    foreach ($d in $expanded) { Emit-PackageChecks -Dir $d }
+                }
+            }
+        }
+    }
+
+    foreach ($base in @('apps', 'services', 'packages', 'modules')) {
+        if (Test-Path -LiteralPath $base -PathType Container) {
+            $subs = Get-ChildItem -Path $base -Directory -ErrorAction SilentlyContinue
+            foreach ($sub in $subs) {
+                $subName = $sub.Name
+                if ($subName -match "[\t\n\r\x1f\p{Cc}]") { continue }
+                if ($subName -in @('node_modules', 'target', 'build', '.venv')) { continue }
+                $subRel = "$base/$subName"
+                Emit-PackageChecks -Dir $subRel
+            }
+        }
+    }
+
+    $lines = $script:WorkspaceLines
     return $lines
 }
 
@@ -1005,3 +1223,4 @@ if ($script:Detected) {
 }
 Write-Log "VERIFICATION UNSUPPORTED: no supported project or check configuration found."
 Complete-Verification "UNSUPPORTED" 3
+

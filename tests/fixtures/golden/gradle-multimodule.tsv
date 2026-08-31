@@ -1,0 +1,6 @@
+required	app-gradle-lint	app	gradle	check
+required	app-gradle-test	app	gradle	test
+required	gradle-lint	.	gradle	check
+required	gradle-test	.	gradle	test
+required	lib-core-gradle-lint	lib/core	gradle	check
+required	lib-core-gradle-test	lib/core	gradle	test

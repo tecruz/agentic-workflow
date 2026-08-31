@@ -511,7 +511,7 @@ function Invoke-Evaluation([string]$ScenarioPath) {
 
     $doc = [ordered]@{
         schema_version       = 1
-        protocol_version     = '1.6.0'
+        protocol_version     = '1.7.0'
         kind                 = 'behavioral_evaluation_result'
         mode                 = 'offline-fixture'
         observed_result      = $observed
@@ -567,3 +567,4 @@ if ($Format -ne 'Json') {
 }
 
 exit $(if ($expectedOk -eq $results.Count) { 0 } else { 1 })
+

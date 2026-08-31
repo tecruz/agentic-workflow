@@ -275,7 +275,7 @@ output_json_checked() {
         source_value="\"source\":\"checks_tsv\""
     fi
 
-    printf '{"schema_version":1,"protocol_version":"1.6.0","kind":"verification_result","result":"%s","exit_code":%d,%s,"summary":%s,"checks":[%s]}\n' \
+    printf '{"schema_version":1,"protocol_version":"1.7.0","kind":"verification_result","result":"%s","exit_code":%d,%s,"summary":%s,"checks":[%s]}\n' \
         "$res_str" "$exit_code" "$source_value" "$summary" "$checks_json"
 }
 
@@ -578,6 +578,179 @@ ruff_configured() {
     return 1
 }
 
+# Expands a workspace pattern (literal or glob) to existing directories, one per
+# line. Globs use pathname expansion with nullglob; `**` enables globstar.
+# Output is project-relative with no trailing slash.
+workspace_expand_pattern() {
+    local pat="$1"
+    pat="${pat#./}"
+    pat="${pat%/}"
+    [ -z "$pat" ] && return
+    if [[ "$pat" == *$'\t'* ]] || [[ "$pat" == *$'\n'* ]]; then return; fi
+    if [[ "$pat" == *'*'* ]]; then
+        local old_nullglob
+        old_nullglob="$(shopt -p nullglob 2>/dev/null || echo "shopt -u nullglob")"
+        local old_globstar
+        old_globstar="$(shopt -p globstar 2>/dev/null || echo "shopt -u globstar")"
+        if [[ "$pat" == *'**'* ]]; then
+            shopt -s globstar 2>/dev/null || true
+        fi
+        shopt -s nullglob
+        local d
+        for d in $pat; do
+            d="${d%/}"
+            if [ -d "$d" ]; then
+                if [[ "$d" =~ [$'\t'$'\n'$'\r'$'\x1f'[:cntrl:]] ]]; then continue; fi
+                local bn
+                bn="$(basename "$d")"
+                case "$bn" in
+                    node_modules|target|build|.venv|.git) continue ;;
+                esac
+                printf '%s\n' "$d"
+            fi
+        done
+        eval "$old_nullglob"
+        eval "$old_globstar" 2>/dev/null || true
+    else
+        if [ -d "$pat" ]; then
+            if [[ "$pat" =~ [$'\t'$'\n'$'\r'$'\x1f'[:cntrl:]] ]]; then return; fi
+            local bn
+            bn="$(basename "$pat")"
+            case "$bn" in
+                node_modules|target|build|.venv|.git) return ;;
+            esac
+            printf '%s\n' "$pat"
+        fi
+    fi
+}
+
+# Emits checks for a single package directory, appending to output_lines and
+# tracking seen_packages/excluded_dirs for workspace deduplication. Relies on
+# output_lines, seen_packages, and excluded_dirs being visible in the caller's
+# scope (dynamic scope via Bash).
+emit_checks_for_dir() {
+    local dir="$1"
+    dir="${dir%/}"
+    dir="${dir#./}"
+    [ -z "$dir" ] && return
+    if [[ "$dir" =~ [$'\t'$'\n'$'\r'$'\x1f'[:cntrl:]] ]]; then return; fi
+    if [ ! -d "$dir" ]; then return; fi
+    local bn
+    bn="$(basename "$dir")"
+    case "$bn" in
+        node_modules|target|build|.venv|.git) return ;;
+    esac
+    local seen=0 s
+    for s in "${seen_packages[@]:-}"; do
+        if [ "$s" = "$dir" ]; then seen=1; break; fi
+    done
+    if [ "$seen" -eq 1 ]; then return; fi
+    for s in "${excluded_dirs[@]:-}"; do
+        if [ "$s" = "$dir" ]; then return; fi
+    done
+    seen_packages+=("$dir")
+    local prefix="${dir//\//-}"
+    prefix="${prefix//\\/-}"
+    if [ -f "$dir/package.json" ]; then
+        echo "Detected: Workspace Node.js project ($dir)" >&2
+        if [ -f "$dir/pnpm-lock.yaml" ]; then
+            output_lines+=("required	${prefix}-node-test	$dir	pnpm	test")
+            if pkg_has_script "$dir/package.json" lint; then
+                output_lines+=("required	${prefix}-node-lint	$dir	pnpm	lint")
+            fi
+        elif [ -f "$dir/yarn.lock" ]; then
+            output_lines+=("required	${prefix}-node-test	$dir	yarn	test")
+            if pkg_has_script "$dir/package.json" lint; then
+                output_lines+=("required	${prefix}-node-lint	$dir	yarn	lint")
+            fi
+        elif [ -f "$dir/bun.lock" ] || [ -f "$dir/bun.lockb" ]; then
+            output_lines+=("required	${prefix}-node-test	$dir	bun	test")
+            if pkg_has_script "$dir/package.json" lint; then
+                output_lines+=("required	${prefix}-node-lint	$dir	bun	run	lint")
+            fi
+        else
+            output_lines+=("required	${prefix}-node-test	$dir	npm	test")
+            output_lines+=("required	${prefix}-node-lint	$dir	npm	run	lint	--if-present")
+        fi
+    fi
+    if [ -f "$dir/go.mod" ]; then
+        echo "Detected: Workspace Go project ($dir)" >&2
+        output_lines+=("required	${prefix}-go-test	$dir	go	test	./...")
+        output_lines+=("required	${prefix}-go-vet	$dir	go	vet	./...")
+    fi
+    if [ -f "$dir/Cargo.toml" ]; then
+        echo "Detected: Workspace Rust project ($dir)" >&2
+        output_lines+=("required	${prefix}-rust-test	$dir	cargo	test")
+        output_lines+=("required	${prefix}-rust-clippy	$dir	cargo	clippy	--	-D	warnings")
+    fi
+    if [ -f "$dir/pyproject.toml" ] || [ -f "$dir/requirements.txt" ]; then
+        echo "Detected: Workspace Python project ($dir)" >&2
+        if [ -f "$dir/poetry.lock" ]; then
+            output_lines+=("required	${prefix}-python-test	$dir	poetry	run	pytest")
+            if ruff_configured "$dir"; then
+                output_lines+=("required	${prefix}-python-ruff	$dir	poetry	run	ruff	check	.")
+            fi
+        elif [ -f "$dir/uv.lock" ]; then
+            output_lines+=("required	${prefix}-python-test	$dir	uv	run	pytest")
+            if ruff_configured "$dir"; then
+                output_lines+=("required	${prefix}-python-ruff	$dir	uv	run	ruff	check	.")
+            fi
+        else
+            output_lines+=("required	${prefix}-python-test	$dir	pytest")
+            if ruff_configured "$dir"; then
+                output_lines+=("required	${prefix}-python-ruff	$dir	ruff	check	.")
+            fi
+        fi
+    fi
+    if [ -f "$dir/pom.xml" ]; then
+        echo "Detected: Workspace Maven project ($dir)" >&2
+        if [ -x "$dir/mvnw" ]; then
+            output_lines+=("required	${prefix}-maven-test	$dir	./mvnw	test")
+            if maven_has_checkstyle "$dir/pom.xml"; then
+                output_lines+=("required	${prefix}-maven-lint	$dir	./mvnw	checkstyle:check")
+            fi
+        else
+            output_lines+=("required	${prefix}-maven-test	$dir	mvn	test")
+            if maven_has_checkstyle "$dir/pom.xml"; then
+                output_lines+=("required	${prefix}-maven-lint	$dir	mvn	checkstyle:check")
+            fi
+        fi
+    fi
+    if [ -f "$dir/build.gradle" ] || [ -f "$dir/build.gradle.kts" ]; then
+        echo "Detected: Workspace Gradle project ($dir)" >&2
+        local is_android=0
+        if grep -q -E 'com\.android|org\.jetbrains\.kotlin\.android' "$dir/build.gradle" "$dir/build.gradle.kts" 2>/dev/null || [ -f "$dir/AndroidManifest.xml" ]; then
+            is_android=1
+        fi
+        if [ "$is_android" -eq 1 ]; then
+            if [ -x "$dir/gradlew" ]; then
+                output_lines+=("required	${prefix}-android-unit	$dir	./gradlew	test")
+                output_lines+=("required	${prefix}-android-lint	$dir	./gradlew	lint")
+                output_lines+=("required	${prefix}-android-build	$dir	./gradlew	assembleDebug")
+                output_lines+=("optional	${prefix}-android-device	$dir	./gradlew	connectedCheck")
+            else
+                output_lines+=("required	${prefix}-android-unit	$dir	gradle	test")
+                output_lines+=("required	${prefix}-android-lint	$dir	gradle	lint")
+                output_lines+=("required	${prefix}-android-build	$dir	gradle	assembleDebug")
+                output_lines+=("optional	${prefix}-android-device	$dir	gradle	connectedCheck")
+            fi
+        else
+            if [ -x "$dir/gradlew" ]; then
+                output_lines+=("required	${prefix}-gradle-test	$dir	./gradlew	test")
+                output_lines+=("required	${prefix}-gradle-lint	$dir	./gradlew	check")
+            else
+                output_lines+=("required	${prefix}-gradle-test	$dir	gradle	test")
+                output_lines+=("required	${prefix}-gradle-lint	$dir	gradle	check")
+            fi
+        fi
+    fi
+    if compgen -G "$dir/*.sln" >/dev/null 2>&1 || compgen -G "$dir/*.csproj" >/dev/null 2>&1; then
+        echo "Detected: Workspace .NET project ($dir)" >&2
+        output_lines+=("required	${prefix}-dotnet-test	$dir	dotnet	test")
+        output_lines+=("required	${prefix}-dotnet-lint	$dir	dotnet	format	--verify-no-changes")
+    fi
+}
+
 # Returns 0 when the pom.xml at $1 configures Checkstyle; the lint check is
 # only emitted for projects that actually adopted it.
 maven_has_checkstyle() {
@@ -589,6 +762,8 @@ detect() {
     # Emits auto-detected checks as TSV on stdout. Human-readable detection
     # messages go to stderr so they never corrupt the TSV stream.
     local -a output_lines=()
+    local -a seen_packages=()
+    local -a excluded_dirs=()
 
     if [ -f package.json ]; then
         echo "Detected: Node.js project (package.json)" >&2
@@ -694,70 +869,164 @@ detect() {
         output_lines+=("required	dotnet-lint	.	dotnet	format	--verify-no-changes")
     fi
 
+    # Workspace manifest detection: pnpm, npm/yarn, Cargo, Maven, Gradle.
+    # These run before the legacy nested scan and share deduplication via
+    # seen_packages / excluded_dirs.
+    if [ -f pnpm-workspace.yaml ]; then
+        echo "Detected: pnpm workspace (pnpm-workspace.yaml)" >&2
+        local -a _pnpm_includes=() _pnpm_excludes=()
+        local _in_pkg=0 line pat
+        while IFS= read -r line || [ -n "$line" ]; do
+            line="${line%$'\r'}"
+            if [[ "$line" =~ ^[[:space:]]*packages[[:space:]]*: ]]; then
+                _in_pkg=1
+                continue
+            fi
+            if [ "$_in_pkg" -eq 1 ]; then
+                if [[ "$line" =~ ^[[:space:]]*(#|$) ]]; then continue; fi
+                if [[ "$line" =~ ^[[:space:]]*-[[:space:]]*(.*) ]]; then
+                    pat="${BASH_REMATCH[1]}"
+                    pat="$(printf '%s' "$pat" | sed -E "s/^[[:space:]]*['\"]?([^'\"]*)['\"]?[[:space:]]*(#.*)?$/\1/; s/^[[:space:]]*//; s/[[:space:]]*$//")"
+                    pat="${pat%%#*}"
+                    pat="$(printf '%s' "$pat" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e "s/^['\"]//" -e "s/['\"]$//")"
+                    [ -z "$pat" ] && continue
+                    if [[ "$pat" == \!* ]]; then
+                        _pnpm_excludes+=("${pat#!}")
+                    else
+                        _pnpm_includes+=("$pat")
+                    fi
+                elif [[ "$line" =~ ^[^[:space:]] ]]; then
+                    break
+                fi
+            fi
+        done < pnpm-workspace.yaml
+        local pat d
+        for pat in "${_pnpm_excludes[@]:-}"; do
+            while IFS= read -r d; do
+                [ -z "$d" ] && continue
+                excluded_dirs+=("$d")
+            done < <(workspace_expand_pattern "$pat")
+        done
+        for pat in "${_pnpm_includes[@]:-}"; do
+            while IFS= read -r d; do
+                [ -z "$d" ] && continue
+                emit_checks_for_dir "$d"
+            done < <(workspace_expand_pattern "$pat")
+        done
+    fi
+
+    if [ -f package.json ] && grep -q '"workspaces"' package.json; then
+        echo "Detected: npm/yarn workspaces (package.json)" >&2
+        local _ws_block="" _ws_obj=""
+        _ws_block="$(sed -n '/"workspaces"[[:space:]]*:[[:space:]]*\[/,/\]/p' package.json)"
+        if [ -z "$_ws_block" ]; then
+            _ws_obj="$(sed -n '/"workspaces"[[:space:]]*:[[:space:]]*{/,/}/p' package.json)"
+            if [ -n "$_ws_obj" ]; then
+                _ws_block="$(printf '%s' "$_ws_obj" | sed -n '/"packages"[[:space:]]*:[[:space:]]*\[/,/\]/p')"
+            fi
+        fi
+        if [ -n "$_ws_block" ]; then
+            local -a _ws_patterns=()
+            local _ws_pat
+            while IFS= read -r _ws_pat; do
+                _ws_pat="${_ws_pat#\"}"
+                _ws_pat="${_ws_pat%\"}"
+                case "$_ws_pat" in
+                    workspaces|packages|nohoist) continue ;;
+                esac
+                [ -z "$_ws_pat" ] && continue
+                _ws_patterns+=("$_ws_pat")
+            done < <(printf '%s' "$_ws_block" | grep -oE '"[^"]*"' || true)
+            local pat d
+            for pat in "${_ws_patterns[@]:-}"; do
+                if [[ "$pat" == \!* ]]; then
+                    pat="${pat#!}"
+                    while IFS= read -r d; do
+                        [ -z "$d" ] && continue
+                        excluded_dirs+=("$d")
+                    done < <(workspace_expand_pattern "$pat")
+                else
+                    while IFS= read -r d; do
+                        [ -z "$d" ] && continue
+                        emit_checks_for_dir "$d"
+                    done < <(workspace_expand_pattern "$pat")
+                fi
+            done
+        fi
+    fi
+
+    if [ -f Cargo.toml ] && grep -q '^\[workspace\]' Cargo.toml; then
+        echo "Detected: Cargo workspace (Cargo.toml)" >&2
+        local _cargo_ws
+        _cargo_ws="$(awk '/^\[workspace\]/{flag=1; next} /^\[.*\]/{flag=0} flag' Cargo.toml)"
+        if [ -n "$_cargo_ws" ]; then
+            local _members_block _exclude_block
+            _members_block="$(printf '%s' "$_cargo_ws" | sed -n '/members[[:space:]]*=/,/\]/p')"
+            _exclude_block="$(printf '%s' "$_cargo_ws" | sed -n '/exclude[[:space:]]*=/,/\]/p')"
+            local pat d
+            if [ -n "$_exclude_block" ]; then
+                while IFS= read -r pat; do
+                    pat="${pat#\"}"; pat="${pat%\"}"
+                    [ -z "$pat" ] && continue
+                    while IFS= read -r d; do
+                        [ -z "$d" ] && continue
+                        excluded_dirs+=("$d")
+                    done < <(workspace_expand_pattern "$pat")
+                done < <(printf '%s' "$_exclude_block" | grep -oE '"[^"]*"' | sed 's/^"//;s/"$//' || true)
+            fi
+            if [ -n "$_members_block" ]; then
+                while IFS= read -r pat; do
+                    pat="${pat#\"}"; pat="${pat%\"}"
+                    [ -z "$pat" ] && continue
+                    while IFS= read -r d; do
+                        [ -z "$d" ] && continue
+                        emit_checks_for_dir "$d"
+                    done < <(workspace_expand_pattern "$pat")
+                done < <(printf '%s' "$_members_block" | grep -oE '"[^"]*"' | sed 's/^"//;s/"$//' || true)
+            fi
+        fi
+    fi
+
+    if [ -f pom.xml ] && grep -q '<modules>' pom.xml; then
+        echo "Detected: Maven multi-module (pom.xml)" >&2
+        local _mods_raw _mod
+        _mods_raw="$(grep -oE '<module>[^<]+</module>' pom.xml | sed -E 's/<\/?module>//g' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+        while IFS= read -r _mod; do
+            [ -z "$_mod" ] && continue
+            _mod="${_mod#./}"; _mod="${_mod%/}"
+            local d
+            while IFS= read -r d; do
+                [ -z "$d" ] && continue
+                emit_checks_for_dir "$d"
+            done < <(workspace_expand_pattern "$_mod")
+        done <<< "$_mods_raw"
+    fi
+
+    for _gradle_file in settings.gradle settings.gradle.kts; do
+        if [ -f "$_gradle_file" ]; then
+            echo "Detected: Gradle workspace ($_gradle_file)" >&2
+            local _gradle_includes
+            _gradle_includes="$(grep -E '^[[:space:]]*include' "$_gradle_file" | grep -oE "['\"][^'\"]+['\"]" | tr -d "'\"" || true)"
+            local _inc pat d
+            while IFS= read -r _inc; do
+                [ -z "$_inc" ] && continue
+                pat="$(printf '%s' "$_inc" | sed -e 's/^://' -e 's/:/\//g' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+                [ -z "$pat" ] && continue
+                while IFS= read -r d; do
+                    [ -z "$d" ] && continue
+                    emit_checks_for_dir "$d"
+                done < <(workspace_expand_pattern "$pat")
+            done <<< "$_gradle_includes"
+        fi
+    done
+
     for base in apps services packages modules; do
         if [ -d "$base" ]; then
             for sub in "$base"/*; do
                 if [[ "$sub" =~ [$'\t'$'\n'$'\r'$'\x1f'[:cntrl:]] ]]; then
                     continue
                 fi
-                if [ -d "$sub" ] && [ "$(basename "$sub")" != "node_modules" ] && [ "$(basename "$sub")" != "target" ] && [ "$(basename "$sub")" != "build" ] && [ "$(basename "$sub")" != ".venv" ]; then
-                    local prefix="${sub//\//-}"
-                    prefix="${prefix//\\/-}"
-                    if [ -f "$sub/package.json" ]; then
-                        echo "Detected: Nested Node.js project ($sub)" >&2
-                        if [ -f "$sub/pnpm-lock.yaml" ]; then
-                            output_lines+=("required	${prefix}-node-test	$sub	pnpm	test")
-                            if pkg_has_script "$sub/package.json" lint; then
-                                output_lines+=("required	${prefix}-node-lint	$sub	pnpm	lint")
-                            fi
-                        elif [ -f "$sub/yarn.lock" ]; then
-                            output_lines+=("required	${prefix}-node-test	$sub	yarn	test")
-                            if pkg_has_script "$sub/package.json" lint; then
-                                output_lines+=("required	${prefix}-node-lint	$sub	yarn	lint")
-                            fi
-                        elif [ -f "$sub/bun.lock" ] || [ -f "$sub/bun.lockb" ]; then
-                            output_lines+=("required	${prefix}-node-test	$sub	bun	test")
-                            if pkg_has_script "$sub/package.json" lint; then
-                                output_lines+=("required	${prefix}-node-lint	$sub	bun	run	lint")
-                            fi
-                        else
-                            output_lines+=("required	${prefix}-node-test	$sub	npm	test")
-                            output_lines+=("required	${prefix}-node-lint	$sub	npm	run	lint	--if-present")
-                        fi
-                    fi
-                    if [ -f "$sub/go.mod" ]; then
-                        echo "Detected: Nested Go project ($sub)" >&2
-                        output_lines+=("required	${prefix}-go-test	$sub	go	test	./...")
-                        output_lines+=("required	${prefix}-go-vet	$sub	go	vet	./...")
-                    fi
-                    if [ -f "$sub/Cargo.toml" ]; then
-                        echo "Detected: Nested Rust project ($sub)" >&2
-                        output_lines+=("required	${prefix}-rust-test	$sub	cargo	test")
-                        output_lines+=("required	${prefix}-rust-clippy	$sub	cargo	clippy	--	-D	warnings")
-                    fi
-                    if [ -f "$sub/pyproject.toml" ] || [ -f "$sub/requirements.txt" ]; then
-                        echo "Detected: Nested Python project ($sub)" >&2
-                        # Nested Python projects inherit the root-level
-                        # Poetry/uv detection rather than always falling back
-                        # to a bare `pytest` invocation.
-                        if [ -f "$sub/poetry.lock" ]; then
-                            output_lines+=("required	${prefix}-python-test	$sub	poetry	run	pytest")
-                            if ruff_configured "$sub"; then
-                                output_lines+=("required	${prefix}-python-ruff	$sub	poetry	run	ruff	check	.")
-                            fi
-                        elif [ -f "$sub/uv.lock" ]; then
-                            output_lines+=("required	${prefix}-python-test	$sub	uv	run	pytest")
-                            if ruff_configured "$sub"; then
-                                output_lines+=("required	${prefix}-python-ruff	$sub	uv	run	ruff	check	.")
-                            fi
-                        else
-                            output_lines+=("required	${prefix}-python-test	$sub	pytest")
-                            if ruff_configured "$sub"; then
-                                output_lines+=("required	${prefix}-python-ruff	$sub	ruff	check	.")
-                            fi
-                        fi
-                    fi
-                fi
+                emit_checks_for_dir "$sub"
             done
         fi
     done
@@ -1176,3 +1445,4 @@ if [ "$DETECTED" -ne 0 ]; then
 fi
 log "VERIFICATION UNSUPPORTED: no supported project or check configuration found."
 complete_verification "UNSUPPORTED" 3
+

@@ -124,7 +124,7 @@ function Output-ContextJson {
 
     $resultObject = [ordered]@{
         schema_version   = 1
-        protocol_version = "1.6.0"
+        protocol_version = "1.7.0"
         kind             = "context_validation_result"
         mode             = if ($Handoff) { "handoff" } else { "standard" }
         result           = $Result
@@ -521,3 +521,4 @@ else {
     [Console]::Out.WriteLine("VALID: context selections ok ($summary)")
 }
 exit 0
+

@@ -622,7 +622,7 @@ def finalize(sid, scenario_path, scenario, checks=None, details=None):
 
     doc = {
         "schema_version": 1,
-        "protocol_version": "1.6.0",
+        "protocol_version": "1.7.0",
         "kind": "behavioral_evaluation_result",
         "mode": "offline-fixture",
         "observed_result": observed,
@@ -687,3 +687,4 @@ if fmt != "json":
 
 sys.exit(0 if run_failures == 0 else 1)
 PYEOF
+

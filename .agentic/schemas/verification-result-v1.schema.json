@@ -6,7 +6,7 @@
   "required": ["schema_version", "protocol_version", "kind", "result", "exit_code", "source", "summary", "checks"],
   "properties": {
     "schema_version": { "type": "integer", "const": 1 },
-    "protocol_version": { "type": "string", "const": "1.6.0" },
+    "protocol_version": { "type": "string", "const": "1.7.0" },
     "kind": { "type": "string", "const": "verification_result" },
     "result": { "type": "string", "enum": ["PASS", "FAIL", "BLOCKED", "UNSUPPORTED"] },
     "exit_code": { "type": "integer", "enum": [0, 1, 2, 3] },
@@ -88,3 +88,4 @@
     }
   ]
 }
+

@@ -55,7 +55,7 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-$ProtocolVersion = "1.6.0"
+$ProtocolVersion = "1.7.0"
 
 if ($Help) {
     @"
@@ -611,3 +611,4 @@ if ($Format -ieq "Json") {
     else { Write-Host "Orchestration BLOCKED: worker blocked in $worktreeRel" -ForegroundColor Yellow }
     Complete-Orchestration $result $exitCode $workersJson $summaryJson $disp $cwdRel
 }
+
