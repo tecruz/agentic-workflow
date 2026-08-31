@@ -579,7 +579,8 @@ ruff_configured() {
 }
 
 # Expands a workspace pattern (literal or glob) to existing directories, one per
-# line. Globs use pathname expansion with nullglob; `**` enables globstar.
+# line. Non-recursive globs use pathname expansion with nullglob; `**` patterns
+# are expanded portably via `find` (works on bash 3.2 / macOS).
 # Output is project-relative with no trailing slash.
 workspace_expand_pattern() {
     local pat="$1"
@@ -587,14 +588,26 @@ workspace_expand_pattern() {
     pat="${pat%/}"
     [ -z "$pat" ] && return
     if [[ "$pat" == *$'\t'* ]] || [[ "$pat" == *$'\n'* ]]; then return; fi
+    if [[ "$pat" == *'**'* ]]; then
+        # Recursive glob: use find for portability (bash 3.2 lacks globstar)
+        local base="${pat%%/**}"
+        base="${base%/}"
+        [ -d "$base" ] || return
+        find "$base" -type d \
+            ! -path '*/node_modules/*' ! -name 'node_modules' \
+            ! -path '*/target/*' ! -name 'target' \
+            ! -path '*/build/*' ! -name 'build' \
+            ! -path '*/.venv/*' ! -name '.venv' \
+            ! -path '*/.git/*' ! -name '.git' \
+            -printf '%P\n' 2>/dev/null | sed 's:/*$::' | sort -u | while IFS= read -r rel; do
+            [ -z "$rel" ] && continue
+            printf '%s/%s\n' "$base" "$rel"
+        done
+        return
+    fi
     if [[ "$pat" == *'*'* ]]; then
         local old_nullglob
         old_nullglob="$(shopt -p nullglob 2>/dev/null || echo "shopt -u nullglob")"
-        local old_globstar
-        old_globstar="$(shopt -p globstar 2>/dev/null || echo "shopt -u globstar")"
-        if [[ "$pat" == *'**'* ]]; then
-            shopt -s globstar 2>/dev/null || true
-        fi
         shopt -s nullglob
         local d
         for d in $pat; do
@@ -610,7 +623,6 @@ workspace_expand_pattern() {
             fi
         done
         eval "$old_nullglob"
-        eval "$old_globstar" 2>/dev/null || true
     else
         if [ -d "$pat" ]; then
             if [[ "$pat" =~ [$'\t'$'\n'$'\r'$'\x1f'[:cntrl:]] ]]; then return; fi
