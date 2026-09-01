@@ -1,8 +1,8 @@
-required	gradle-test	.	gradle	test
+optional	app-android-device	app	gradle	connectedCheck
 required	gradle-lint	.	gradle	check
+required	gradle-test	.	gradle	test
 required	app-android-unit	app	gradle	test
 required	app-android-lint	app	gradle	lint
 required	app-android-build	app	gradle	assembleDebug
-optional	app-android-device	app	gradle	connectedCheck
 required	shared-gradle-test	shared	gradle	test
 required	shared-gradle-lint	shared	gradle	check
