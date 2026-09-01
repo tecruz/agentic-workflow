@@ -578,17 +578,17 @@ ruff_configured() {
     return 1
 }
 
-# Returns 0 when $1 is an Android/Kotlin-Android Gradle project.
-# Checks: module build files for Android plugins, version catalogs for Android
-# plugin versions, and convention plugins referenced in build files.
-is_android_project() {
+# Returns 0 when $1 is the project root and the project uses Android/Kotlin-Android
+# Gradle. Checks root-level build files, version catalogs, and convention plugins.
+# This is used for ROOT-LEVEL detection.
+is_android_project_root() {
     local dir="$1"
     local gradle_files=()
     [ -f "$dir/build.gradle" ] && gradle_files+=("$dir/build.gradle")
     [ -f "$dir/build.gradle.kts" ] && gradle_files+=("$dir/build.gradle.kts")
     [ ${#gradle_files[@]} -eq 0 ] && return 1
 
-    # Direct Android plugin or AndroidManifest.xml in module
+    # Direct Android plugin or AndroidManifest.xml in root
     for gf in "${gradle_files[@]}"; do
         if grep -q -E 'com\.android|org\.jetbrains\.kotlin\.android' "$gf" 2>/dev/null; then
             return 0
@@ -605,8 +605,36 @@ is_android_project() {
         fi
     fi
 
+    # Check for convention plugin references in root build files
+    local conv_pat='id\(["][^"]*android[^"]*["]\)'
+    for gf in "${gradle_files[@]}"; do
+        if grep -q -E "$conv_pat" "$gf" 2>/dev/null; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+# Returns 0 when $1 is a module directory that is an Android/Kotlin-Android
+# Gradle module. Checks ONLY the module's own build files and manifest.
+# Does NOT consult project root version catalog (to avoid false positives in mixed projects).
+is_android_module() {
+    local dir="$1"
+    local gradle_files=()
+    [ -f "$dir/build.gradle" ] && gradle_files+=("$dir/build.gradle")
+    [ -f "$dir/build.gradle.kts" ] && gradle_files+=("$dir/build.gradle.kts")
+    [ ${#gradle_files[@]} -eq 0 ] && return 1
+
+    # Direct Android plugin or AndroidManifest.xml in module
+    for gf in "${gradle_files[@]}"; do
+        if grep -q -E 'com\.android|org\.jetbrains\.kotlin\.android' "$gf" 2>/dev/null; then
+            return 0
+        fi
+    done
+    [ -f "$dir/AndroidManifest.xml" ] && return 0
+
     # Check for convention plugin references in module build files
-    # Convention plugins typically look like: id("com.android.application") via pluginManagement or id("my-android-convention")
     local conv_pat='id\(["][^"]*android[^"]*["]\)'
     for gf in "${gradle_files[@]}"; do
         if grep -q -E "$conv_pat" "$gf" 2>/dev/null; then
@@ -770,7 +798,7 @@ emit_checks_for_dir() {
     if [ -f "$dir/build.gradle" ] || [ -f "$dir/build.gradle.kts" ]; then
         echo "Detected: Workspace Gradle project ($dir)" >&2
         local is_android=0
-        if is_android_project "$dir"; then
+        if is_android_module "$dir"; then
             is_android=1
         fi
         if [ "$is_android" -eq 1 ]; then
@@ -886,7 +914,7 @@ detect() {
         fi
     elif [ -f build.gradle ] || [ -f build.gradle.kts ]; then
         local is_android=0
-        if grep -q -E 'com\.android|org\.jetbrains\.kotlin\.android|AndroidManifest\.xml' build.gradle build.gradle.kts 2>/dev/null || [ -f AndroidManifest.xml ]; then
+        if is_android_project_root .; then
             is_android=1
         fi
         if [ "$is_android" -eq 1 ]; then
