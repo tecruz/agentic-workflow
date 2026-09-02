@@ -278,128 +278,63 @@ make_git_repo() {
     have python3 || skip "python3 not available"
     TMPD="$(mktemp -d)"
     make_git_repo "$TMPD"
-    # Create a realistic task with approval and meaningful worker
-    mkdir -p "$TMPD/.agentic/tasks"
-    cat > "$TMPD/.agentic/tasks/TASK-INTEG-001.md" <<EOF
-# TASK-INTEG-001: Integration test task
+    setup_task_file "$TMPD" "TASK-INTEG-001.md" "- [x] AG-1: Approved by Integration Tester on 2026-09-02"
 
-## Status
-Status: planned
-Updated: 2026-09-02
-
-## Risk profile
-Profile: standard
-
-## Profile rationale
-Integration test for full orchestration lifecycle.
-
-## Acceptance criteria
-- AC-1: Worker executes successfully
-- AC-2: Events stream captures full lifecycle
-- AC-3: Worktree is created and cleaned up
-
-## Approval gates
-- [x] AG-1: Approved by Integration Tester on 2026-09-02
-
-## Context modules
-- None selected — integration test
-
-## Verification
-### Baseline
-- baseline
-### Final
-- final
-## Files changed
-- file
-## Remaining risks
-- None identified
-EOF
-
-    # Run coordinator with events stream, a real worker (simple script), and cleanup
-    run bash -c "cd '$TMPD' && bash '$COORD' --approve --worker 'echo \"worker running in \$(pwd)\"; echo success > output.txt; cat output.txt' --events .agentic/runs/integ.jsonl .agentic/tasks/TASK-INTEG-001.md 2>&1"
+    # Run coordinator with a real worker, an events stream, and cleanup
+    run bash -c "cd '$TMPD' && bash '$COORD' --approve --worker 'echo worker-executed' --events .agentic/runs/integ.jsonl .agentic/tasks/TASK-INTEG-001.md 2>&1"
     [ "$status" -eq 0 ]
 
-    # Verify full event lifecycle in events file
-    [ -f "$TMPD/.agentic/runs/coord.jsonl" ] || [ -f "$TMPD/.agentic/runs/integ.jsonl" ]
-    EVENTS_FILE="\$(ls \$TMPD/.agentic/runs/*.jsonl 2>/dev/null | head -1)"
-    [ -f "\$EVENTS_FILE" ]
+    # Verify the events stream exists
+    [ -f "$TMPD/.agentic/runs/integ.jsonl" ]
 
-    # Verify complete event lifecycle
-    head -n 1 "\$EVENTS_FILE" | grep -q 'orchestration_started'
-    grep -q 'worker_started' "\$EVENTS_FILE"
-    grep -q 'worker_completed' "\$EVENTS_FILE"
-    tail -n 1 "\$EVENTS_FILE" | grep -q 'orchestration_completed'
+    # Verify the complete event lifecycle: exactly started, worker pair, terminal last
+    head -n 1 "$TMPD/.agentic/runs/integ.jsonl" | grep -q 'orchestration_started'
+    grep -q 'worker_started' "$TMPD/.agentic/runs/integ.jsonl"
+    grep -q 'worker_completed' "$TMPD/.agentic/runs/integ.jsonl"
+    tail -n 1 "$TMPD/.agentic/runs/integ.jsonl" | grep -q 'orchestration_completed'
 
-    # Verify each event is valid JSON
-    python3 -c "import json,sys; [json.loads(l) for l in open('\$EVENTS_FILE')]"
-    [ "\$?" -eq 0 ]
+    # Verify each event line is valid JSON
+    python3 -c "import json,sys; [json.loads(l) for l in open('$TMPD/.agentic/runs/integ.jsonl')]"
 
-    # Verify no raw command leakage
-    ! grep -q "worker running" "\$EVENTS_FILE" || true
+    # Terminal event pairs PASS with exit 0
+    tail -n 1 "$TMPD/.agentic/runs/integ.jsonl" | grep -q '"result":"PASS"'
+    tail -n 1 "$TMPD/.agentic/runs/integ.jsonl" | grep -q '"exit_code":0'
 
-    # Verify worktree created and cleaned up (with --cleanup flag)
-    # Note: --cleanup removes the worktree
-    [ ! -d "\$TMPD/.agentic/orchestration/worktrees/TMP-INTEG" ] || true
+    # Worker events carry the project-relative working directory (redaction)
+    grep -q '"working_directory":"./.agentic/orchestration/worktrees/TASK-INTEG-001"' "$TMPD/.agentic/runs/integ.jsonl"
 
-    # Cleanup
-    rm -rf "\$TMPD"
+    # No raw worker command leakage in the events stream
+    ! grep -q "worker-executed" "$TMPD/.agentic/runs/integ.jsonl"
+
+    # The isolated worktree was created for the task
+    [ -d "$TMPD/.agentic/orchestration/worktrees/TASK-INTEG-001" ]
+    git -C "$TMPD" worktree list | grep -q "TASK-INTEG-001"
+
+    rm -rf "$TMPD"
 }
 
-# Cross-platform integration: verify event schema validity
-@test "integration: event schema validation" {
+@test "integration: event stream validates against orchestration-events schema" {
     have git || skip "git not available"
     have python3 || skip "python3 not available"
-    TMPD="\$(mktemp -d)"
-    make_git_repo "\$TMPD"
-    mkdir -p "\$TMPD/.agentic/tasks"
-    cat > "\$TMPD/.agentic/tasks/TASK-EVENTS-001.md" <<EOF
-# TASK-EVENTS-001: Event schema validation
+    python3 -c "import jsonschema" 2>/dev/null || skip "jsonschema module not available"
+    TMPD="$(mktemp -d)"
+    make_git_repo "$TMPD"
+    setup_task_file "$TMPD" "TASK-EVENTS-001.md" "- [x] AG-1: Approved by Schema Tester on 2026-09-02"
 
-## Status
-Status: planned
-Updated: 2026-09-02
+    run bash -c "cd '$TMPD' && bash '$COORD' --approve --worker 'echo hello' --events .agentic/runs/schema-test.jsonl .agentic/tasks/TASK-EVENTS-001.md 2>&1"
+    [ "$status" -eq 0 ]
+    [ -f "$TMPD/.agentic/runs/schema-test.jsonl" ]
 
-## Risk profile
-Profile: standard
-
-## Profile rationale
-Event schema validation test.
-
-## Acceptance criteria
-- AC-1: Events match schema
-
-## Approval gates
-- [x] AG-1: Approved by Schema Tester on 2026-09-02
-
-## Context modules
-- None selected — schema test
-
-## Verification
-### Baseline
-- baseline
-### Final
-- final
-## Files changed
-- file
-## Remaining risks
-- None identified
-EOF
-
-    run bash -c "cd '\$TMPD' && bash '\$COORD' --approve --worker 'echo hello' --events .agentic/runs/schema-test.jsonl .agentic/tasks/TASK-EVENTS-001.md 2>&1"
-    [ "\$status" -eq 0 ]
-
-    # Validate each event against the events schema
-    EVENTS_FILE="\$(ls \$TMPD/.agentic/runs/*.jsonl 2>/dev/null | head -1)"
-    python3 -c "
+    # Every line of the event stream must validate against the schema
+    python3 - "$SCHEMA_EVENTS" "$TMPD/.agentic/runs/schema-test.jsonl" <<'PYEOF'
 import json, sys
 from jsonschema import validate
-with open('\$TMPD/.agentic/schemas/orchestration-events-v1.schema.json') as f:
+with open(sys.argv[1]) as f:
     schema = json.load(f)
-with open('\$EVENTS_FILE') as f:
+with open(sys.argv[2]) as f:
     for line in f:
-        event = json.loads(line)
-        validate(instance=event, schema=schema)
-" 2>/dev/null || skip "jsonschema not available"
-    [ "\$?" -eq 0 ] || true  # Don't fail if jsonschema not installed
-    rm -rf "\$TMPD"
+        validate(instance=json.loads(line), schema=schema)
+PYEOF
+
+    rm -rf "$TMPD"
 }
