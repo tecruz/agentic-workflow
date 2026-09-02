@@ -472,6 +472,77 @@ function Test-MavenCheckstyle {
     return (Get-Content -LiteralPath $Path -Raw -ErrorAction SilentlyContinue) -match 'checkstyle'
 }
 
+function Test-AndroidProjectRoot {
+    # Returns true when $Dir is the project root and the project uses Android/Kotlin-Android
+    # Gradle. Checks root-level build files, version catalogs, and convention plugins.
+    param([string] $Dir)
+    $gradleFiles = @()
+    if (Test-Path -LiteralPath (Join-Path $Dir 'build.gradle')) { $gradleFiles += Join-Path $Dir 'build.gradle' }
+    if (Test-Path -LiteralPath (Join-Path $Dir 'build.gradle.kts')) { $gradleFiles += Join-Path $Dir 'build.gradle.kts' }
+    if ($gradleFiles.Count -eq 0) { return $false }
+
+    # Direct Android plugin or AndroidManifest.xml in root
+    foreach ($gf in $gradleFiles) {
+        if ((Get-Content -LiteralPath $gf -ErrorAction SilentlyContinue) -match 'com\.android|org\.jetbrains\.kotlin\.android') {
+            return $true
+        }
+    }
+    if (Test-Path -LiteralPath (Join-Path $Dir 'AndroidManifest.xml')) { return $true }
+
+    # Check version catalog at project root (libs.versions.toml)
+    $rootDir = $Dir
+    $gitRoot = git -C $Dir rev-parse --show-toplevel 2>$null
+    if ($LASTEXITCODE -eq 0) { $rootDir = $gitRoot }
+    $versionCatalog = Join-Path $rootDir 'gradle/libs.versions.toml'
+    if (Test-Path -LiteralPath $versionCatalog) {
+        $vcText = Get-Content -LiteralPath $versionCatalog -Raw -ErrorAction SilentlyContinue
+        if ($vcText -match 'android.*=.*"com\.android|kotlin-android.*=.*"org\.jetbrains\.kotlin') {
+            return $true
+        }
+    }
+
+    # Check for convention plugin references in root build files
+    $convPat = 'id\("([^"]*android[^"]*)"\)'
+    foreach ($gf in $gradleFiles) {
+        $gfText = Get-Content -LiteralPath $gf -Raw -ErrorAction SilentlyContinue
+        if ($gfText -match $convPat) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Test-AndroidModule {
+    # Returns true when $Dir is a module directory that is an Android/Kotlin-Android
+    # Gradle module. Checks ONLY the module's own build files and manifest.
+    # Does NOT consult project root version catalog (to avoid false positives in mixed projects).
+    param([string] $Dir)
+    $gradleFiles = @()
+    if (Test-Path -LiteralPath (Join-Path $Dir 'build.gradle')) { $gradleFiles += Join-Path $Dir 'build.gradle' }
+    if (Test-Path -LiteralPath (Join-Path $Dir 'build.gradle.kts')) { $gradleFiles += Join-Path $Dir 'build.gradle.kts' }
+    if ($gradleFiles.Count -eq 0) { return $false }
+
+    # Direct Android plugin or AndroidManifest.xml in module
+    foreach ($gf in $gradleFiles) {
+        if ((Get-Content -LiteralPath $gf -ErrorAction SilentlyContinue) -match 'com\.android|org\.jetbrains\.kotlin\.android') {
+            return $true
+        }
+    }
+    if (Test-Path -LiteralPath (Join-Path $Dir 'AndroidManifest.xml')) { return $true }
+
+    # Check for convention plugin references in module build files
+    $convPat = 'id\("([^"]*android[^"]*)"\)'
+    foreach ($gf in $gradleFiles) {
+        $gfText = Get-Content -LiteralPath $gf -Raw -ErrorAction SilentlyContinue
+        if ($gfText -match $convPat) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
 function Expand-WorkspacePattern {
     # Expands a workspace pattern (literal or glob) to existing directories.
     # Globs use Get-ChildItem with nullglob semantics; `**` enables recursion.
@@ -597,12 +668,7 @@ function Get-DetectedChecks {
         }
         if ((Test-Path -LiteralPath (Join-Path $dir 'build.gradle')) -or (Test-Path -LiteralPath (Join-Path $dir 'build.gradle.kts'))) {
             Write-Log "Detected: Workspace Gradle project ($dir)"
-            $isAndroid = $false
-            $gradleText = ''
-            if (Test-Path -LiteralPath (Join-Path $dir 'build.gradle')) { $gradleText += Get-Content -LiteralPath (Join-Path $dir 'build.gradle') -Raw -ErrorAction SilentlyContinue }
-            if (Test-Path -LiteralPath (Join-Path $dir 'build.gradle.kts')) { $gradleText += Get-Content -LiteralPath (Join-Path $dir 'build.gradle.kts') -Raw -ErrorAction SilentlyContinue }
-            if (Test-Path -LiteralPath (Join-Path $dir 'AndroidManifest.xml')) { $isAndroid = $true }
-            if ($gradleText -match 'com\.android|org\.jetbrains\.kotlin\.android') { $isAndroid = $true }
+            $isAndroid = (Test-AndroidModule $dir)
             if ($isAndroid) {
                 if (Test-Path -LiteralPath (Join-Path $dir 'gradlew.bat')) { $gradleCmd = './gradlew.bat' } elseif (Test-Path -LiteralPath (Join-Path $dir 'gradlew')) { $gradleCmd = './gradlew' } else { $gradleCmd = 'gradle' }
                 $script:WorkspaceLines += "required`t${prefix}-android-unit`t${dir}`t${gradleCmd}`ttest"
@@ -691,12 +757,7 @@ function Get-DetectedChecks {
         }
     }
     elseif ((Test-Path -LiteralPath build.gradle) -or (Test-Path -LiteralPath build.gradle.kts)) {
-        $isAndroid = $false
-        $gradleText = ''
-        if (Test-Path -LiteralPath build.gradle) { $gradleText += Get-Content -LiteralPath build.gradle -Raw -ErrorAction SilentlyContinue }
-        if (Test-Path -LiteralPath build.gradle.kts) { $gradleText += Get-Content -LiteralPath build.gradle.kts -Raw -ErrorAction SilentlyContinue }
-        if (Test-Path -LiteralPath AndroidManifest.xml) { $isAndroid = $true }
-        if ($gradleText -match 'com\.android|org\.jetbrains\.kotlin\.android') { $isAndroid = $true }
+        $isAndroid = (Test-AndroidProjectRoot .)
 
         if ($isAndroid) {
             Write-Log "Detected: Android / Kotlin Gradle project (build.gradle)"

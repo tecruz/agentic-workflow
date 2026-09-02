@@ -1,0 +1,12 @@
+optional	android-device	.	gradle	connectedCheck
+optional	app-android-device	app	gradle	connectedCheck
+optional	build-logic-conventions-android-device	build-logic/conventions	gradle	connectedCheck
+required	android-build	.	gradle	assembleDebug
+required	android-lint	.	gradle	lint
+required	android-unit	.	gradle	test
+required	app-android-build	app	gradle	assembleDebug
+required	app-android-lint	app	gradle	lint
+required	app-android-unit	app	gradle	test
+required	build-logic-conventions-android-build	build-logic/conventions	gradle	assembleDebug
+required	build-logic-conventions-android-lint	build-logic/conventions	gradle	lint
+required	build-logic-conventions-android-unit	build-logic/conventions	gradle	test
