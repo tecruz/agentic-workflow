@@ -492,9 +492,9 @@ if (-not $worktreeExists) {
         git worktree add -b $worktreeBranch $worktreeAbs 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) { Remove-Item -LiteralPath $lockFile -Force -ErrorAction SilentlyContinue; Fail-WithResult "BLOCKED" 2 "worktree creation failed." }
     }
-    Write-Host "Created isolated worktree: $worktreeRel (branch $worktreeBranch)"
+    Write-Log "Created isolated worktree: $worktreeRel (branch $worktreeBranch)"
 } else {
-    Write-Host "Reusing existing worktree: $worktreeRel"
+    Write-Log "Reusing existing worktree: $worktreeRel"
 }
 
 $cwdRel = "./$worktreeRel"
@@ -506,9 +506,9 @@ if ([string]::IsNullOrWhiteSpace($Worker)) {
     }
     $workersJson = '{"worker_id":' + (ConvertTo-Json $taskId -Compress) + ',"status":"PASS","exit_code":0,"duration_ms":0,"reason_code":null}'
     $summaryJson = '{"workers_defined":1,"workers_run":1,"passed":1,"failed":0,"blocked":0}'
-    Write-Host "No worker command supplied; worktree ready."
+    Write-Log "No worker command supplied; worktree ready."
     if ($Push) {
-        Write-Host "Pushing branch $worktreeBranch..."
+        Write-Log "Pushing branch $worktreeBranch..."
         git -C $worktreeAbs push origin $worktreeBranch 2>&1 | Write-Host
         if ($LASTEXITCODE -ne 0) {
             $workersJson = '{"worker_id":' + (ConvertTo-Json $taskId -Compress) + ',"status":"FAIL","exit_code":1,"duration_ms":0,"reason_code":"WORKER_FAILED"}'
@@ -518,12 +518,12 @@ if ([string]::IsNullOrWhiteSpace($Worker)) {
             $disp = Get-DisplayPath $TaskFile
             Complete-Orchestration "FAIL" 1 $workersJson $summaryJson $disp $cwdRel
         }
-        Write-Host "Pushed $worktreeBranch"
+        Write-Log "Pushed $worktreeBranch"
     }
     if ($Cleanup) {
         try { git worktree remove --force $worktreeAbs 2>$null | Out-Null } catch {}
         try { Remove-Item -Recurse -Force $worktreeAbs -ErrorAction SilentlyContinue } catch {}
-        Write-Host "Cleaned up worktree $worktreeRel"
+        Write-Log "Cleaned up worktree $worktreeRel"
     }
     Remove-Item -LiteralPath $lockFile -Force -ErrorAction SilentlyContinue
     $disp = Get-DisplayPath $TaskFile
@@ -584,20 +584,20 @@ if ($status -eq "PASS") {
 }
 
 if ($Push -and $result -eq "PASS") {
-    Write-Host "Pushing branch $worktreeBranch..."
+    Write-Log "Pushing branch $worktreeBranch..."
     git -C $worktreeAbs push origin $worktreeBranch 2>&1 | Write-Host
     if ($LASTEXITCODE -ne 0) {
         $workersJson = '{"worker_id":' + (ConvertTo-Json $taskId -Compress) + ',"status":"FAIL","exit_code":1,"duration_ms":' + $durationMs + ',"reason_code":"WORKER_FAILED"}'
         $summaryJson = '{"workers_defined":1,"workers_run":1,"passed":0,"failed":1,"blocked":0}'
         $result = "FAIL"; $exitCode = 1
         Write-Host "Push failed for $worktreeBranch" -ForegroundColor Red
-    } else { Write-Host "Pushed $worktreeBranch" }
+    } else { Write-Log "Pushed $worktreeBranch" }
 }
 
 if ($Cleanup) {
     try { git worktree remove --force $worktreeAbs 2>$null | Out-Null } catch {}
     try { Remove-Item -Recurse -Force $worktreeAbs -ErrorAction SilentlyContinue } catch {}
-    Write-Host "Cleaned up worktree $worktreeRel"
+    Write-Log "Cleaned up worktree $worktreeRel"
 }
 
 Remove-Item -LiteralPath $lockFile -Force -ErrorAction SilentlyContinue
@@ -606,8 +606,8 @@ $disp = Get-DisplayPath $TaskFile
 if ($Format -ieq "Json") {
     Complete-Orchestration $result $exitCode $workersJson $summaryJson $disp $cwdRel
 } else {
-    if ($result -eq "PASS") { Write-Host "Orchestration PASS: worker succeeded in $worktreeRel" }
-    elseif ($result -eq "FAIL") { Write-Host "Orchestration FAIL: worker failed in $worktreeRel" -ForegroundColor Red }
-    else { Write-Host "Orchestration BLOCKED: worker blocked in $worktreeRel" -ForegroundColor Yellow }
+    if ($result -eq "PASS") { Write-Log "Orchestration PASS: worker succeeded in $worktreeRel" }
+    elseif ($result -eq "FAIL") { Write-Log "Orchestration FAIL: worker failed in $worktreeRel" }
+    else { Write-Log "Orchestration BLOCKED: worker blocked in $worktreeRel" }
     Complete-Orchestration $result $exitCode $workersJson $summaryJson $disp $cwdRel
 }

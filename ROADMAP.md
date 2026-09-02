@@ -73,11 +73,11 @@ Each new module must also add `validate-context` fixture + golden coverage, and
 ### 5. Orchestration maturity (ADR-0011)
 The v1.6.0 coordinator replaced the v1.5.0 stub. Remaining follow-up:
 
-- [ ] Cross-platform integration test driving a real `--worker` through a
+- [x] Cross-platform integration test driving a real `--worker` through a
       complete `orchestration_started → … → orchestration_completed` run on
       Linux, macOS, and Windows (today coverage is unit/fixture-level).
-- [ ] Consumer docs for wiring common CLIs (`AGENTIC_WORKER_CMD`) as workers.
-- [ ] Decide and record a policy for stale worktree GC beyond manual
+- [x] Consumer docs for wiring common CLIs (`AGENTIC_WORKER_CMD`) as workers.
+- [x] Decide and record a policy for stale worktree GC beyond manual
       `--cleanup`.
 
 ## Later / ideas (no target)

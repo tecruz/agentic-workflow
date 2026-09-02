@@ -102,6 +102,11 @@ jobs:
       - name: Run fixture smoke harness
         run: bash tests/fixtures/run-fixtures.sh .agentic/scripts/verify.sh
 
+      - name: Coordinator integration test (Linux)
+        run: |
+          sudo apt-get update -o Acquire::Retries=5 && sudo apt-get install -y bats
+          bats tests/bats/coordinator_test.bats
+
   # ── PowerShell fast (Windows) ──────────────────────────────────────────
   powershell-fast:
     name: PowerShell fast (Windows)
@@ -173,6 +178,10 @@ jobs:
         shell: pwsh
         run: pwsh -NoProfile -File evals/run-evals.ps1
 
+      - name: Coordinator integration test (Windows)
+        shell: pwsh
+        run: pwsh -NoProfile -File tests/pester/Coordinator.Integration.Tests.ps1
+
   # ── macOS compatibility ────────────────────────────────────────────────
   macos-compat:
     name: macOS compatibility
@@ -199,6 +208,11 @@ jobs:
 
       - name: Validate task fixtures against golden expectations (Bash 3.2)
         run: bash tests/parity/run-golden.sh bash .agentic/scripts/validate-task.sh
+
+      - name: Coordinator integration test (macOS)
+        run: |
+          brew install bats-core
+          bats tests/bats/coordinator_test.bats
 
   # ── Validator parity (single run) ──────────────────────────────────────
   # The parity job invokes pwsh -NoProfile -File per fixture through
