@@ -24,6 +24,11 @@
 | dependency-changes | 1 | standard | Manifest or lockfile changes, dependency upgrades, new external libraries, supply-chain implications |
 | infrastructure-change | 1 | high-assurance | Production-affecting CI/CD, Terraform/OpenTofu, Kubernetes, cloud resources, deployment configuration |
 | public-api-change | 1 | standard | Public endpoints, published interfaces, SDK contracts, backward compatibility |
+| performance | 1 | standard | Latency/memory/caching changes, hot path optimizations, resource pooling |
+| accessibility | 1 | standard | UI/UX changes, color contrast, keyboard nav, ARIA, screen reader support |
+| i18n | 1 | standard | New/modified user strings, locale files, date/number formatting, pluralization |
+| mobile-adaptive | 1 | standard | Responsive breakpoints, touch targets, safe area, orientation, PWA installability |
+| testing-infrastructure | 1 | standard | Test framework/CI config, fixtures, coverage, flaky tests, test types |
 
 ## Rules
 
