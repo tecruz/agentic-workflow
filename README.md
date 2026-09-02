@@ -418,10 +418,67 @@ stays in sync.
 
 ---
 
-## Customization
+## Orchestration
 
-- **Change the protocol**: edit `AGENTS.md` and `.agentic/WORKFLOW.md` — the
-  entry points pick it up automatically; re-run the installer to push updates
+The optional multi-agent orchestration (ADR-0011) runs tasks in isolated Git
+worktrees with approval gates, JSONL event streams, and cross-language parity
+(Bash + PowerShell). See `.agentic/orchestration/README.md` for details.
+
+### Generic Worker Interface (`AGENTIC_WORKER_CMD`)
+
+Any CLI agent can be used as a worker by setting `AGENTIC_WORKER_CMD` (or using
+`--worker`):
+
+```bash
+# Bash
+export AGENTIC_WORKER_CMD="my-agent --task task.md"
+bash .agentic/orchestration/coordinator.sh --approve .agentic/tasks/TASK-001.md
+
+# PowerShell
+$env:AGENTIC_WORKER_CMD = "my-agent --task task.md"
+pwsh .agentic/orchestration/coordinator.ps1 -Approve .agentic/tasks/TASK-001.md
+```
+
+The worker runs inside an isolated Git worktree with a clean environment.
+Event streams (`--events`) and JSON output (`--format json`) are supported.
+
+#### Worker Requirements
+
+- Exit `0` for success, non-zero for failure
+- Exit `127`/`126` for tooling unavailable (reported as `BLOCKED`)
+- Must not write to stdout in `--format json` mode (use stderr for logs)
+- Should not emit raw command lines or absolute paths to stdout
+
+#### Common Worker Examples
+
+| Agent | `AGENTIC_WORKER_CMD` |
+| :--- | :--- |
+| **Claude Code** | `claude --task task.md` |
+| **Gemini CLI** | `gemini --task task.md` |
+| **OpenCode** | `opencode task.md` |
+| **Custom script** | `./scripts/my-agent.sh` |
+
+#### Approval Gates
+
+Tasks declare gates in their `## Approval gates` section:
+
+```markdown
+## Approval gates
+- [x] AG-1: Approved by Reviewer on 2026-09-02
+```
+
+Spawning requires `--approve` + a checked gate (`[x] AG-N:`). Use `None identified` for no gates.
+
+### Events
+
+Enable JSONL event stream with `--events .agentic/runs/run.jsonl`. Events:
+- `orchestration_started`
+- `worker_started` / `worker_completed`
+- `orchestration_completed`
+
+---
+
+## Customization
   into adopting projects.
 - **Add stack-specific rules**: drop a new file into `.agentic/rules/` and
   reference it from `AGENTS.md`.

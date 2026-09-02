@@ -42,3 +42,45 @@ Events and JSON results never contain raw command lines, arguments, environment,
 - `coordinator.sh` / `coordinator.ps1` — twins, managed.
 - `.agentic/schemas/orchestration-result-v1.schema.json` — aggregated result contract.
 - `.agentic/schemas/orchestration-events-v1.schema.json` — JSONL event stream contract.
+
+## Stale Worktree GC Policy
+
+Worktrees and branches created by the coordinator can accumulate over time. This
+policy governs their cleanup:
+
+### Automatic Cleanup
+
+- **`--cleanup` flag**: When supplied, the coordinator removes the worktree and
+  its branch after successful completion (exit 0). Use this for CI pipelines.
+- **Lock file expiry**: Lock files (`.agentic/orchestration/worktrees/<id>.lock`)
+  contain the owning PID. On startup, the coordinator removes stale locks where
+  the PID no longer exists.
+
+### Manual Cleanup
+
+Run the GC command to remove orphaned worktrees and branches:
+
+```bash
+# List worktrees
+git worktree list | grep 'orchestration/'
+
+# Remove specific worktree
+bash .agentic/orchestration/coordinator.sh --approve --cleanup .agentic/tasks/TASK-ID.md
+
+# Bulk cleanup (manual)
+git worktree prune
+git branch -D $(git branch --list 'orchestration/*' | sed 's/^..//')
+```
+
+### Retention Policy
+
+| Scenario | Retention |
+| :--- | :--- |
+| Successful task with `--cleanup` | Immediate removal |
+| Failed/blocked task | Preserved until manual review |
+| Stale lock (PID gone) | Removed on next coordinator run |
+| Unreferenced branch (no worktree) | `git worktree prune` removes |
+
+> **Recommendation**: Configure CI pipelines with `--cleanup`. For local
+> development, run `git worktree prune` periodically. Do not rely on
+> automatic cleanup for failed tasks — preserve worktrees for debugging.
