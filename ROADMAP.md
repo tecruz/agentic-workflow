@@ -7,7 +7,7 @@
 
 ## Current state
 
-- **Version**: `1.7.0` (workspace/monorepo detection landed)
+- **Version**: `1.8.0` (workspace/monorepo detection landed; deeper Android/Kotlin detection landed)
 - The core loop (`DISCOVER → CLASSIFY RISK → PLAN → IMPLEMENT → VERIFY →
   HANDOFF`), the honest verification model, the non-destructive installer, risk
   profiles + evidence contracts, context modules + behavioral evals, and the
@@ -38,16 +38,16 @@ augmented by manifest-driven discovery (dual Bash + PowerShell, same fixtures).
 - [x] Extend the `tests/fixtures/golden/*.tsv` lock with 7 new workspace shapes (`pnpm-workspace`, `npm-workspaces`, `yarn-workspaces-object`, `cargo-workspace`, `maven-modules`, `gradle-multimodule`, `pnpm-workspace-recursive`) plus `run-fixtures` smoke coverage (Bash + PowerShell parity).
 - Stale `feat/namespaced-checks-and-monorepo-detection` remains superseded; `feat/orchestration` local branches pruned.
 
-### 2. Deeper Android / Kotlin detection
-Detection is currently root-only: it reads root `build.gradle(.kts)` /
-`AndroidManifest.xml` and cannot follow Android plugins declared only in module
+### 2. Deeper Android / Kotlin detection — **done in v1.8.0**
+Detection previously was root-only: it read root `build.gradle(.kts)` /
+`AndroidManifest.xml` and could not follow Android plugins declared only in module
 build files, version-catalog aliases, or convention plugins (README
-*Supported Stacks* → *Detection notes*).
+*Supported Stacks* → *Detection notes*). Now implemented:
 
-- [ ] Follow `com.android.*` / `org.jetbrains.kotlin.android` markers in module
+- [x] Follow `com.android.*` / `org.jetbrains.kotlin.android` markers in module
       build files and version catalogs.
-- [ ] Emit the wrapper-aware `test` / `lint` / `assembleDebug` checks per module.
-- [ ] Fixture coverage for convention-plugin and version-catalog layouts.
+- [x] Emit the wrapper-aware `test` / `lint` / `assembleDebug` checks per module.
+- [x] Fixture coverage for convention-plugin and version-catalog layouts.
 
 ### 3. A published `ROADMAP.md` + grooming — **done**
 This file. Plus:

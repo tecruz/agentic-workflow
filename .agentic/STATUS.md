@@ -25,6 +25,7 @@
 - [x] TASK-012 — v1.6.1 fix round — bugs + hygiene + CI maintainability (see `.agentic/tasks/TASK-012-maintenance.md`)
 - [x] TASK-013 — Draft ROADMAP.md (see `.agentic/tasks/TASK-013-draft-roadmap.md`)
 - [x] TASK-014 — Workspace and monorepo detection (v1.7.0): manifest-driven discovery for pnpm-workspace.yaml, package.json workspaces, Cargo workspace, pom.xml modules, settings.gradle include, with Bash+PowerShell parity and 7 new fixtures (see `.agentic/tasks/TASK-014-workspace-monorepo-detection.md`)
+- [x] TASK-015 — v1.8.0 release bookkeeping: deeper Android/Kotlin detection (see `.agentic/tasks/TASK-015-v180-release-bookkeeping.md`)
 
 ## Recent Decisions
 
@@ -35,8 +36,11 @@
 - ADR-0010 — Portable context modules and offline behavioral evaluations (see `docs/decisions/ADR-0010-context-modules-and-evaluations.md`)
 - ADR-0011 — Isolated multi-agent task coordination (see `docs/decisions/ADR-0011-isolated-multi-agent-task-coordination.md`)
 - ADR-0012 — Workspace and monorepo detection (see `docs/decisions/ADR-0012-workspace-monorepo-detection.md`)
+- ADR-0013 — Deeper Android and Kotlin detection (see `docs/decisions/ADR-0013-deeper-android-kotlin-detection.md`)
 
 ## Notes
+
+- **v1.8.0 — deeper Android/Kotlin detection** (unreleased, on `master`): root-level detection now interprets version catalogs (`gradle/libs.versions.toml`) and convention plugins (`id("...android...")`); per-module detection scans module build files and manifests without cross-module contamination; two new fixtures/goldens (`android-version-catalog`, `android-convention-plugin`); `protocol_version` sweep to `1.8.0`; `VERSION` bump to `1.8.0`. See `TASK-015`, `ADR-0013`, `CHANGELOG.md` `[1.8.0]`, and `ROADMAP.md`.
 
 - **v1.7.0 — workspace/monorepo detection** (unreleased, on `master`): manifest-driven discovery for `pnpm-workspace.yaml`, `package.json` `workspaces`, `Cargo.toml` `[workspace]`, `pom.xml` `<modules>`, `settings.gradle(.kts)` `include` with `*`/`**`/`!` and deduplication; 7 new fixtures/goldens with Bash+PowerShell parity; `protocol_version` sweep to `1.7.0`; `VERSION` bump to `1.7.0`. See `TASK-014`, `ADR-0012`, `CHANGELOG.md` `[1.7.0]`, and `ROADMAP.md`.
 

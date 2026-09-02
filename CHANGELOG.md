@@ -5,6 +5,21 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-09-01
+
+### Added
+- **Deeper Android / Kotlin detection (ADR-0013).** Root-level detection now interprets version catalogs (`gradle/libs.versions.toml`) and convention plugins (`id("...android...")`); per-module detection scans module build files and manifests without cross-module contamination:
+  - Root-level detection: `alias(libs.plugins.android.application)` via version catalog, `id("...android...")` convention plugins in root build files.
+  - Per-module detection: module `build.gradle(.kts)` markers, `AndroidManifest.xml`, convention plugin references; **excludes** version catalog to avoid false positives in mixed Android + pure-Java/Kotlin projects.
+  - Two new fixtures + goldens: `android-version-catalog` (root catalog + module alias + convention; shared module pure Kotlin-JVM) and `android-convention-plugin` (root convention plugin `apply false`, module applies it; `build-logic/conventions` with AGP dependency).
+  - Root-level detection now uses shared helper; per-module detection uses module helper; both languages (Bash + PowerShell) parity.
+  - Fixture harness parity: PowerShell passes all fixtures; Bash on WSL has line-ending quirk; files end with LF per `.gitattributes`.
+
+### Changed
+- `.agentic/VERSION` and `protocol_version` swept to `1.8.0` across all emitters, schemas, and `evals/` artifacts.
+- `ROADMAP.md` item 2 checked off; version updated to `1.8.0`.
+- ADR-0013 written and indexed.
+
 ## [1.7.0] - 2026-08-30
 
 ### Added
