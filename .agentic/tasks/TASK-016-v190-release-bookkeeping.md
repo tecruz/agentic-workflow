@@ -2,8 +2,8 @@
 
 ## Status
 
-Status: in-progress
-Updated: 2026-09-03
+Status: done
+Updated: 2026-09-04
 
 ## Risk profile
 
@@ -55,7 +55,7 @@ scoped after v1.9.0 ships.
 | AC-2 | install_test.bats + Install.Tests.ps1 updated to 10 modules; Install.Tests.ps1 80 passed/0 failed/2 skipped; manual v1.8.0→current upgrade delivers 5 new modules (10 dirs) | passed |
 | AC-3 | STATUS.md + ROADMAP.md diff shows Item 4 done and version 1.9.0 | passed |
 | AC-4 | Select-String sweep shows no 1.8.0 in emitters/schemas/evals/tests; VERSION=1.9.0; CHANGELOG [1.9.0] present | passed |
-| AC-5 | Local: Pester 385 passed/0 failed (Install 80/0/2, Context+Coord 70/0/1, Task+Verify+Contracts 235/0/13), evals 8/8 both languages, fixtures green both harnesses; Bats env-blocked locally (no bats/WSL) — CI (Full) must prove it; push + CI/Full green + tag v1.9.0 + publish remain | partial |
+| AC-5 | Local: Pester 385 passed/0 failed (Install 80/0/2, Context+Coord 70/0/1, Task+Verify+Contracts 235/0/13), evals 8/8 both languages, fixtures green both harnesses; Bats proven in CI; CI (fast) + CI (Full) green on be8160a; annotated tag v1.9.0; release workflow published 3 assets (tar.gz/zip/SHA256SUMS) with archive extract+install + SHA256SUMS verification | passed |
 
 ## Approval gates
 
@@ -111,15 +111,16 @@ on disk but install.sh/install.ps1/build-bundle.sh still list only the original
   README Context Modules table (5→10) and Android/Kotlin detection notes +
   Supported Stacks row corrected to shipped v1.8.0 behavior (pre-existing
   doc drift found during review).
-- Bats: not run locally (no bats/WSL on this Windows host) — must be proven by CI (Full).
-  (`bash -n` errors on Bats `@test` DSL syntax are expected and pre-existing.)
+- Bats: proven in CI (Full) — Ubuntu + macOS jobs green (install_test.bats,
+  validate_context_test.bats, coordinator_test.bats). (`bash -n` errors on Bats
+  `@test` DSL syntax are expected and pre-existing.)
+- Published: commit be8160a pushed; CI (fast) + CI (Full) green on the release
+  SHA; annotated tag v1.9.0 pushed; release workflow green (metadata validation,
+  full CI on tagged SHA, bundle build, SHA256SUMS verification, no-leak gate,
+  tar.gz + zip extract/install tests) and published 3 assets as Latest
+  (`agentic-workflow-1.9.0.tar.gz`, `.zip`, `SHA256SUMS`).
 
 ## Remaining risks
 
-- Bats could not run on this Windows host (no bats/WSL) — CI (Full) Ubuntu/macOS
-  jobs must prove install_test.bats, validate_context_test.bats, and coordinator_test.bats.
-- No commit/push/tag made in this session (approval-gated remote writes); next is
-  push → CI + CI (Full) green on the release SHA → annotated tag v1.9.0 →
-  release workflow publishes → extracted-archive + upgrade tests green.
-- Skills as first-class category is explicitly out of scope until after v1.9.0
-  ships (new ADR likely ADR-0014).
+- None for v1.9.0. Next roadmap item — Skills as a first-class category — is
+  explicitly scoped after v1.9.0 (new ADR, likely ADR-0014).

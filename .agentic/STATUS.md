@@ -41,7 +41,7 @@
 
 ## Notes
 
-- **v1.9.0 — context-module expansion + orchestration maturity** (unreleased, on `master`): five new context modules (`performance`, `accessibility`, `i18n`, `mobile-adaptive`, `testing-infrastructure`) with 20 fixtures, installer/bundle/upgrade registration for all 10 modules; cross-platform coordinator integration tests in CI, `AGENTIC_WORKER_CMD` docs, stale-worktree GC policy, `coordinator.ps1` JSON-mode `Write-Log` parity fix; `protocol_version` sweep to `1.9.0`; `VERSION` bump to `1.9.0`. See `TASK-016`, `CHANGELOG.md` `[1.9.0]`, and `ROADMAP.md` (Items 4 + 5 done; Skills scoped after v1.9.0).
+- **v1.9.0 — context-module expansion + orchestration maturity** (released 2026-09-04 as annotated tag `v1.9.0`): five new context modules (`performance`, `accessibility`, `i18n`, `mobile-adaptive`, `testing-infrastructure`) with 20 fixtures, installer/bundle/upgrade registration for all 10 modules; cross-platform coordinator integration tests in CI, `AGENTIC_WORKER_CMD` docs, stale-worktree GC policy, `coordinator.ps1` JSON-mode `Write-Log` parity fix; `protocol_version` sweep to `1.9.0`; `VERSION` bump to `1.9.0`. See `TASK-016`, `CHANGELOG.md` `[1.9.0]`, and `ROADMAP.md` (Items 4 + 5 done; Skills scoped after v1.9.0).
 
 - **v1.8.0 — deeper Android/Kotlin detection** (unreleased, on `master`): root-level detection now interprets version catalogs (`gradle/libs.versions.toml`) and convention plugins (`id("...android...")`); per-module detection scans module build files and manifests without cross-module contamination; two new fixtures/goldens (`android-version-catalog`, `android-convention-plugin`); `protocol_version` sweep to `1.8.0`; `VERSION` bump to `1.8.0`. See `TASK-015`, `ADR-0013`, `CHANGELOG.md` `[1.8.0]`, and `ROADMAP.md`.
 
