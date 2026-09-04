@@ -28,6 +28,7 @@
 - [x] TASK-015 — v1.8.0 release bookkeeping: deeper Android/Kotlin detection (see `.agentic/tasks/TASK-015-v180-release-bookkeeping.md`)
 - [x] TASK-016 — v1.9.0 release bookkeeping: context-module expansion + orchestration maturity (see `.agentic/tasks/TASK-016-v190-release-bookkeeping.md`)
 - [x] TASK-017 — Skills as a first-class category (v1.10.0, ADR-0014): `.agentic/skills/` registry with three initial skills, `validate-skills.sh`/`.ps1` with cross-language parity and stable diagnostics, `skill-selection-v1` schema, three-leg handoff gate, installer/bundle/upgrade registration, eval-harness third leg, `protocol_version` sweep to 1.10.0 (see `.agentic/tasks/TASK-017-skills-first-class-category.md`)
+- [x] TASK-018 — v1.10.0 release publication: annotated tag, published assets, supersede bookkeeping (see `.agentic/tasks/TASK-018-v1100-release-publication.md`)
 
 ## Recent Decisions
 
@@ -43,9 +44,9 @@
 
 ## Notes
 
-- **v1.10.0 — skills as a first-class category** (in progress, `TASK-017`, ADR-0014): `.agentic/skills/` registry (`task-decomposition`, `verification-triage`, `release-verification`) with 17 fixtures, `validate-skills.sh`/`.ps1` parity, three-leg handoff gate, installer/bundle/upgrade registration, eval-harness `SKILLS_CONTRACT_VALID` leg on all eight scenarios; `protocol_version` sweep to `1.10.0`. See `TASK-017`, `CHANGELOG.md` `[1.10.0]`, and `ROADMAP.md` (Item 6 done).
+- **v1.10.0 — skills as a first-class category** (released 2026-09-04 as annotated tag `v1.10.0` on `48f7d91`): `.agentic/skills/` registry (`task-decomposition`, `verification-triage`, `release-verification`) with 17 fixtures, `validate-skills.sh`/`.ps1` parity, three-leg handoff gate, installer/bundle/upgrade registration, eval-harness `SKILLS_CONTRACT_VALID` leg on all eight scenarios; `protocol_version` sweep to `1.10.0`; published 3 assets as Latest (`agentic-workflow-1.10.0.tar.gz`, `.zip`, `SHA256SUMS`). The v1.9.0 release is marked as superseded. See `TASK-017`, `TASK-018`, `ADR-0014`, `CHANGELOG.md` `[1.10.0]`, and `ROADMAP.md` (Item 6 done).
 
-- **v1.9.0 — context-module expansion + orchestration maturity** (released 2026-09-04 as annotated tag `v1.9.0`): five new context modules (`performance`, `accessibility`, `i18n`, `mobile-adaptive`, `testing-infrastructure`) with 20 fixtures, installer/bundle/upgrade registration for all 10 modules; cross-platform coordinator integration tests in CI, `AGENTIC_WORKER_CMD` docs, stale-worktree GC policy, `coordinator.ps1` JSON-mode `Write-Log` parity fix; `protocol_version` sweep to `1.9.0`; `VERSION` bump to `1.9.0`. See `TASK-016`, `CHANGELOG.md` `[1.9.0]`, and `ROADMAP.md` (Items 4 + 5 done; Skills scoped after v1.9.0).
+- **v1.9.0 — context-module expansion + orchestration maturity** (released 2026-09-04 as annotated tag `v1.9.0`): five new context modules (`performance`, `accessibility`, `i18n`, `mobile-adaptive`, `testing-infrastructure`) with 20 fixtures, installer/bundle/upgrade registration for all 10 modules; cross-platform coordinator integration tests in CI, `AGENTIC_WORKER_CMD` docs, stale-worktree GC policy, `coordinator.ps1` JSON-mode `Write-Log` parity fix; `protocol_version` sweep to `1.9.0`; `VERSION` bump to `1.9.0`. See `TASK-016`, `CHANGELOG.md` `[1.9.0]`, and `ROADMAP.md` (Items 4 + 5 done; Skills scoped after v1.9.0). Superseded by v1.10.0.
 
 - **v1.8.0 — deeper Android/Kotlin detection** (unreleased, on `master`): root-level detection now interprets version catalogs (`gradle/libs.versions.toml`) and convention plugins (`id("...android...")`); per-module detection scans module build files and manifests without cross-module contamination; two new fixtures/goldens (`android-version-catalog`, `android-convention-plugin`); `protocol_version` sweep to `1.8.0`; `VERSION` bump to `1.8.0`. See `TASK-015`, `ADR-0013`, `CHANGELOG.md` `[1.8.0]`, and `ROADMAP.md`.
 
