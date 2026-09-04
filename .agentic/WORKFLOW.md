@@ -21,6 +21,7 @@ DISCOVER → CLASSIFY RISK → PLAN → IMPLEMENT → VERIFY → HANDOFF
    - Inspect package configuration (`package.json`, `Cargo.toml`, `pyproject.toml`, `go.mod`, etc.).
    - Inspect `.agentic/checks.tsv` — it is the project's authoritative definition of done.
    - Inspect `.agentic/context/INDEX.md` — select every context module whose *Load when* triggers match the task, and record each selection in the task file under `## Context modules` before planning. Load only triggered modules, never all of them.
+   - Inspect `.agentic/skills/INDEX.md` — invoke every skill whose *Invoked when* triggers match the task, and record each invocation in the task file under `## Skills` before the corresponding work begins. Load only invoked skills, never all of them.
 2. **Search First**:
    - Search existing patterns before writing new utilities.
    - Respect established naming conventions, linting rules, and directory structure.
@@ -106,14 +107,16 @@ Before planning, classify the task's risk profile per `.agentic/profiles/README.
      progresses.
    - Before handoff, mark the task `done` and run the single public gate:
      `.agentic/scripts/validate-handoff.sh` or
-     `.agentic/scripts/validate-handoff.ps1`. The composite gate runs BOTH
-     production validators in handoff mode — `validate-task` (risk profile,
-     evidence, approvals) and `validate-context` (context-module selections)
-     — against the same file, so results always refer to the same task and
-     profile. It requires `Status: done`, resolved evidence, checked approval
-     gates, known/duplicate-free/rationale-backed module selections, and a
-     task profile that satisfies every selected module's minimum profile.
-     Exit codes: `0` both gates VALID, `1` any INVALID, `2` any BLOCKED.
+     `.agentic/scripts/validate-handoff.ps1`. The composite gate runs ALL
+     THREE production validators in handoff mode — `validate-task` (risk profile,
+     evidence, approvals), `validate-context` (context-module selections), and
+     `validate-skills` (skill invocations) — against the same file, so results
+     always refer to the same task and profile. It requires `Status: done`,
+     resolved evidence, checked approval gates, known/duplicate-free/
+     rationale-backed module selections AND skill invocations, and a task
+     profile that satisfies every selected module's and every invoked skill's
+     minimum profile.
+     Exit codes: `0` all gates VALID, `1` any INVALID, `2` any BLOCKED.
    - Validate with the composite gate *after* marking the task done, so the
      recorded state is the one that gets reviewed.
 2. **Update State**:

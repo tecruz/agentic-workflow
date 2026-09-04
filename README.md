@@ -222,10 +222,12 @@ DISCOVER → CLASSIFY RISK → PLAN → IMPLEMENT → VERIFY → HANDOFF
    three evidence-based repair cycles; never weaken a test to go green.
  6. **Handoff** — mark the task `done` under `## Status`, then validate it with
     `.agentic/scripts/validate-handoff.sh` / `validate-handoff.ps1`. The
-    composite gate runs both production validators in handoff mode —
+    composite gate runs all three production validators in handoff mode —
     `validate-task --handoff` (requires `Status: done`, resolved evidence, and
-    checked approval gates) and `validate-context --handoff` (known,
-    rationale-backed module selections at a compatible risk profile) — then
+    checked approval gates), `validate-context --handoff` (known,
+    rationale-backed module selections at a compatible risk profile), and
+    `validate-skills --handoff` (known, rationale-backed skill invocations at
+    a compatible risk profile) — then
     report files changed, verification commands with exit
     codes and results, pre-existing failures, environment blockers, remaining
     risks, and commit status. Commits happen only when explicitly requested or
@@ -294,6 +296,34 @@ Specialist knowledge lives in portable, on-demand modules under
   `MODULE_PROFILE_TOO_LOW`, `MODULE_SELECTION_UNRESOLVED`,
   `CONTEXT_SECTION_MISSING`) and JSON output validated by
   `.agentic/schemas/context-selection-v1.schema.json`.
+
+---
+
+## Skills
+
+Reusable procedures live in the on-demand registry under `.agentic/skills/`,
+parallel to context modules:
+
+| Skill | Minimum profile | Invoked when |
+| :--- | :--- | :--- |
+| `task-decomposition` | `standard` | breaking a request into atomic, verifiable steps before planning |
+| `verification-triage` | `standard` | diagnosing a check failure, forming a root-cause hypothesis, repairing |
+| `release-verification` | `standard` | confirming VERSION/CHANGELOG/tag agreement, bundle and archive integrity |
+
+- During **PLAN** agents inspect `.agentic/skills/INDEX.md`, invoke every
+  skill whose *Invoked when* triggers match the task, and record each
+  invocation under `## Skills` in the task file — known ID, recognized
+  version, an `invoked` confirmation, and a real rationale.
+- Only invoked skills are loaded; nothing imports every skill into every
+  session. Work that invokes no procedure records `- None required`.
+- A skill's minimum risk profile is a floor for the task's profile.
+- `.agentic/scripts/validate-skills.sh` / `validate-skills.ps1` structurally
+  validate invocations (exit `0` VALID, `1` INVALID, `2` BLOCKED) with stable
+  diagnostic codes (`SKILL_UNKNOWN`, `SKILL_DUPLICATE`,
+  `SKILL_RATIONALE_MISSING`, `SKILL_VERSION_UNSUPPORTED`,
+  `SKILL_PROFILE_TOO_LOW`, `SKILL_SELECTION_UNRESOLVED`,
+  `SKILLS_SECTION_MISSING`) and JSON output validated by
+  `.agentic/schemas/skill-selection-v1.schema.json`.
 
 ---
 
@@ -378,8 +408,8 @@ CI on any mismatch. Both the Bats and Pester suites run on all three platforms;
 │   └── build-bundle.sh            # Packages the clean adopter distribution
 ├── evals/                         # Offline behavioral evaluations (dev-repo only, never bundled)
 ├── tests/
-│   ├── bats/                      # Bats suites (verify.sh + install.sh + validate-task.sh)
-│   ├── pester/                    # Pester suites (verify.ps1 + install.ps1 + validate-task.ps1)
+│   ├── bats/                      # Bats suites (verify.sh + install.sh + validate-task.sh + validate-skills.sh)
+│   ├── pester/                    # Pester suites (verify.ps1 + install.ps1 + validate-task.ps1 + validate-skills.ps1)
 │   └── fixtures/                  # Fixture projects + smoke harnesses
 ├── docs/decisions/                # This repository's ADRs
 └── .agentic/
@@ -392,6 +422,7 @@ CI on any mismatch. Both the Bats and Pester suites run on all three platforms;
     ├── rules/                     # Technology-agnostic standards
     ├── profiles/                  # Risk profiles (prototype, standard, high-assurance)
     ├── context/                   # Portable, on-demand specialist modules + INDEX
+    ├── skills/                    # Portable, on-demand procedure skills + INDEX
     ├── tasks/                     # One file per task
     ├── decisions/                 # Immutable Architecture Decision Records
     ├── templates/                 # Feature spec, bug report, refactor plan, task file
@@ -402,6 +433,8 @@ CI on any mismatch. Both the Bats and Pester suites run on all three platforms;
         ├── validate-task.ps1      # Task-file validator (Windows)
         ├── validate-context.sh    # Context-selection validator (Linux/macOS)
         ├── validate-context.ps1   # Context-selection validator (Windows)
+        ├── validate-skills.sh     # Skill-invocation validator (Linux/macOS)
+        ├── validate-skills.ps1    # Skill-invocation validator (Windows)
         ├── validate-handoff.sh    # Composite handoff gate (Linux/macOS)
         └── validate-handoff.ps1   # Composite handoff gate (Windows)
 ```

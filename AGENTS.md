@@ -29,7 +29,7 @@ DISCOVER → CLASSIFY RISK → PLAN → IMPLEMENT → VERIFY → HANDOFF
 3. **Plan**: Decompose the request into atomic, verifiable steps. Create or update a task file in `.agentic/tasks/` using `.agentic/templates/task.md`, declaring the profile and its required evidence. Ask before destructive or ambiguous actions.
 4. **Implement**: Make minimal, style-matching changes per `.agentic/rules/`. Comments explain *why*, not *what*.
 5. **Verify**: Run the project's checks via `.agentic/scripts/verify.sh` / `verify.ps1` (see Section 7). Attempt at most three evidence-based repair cycles; then stop, preserve the latest useful state, and report the blocker. Never weaken a failing test merely to go green.
-6. **Handoff**: Mark the task `done` under `## Status`, then validate it with `.agentic/scripts/validate-handoff.sh` / `validate-handoff.ps1` — the single public gate that runs both `validate-task --handoff` and `validate-context --handoff`. Report files changed, verification commands run with exit codes and results, pre-existing failures, environment blockers, remaining risks, whether any commit was made, and the profile's handoff evidence. Commit only when explicitly requested or permitted by documented project policy.
+6. **Handoff**: Mark the task `done` under `## Status`, then validate it with `.agentic/scripts/validate-handoff.sh` / `validate-handoff.ps1` — the single public gate that runs all three production validators in handoff mode (`validate-task --handoff`, `validate-context --handoff`, and `validate-skills --handoff`). Report files changed, verification commands run with exit codes and results, pre-existing failures, environment blockers, remaining risks, whether any commit was made, and the profile's handoff evidence. Commit only when explicitly requested or permitted by documented project policy.
 
 ---
 
@@ -88,6 +88,15 @@ Specialist knowledge lives in portable, on-demand modules under `.agentic/contex
 - Load only triggered modules; do **not** import every module into every session.
 - A selection records: known module ID, recognized version, a `loaded` confirmation, and a real rationale. Duplicates are rejected; a module's minimum risk profile is a floor for the task's profile.
 - Selections are validated by `.agentic/scripts/validate-context.sh` / `validate-context.ps1` (exit codes: 0 VALID, 1 INVALID, 2 BLOCKED).
+
+## 5.3 Skills
+
+Reusable procedures live in the on-demand registry under `.agentic/skills/` — not in this always-loaded protocol:
+
+- During **PLAN**, inspect `.agentic/skills/INDEX.md`; invoke every skill whose *Invoked when* triggers match the task, and record each invocation under `## Skills` in the task file before the corresponding work begins.
+- Load only invoked skills; do **not** import every skill into every session.
+- An invocation records: known skill ID, recognized version, an `invoked` confirmation, and a real rationale. Duplicates are rejected; a skill's minimum risk profile is a floor for the task's profile.
+- Invocations are validated by `.agentic/scripts/validate-skills.sh` / `validate-skills.ps1` (exit codes: 0 VALID, 1 INVALID, 2 BLOCKED).
 
 ---
 

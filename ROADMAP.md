@@ -7,7 +7,7 @@
 
 ## Current state
 
-- **Version**: `1.9.0` (workspace/monorepo detection landed; deeper Android/Kotlin detection landed; context-module expansion + orchestration maturity landed)
+- **Version**: `1.10.0` (workspace/monorepo detection landed; deeper Android/Kotlin detection landed; context-module expansion + orchestration maturity landed; skills as a first-class category landed)
 - The core loop (`DISCOVER → CLASSIFY RISK → PLAN → IMPLEMENT → VERIFY →
   HANDOFF`), the honest verification model, the non-destructive installer, risk
   profiles + evidence contracts, context modules + behavioral evals, and the
@@ -82,11 +82,21 @@ The v1.6.0 coordinator replaced the v1.5.0 stub. Remaining follow-up:
 - [x] Decide and record a policy for stale worktree GC beyond manual
       `--cleanup`.
 
+### 6. Skills as a first-class category — **done in v1.10.0**
+ADR-0007 anticipated "skills" as a future extension; the on-demand skills
+registry now ships parallel to context modules (ADR-0014):
+
+- [x] `.agentic/skills/` registry (`INDEX.md` + three initial skills:
+      `task-decomposition`, `verification-triage`, `release-verification`).
+- [x] `validate-skills.sh/ps1` with Bash+PowerShell parity, shared fixtures,
+      `skill-selection-v1` schema, and stable `SKILL_*` diagnostics.
+- [x] Three-leg handoff gate (`validate-task` + `validate-context` +
+      `validate-skills`); task template carries `## Skills`; AGENTS.md §5.3.
+- [x] Installer/bundle/upgrade registration with N-1 (v1.9.0→v1.10.0)
+      migration coverage; eval harness enforces the third contract leg.
+
 ## Later / ideas (no target)
 
-- **Skills as a first-class category** — ADR-0007 anticipated "skills" as a
-  future extension; explore an on-demand skills registry parallel to context
-  modules.
 - **Optional-check policy review** — re-examine whether `optional` check
   failures should ever be promotable to blocking warnings on CI.
 - **More agent-tool adapters** — add import-only entry points as new tools ship

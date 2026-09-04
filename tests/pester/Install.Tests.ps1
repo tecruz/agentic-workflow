@@ -118,6 +118,27 @@ Describe 'install.ps1' {
         finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
     }
 
+    It 'fresh install creates the skills registry and skills validators' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp *> $null
+            Test-Path (Join-Path $tmp '.agentic\skills\INDEX.md') | Should -Be $true
+            foreach ($sk in @('task-decomposition','verification-triage','release-verification')) {
+                Test-Path (Join-Path $tmp ".agentic\skills\$sk\SKILL.md") | Should -Be $true
+            }
+            Test-Path (Join-Path $tmp '.agentic\scripts\validate-skills.ps1') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\schemas\skill-selection-v1.schema.json') | Should -Be $true
+            $manifest = Get-Content -Raw (Join-Path $tmp '.agentic\install-manifest.tsv')
+            $manifest -match "\.agentic/skills/INDEX\.md`tmanaged" | Should -Be $true
+            foreach ($sk in @('task-decomposition','verification-triage','release-verification')) {
+                $manifest -match "\.agentic/skills/$sk/SKILL\.md`tmanaged" | Should -Be $true
+            }
+            $manifest -match "\.agentic/scripts/validate-skills\.ps1`tmanaged" | Should -Be $true
+            $manifest -match "\.agentic/schemas/skill-selection-v1\.schema\.json`tmanaged" | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
     It 'fresh install creates the orchestration stub and records it as managed' {
         $tmp = New-TestDir
         try {
@@ -1466,6 +1487,14 @@ Describe 'install.ps1' {
             Test-Path (Join-Path $bundleRoot '.agentic\scripts\validate-handoff.sh') | Should -Be $true
             Test-Path (Join-Path $bundleRoot '.agentic\scripts\validate-handoff.ps1') | Should -Be $true
             Test-Path (Join-Path $bundleRoot '.agentic\schemas\context-selection-v1.schema.json') | Should -Be $true
+            # v1.10.0 payload: skills registry, validators, and schema ship.
+            Test-Path (Join-Path $bundleRoot '.agentic\skills\INDEX.md') | Should -Be $true
+            foreach ($sk in @('task-decomposition','verification-triage','release-verification')) {
+                Test-Path (Join-Path $bundleRoot ".agentic\skills\$sk\SKILL.md") | Should -Be $true
+            }
+            Test-Path (Join-Path $bundleRoot '.agentic\scripts\validate-skills.ps1') | Should -Be $true
+            Test-Path (Join-Path $bundleRoot '.agentic\scripts\validate-skills.sh') | Should -Be $true
+            Test-Path (Join-Path $bundleRoot '.agentic\schemas\skill-selection-v1.schema.json') | Should -Be $true
             Test-Path (Join-Path $bundleRoot '.agentic\orchestration\README.md') | Should -Be $true
             Test-Path (Join-Path $bundleRoot '.agentic\orchestration\coordinator.sh') | Should -Be $true
         }
@@ -1700,6 +1729,14 @@ Describe 'install.ps1' {
             Test-Path (Join-Path $tmp '.agentic\scripts\validate-handoff.ps1') | Should -Be $true
             Test-Path (Join-Path $tmp '.agentic\scripts\validate-handoff.sh') | Should -Be $true
             Test-Path (Join-Path $tmp '.agentic\schemas\context-selection-v1.schema.json') | Should -Be $true
+            # v1.10.0 additions landed as managed files.
+            Test-Path (Join-Path $tmp '.agentic\skills\INDEX.md') | Should -Be $true
+            foreach ($sk in @('task-decomposition','verification-triage','release-verification')) {
+                Test-Path (Join-Path $tmp ".agentic\skills\$sk\SKILL.md") | Should -Be $true
+            }
+            Test-Path (Join-Path $tmp '.agentic\scripts\validate-skills.ps1') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\scripts\validate-skills.sh') | Should -Be $true
+            Test-Path (Join-Path $tmp '.agentic\schemas\skill-selection-v1.schema.json') | Should -Be $true
             foreach ($p in @('.agentic/context/INDEX.md', '.agentic/context/performance/MODULE.md', '.agentic/context/accessibility/MODULE.md', '.agentic/context/i18n/MODULE.md', '.agentic/context/mobile-adaptive/MODULE.md', '.agentic/context/testing-infrastructure/MODULE.md', '.agentic/scripts/validate-context.sh', '.agentic/scripts/validate-handoff.sh', '.agentic/schemas/context-selection-v1.schema.json')) {
                 (Get-Content -Raw (Join-Path $tmp '.agentic\install-manifest.tsv')) -match [regex]::Escape("$p`tmanaged`t") | Should -Be $true
             }
@@ -1758,10 +1795,50 @@ Final run.
             & pwsh -NoProfile -File $valCtx (Join-Path $tmp '.agentic\tasks\TASK-901-context.md') *> $null
             $LASTEXITCODE | Should -Be 0
 
+            # Step 7b: The installed skills validator works against the installed registry.
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\tasks\TASK-902-skills.md') -Value @'
+# TASK-902: skills smoke
+
+## Status
+
+Status: done
+Updated: 2026-09-04
+
+## Risk profile
+
+Profile: standard
+
+## Context modules
+
+- None selected — skills smoke only
+
+## Skills
+
+- verification-triage v1 invoked — upgrade smoke invocation
+
+## Verification
+
+### Baseline
+
+Baseline run.
+
+### Final
+
+Final run.
+
+## Remaining risks
+
+- None identified
+'@
+            $valSkl = Join-Path $tmp '.agentic\scripts\validate-skills.ps1'
+            & pwsh -NoProfile -File $valSkl (Join-Path $tmp '.agentic\tasks\TASK-902-skills.md') *> $null
+            $LASTEXITCODE | Should -Be 0
+
             # Step 8: Uninstall removes the registry but preserves seeds.
             & (Join-Path $currentBundle 'install.ps1') -Target $tmp -Uninstall *> $null
             $LASTEXITCODE | Should -Be 0
             Test-Path (Join-Path $tmp '.agentic\context') | Should -Be $false
+            Test-Path (Join-Path $tmp '.agentic\skills') | Should -Be $false
             Test-Path (Join-Path $tmp '.agentic\ARCHITECTURE.md') | Should -Be $true
             Test-Path (Join-Path $tmp '.agentic\tasks\TASK-900-adopter.md') | Should -Be $true
         }

@@ -9,12 +9,13 @@ required	sh-syntax-install	.	bash	-n	install.sh
 required	sh-syntax-verify	.	bash	-n	.agentic/scripts/verify.sh
 required	sh-syntax-validate-task	.	bash	-n	.agentic/scripts/validate-task.sh
 required	sh-syntax-validate-context	.	bash	-n	.agentic/scripts/validate-context.sh
+required	sh-syntax-validate-skills	.	bash	-n	.agentic/scripts/validate-skills.sh
 required	sh-syntax-validate-handoff	.	bash	-n	.agentic/scripts/validate-handoff.sh
 required	sh-syntax-coordinator	.	bash	-n	.agentic/orchestration/coordinator.sh
-required	handoff-gate	.	bash	.agentic/scripts/validate-handoff.sh	.agentic/tasks/TASK-009-orchestration-full-implementation.md
+required	handoff-gate	.	bash	.agentic/scripts/validate-handoff.sh	.agentic/tasks/TASK-017-skills-first-class-category.md
 required	ps-syntax	.	pwsh	-NoProfile	-File	tests/ps-syntax.ps1
 required	bats	.	bats	tests/bats
 required	pester	.	pwsh	-NoProfile	-Command	Import-Module Pester -MinimumVersion 5.0; $r = Invoke-Pester -Script 'tests/pester' -PassThru; if ($r.FailedCount -gt 0) { exit 1 }
 required	evals-sh	.	bash	evals/run-evals.sh
 required	evals-ps	.	pwsh	-NoProfile	-File	evals/run-evals.ps1
-optional	shellcheck	.	shellcheck	install.sh	.agentic/scripts/verify.sh	.agentic/scripts/validate-task.sh	.agentic/scripts/validate-context.sh	.agentic/scripts/validate-handoff.sh	.agentic/orchestration/coordinator.sh
+optional	shellcheck	.	shellcheck	install.sh	.agentic/scripts/verify.sh	.agentic/scripts/validate-task.sh	.agentic/scripts/validate-context.sh	.agentic/scripts/validate-skills.sh	.agentic/scripts/validate-handoff.sh	.agentic/orchestration/coordinator.sh

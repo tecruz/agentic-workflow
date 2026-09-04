@@ -65,6 +65,10 @@ Threat model: long lock windows starving order writes and an unrecoverable parti
 
 - database-migrations v1 loaded — schema change with backfill implications
 
+## Skills
+
+- task-decomposition v1 invoked — migration broken into schema, backfill, and verify steps
+
 ## Verification
 
 ### Baseline

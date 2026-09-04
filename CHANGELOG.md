@@ -5,6 +5,44 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.0] - 2026-09-04
+
+### Added
+- **Skills as a first-class category (ADR-0014, ROADMAP Item 6).** An
+  on-demand skills registry parallel to context modules: `.agentic/skills/`
+  ships `INDEX.md` plus three initial skills (`task-decomposition`,
+  `verification-triage`, `release-verification`), each declaring ID, version,
+  load triggers, minimum risk profile, required context, approval gates,
+  required evidence, and prohibited shortcuts.
+  - New structural validators `.agentic/scripts/validate-skills.sh` /
+    `validate-skills.ps1` (exit codes: 0 VALID, 1 INVALID, 2 BLOCKED) enforce
+    the `## Skills` task contract — known ID, no duplicates, recognized
+    version, `invoked` confirmation, meaningful rationale, `None required`
+    sentinel exclusivity, and the minimum-profile floor — with Bash+PowerShell
+    parity over 17 shared fixtures, JSON output validated by the new
+    `.agentic/schemas/skill-selection-v1.schema.json`, and stable `SKILL_*` /
+    `SKILLS_*` diagnostic codes.
+  - The handoff gate (`.agentic/scripts/validate-handoff.sh` / `.ps1`) now
+    runs all three production validators in handoff mode; the task template
+    carries `## Skills`; `AGENTS.md` gains §5.3 and `.agentic/WORKFLOW.md`
+    records skills inspection during PLAN.
+  - All new files are `managed` (both installers, `build-bundle.sh`) with
+    fresh-install, bundle, and N-1 (v1.9.0→v1.10.0) upgrade test coverage;
+    the eval harness enforces the third contract leg (`SKILLS_CONTRACT_VALID`)
+    across all eight scenarios.
+
+### Changed
+- `.agentic/VERSION` and `protocol_version` swept to `1.10.0` across all
+  emitters (coordinator, validate-task, validate-context, validate-skills,
+  verify — bash+ps1 each), schemas, `evals/` runners/artifacts, and test
+  expectations.
+- The `checks.tsv` handoff-gate check now targets
+  `.agentic/tasks/TASK-017-skills-first-class-category.md` (the task proving
+  the three-leg gate), following the precedent that moved the target from
+  TASK-006 to TASK-009 when the contract evolved.
+- `ROADMAP.md` Item 6 marked done with version line at `1.10.0`; README gains
+  a Skills section and updated handoff/file-tree docs.
+
 ## [1.9.0] - 2026-09-03
 
 ### Added

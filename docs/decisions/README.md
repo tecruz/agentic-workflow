@@ -20,3 +20,4 @@ project-owned copy of this layout under `.agentic/decisions/`.
 | [ADR-0011](ADR-0011-isolated-multi-agent-task-coordination.md) | Isolated multi-agent task coordination | Accepted (amended v1.6.0) |
 | [ADR-0012](ADR-0012-workspace-monorepo-detection.md) | Workspace and monorepo detection | Accepted |
 | [ADR-0013](ADR-0013-deeper-android-kotlin-detection.md) | Deeper Android and Kotlin detection | Accepted |
+| [ADR-0014](ADR-0014-skills-as-first-class-category.md) | Skills as a first-class category | Accepted |

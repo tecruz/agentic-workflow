@@ -56,6 +56,24 @@ minimum risk profile. When no module applies use exactly:
 - None selected — <optional: why no module applies>
 -->
 
+## Skills
+
+- None required
+
+<!-- Inspect .agentic/skills/INDEX.md during PLAN. For each skill whose
+"Invoked when" triggers match this task, record one bullet BEFORE the
+corresponding work begins:
+
+- verification-triage v1 invoked — task triages a failing check before repairing
+
+The line must carry: known skill ID, recognized version (v<N> matching the
+skill), the invoked confirmation token, and a real rationale. Duplicate
+skills are rejected. The task's profile must satisfy every invoked skill's
+minimum risk profile. When no skill applies use exactly:
+
+- None required — <optional: why no skill applies>
+-->
+
 ## Files changed
 
 - [paths]

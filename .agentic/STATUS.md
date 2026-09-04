@@ -27,6 +27,7 @@
 - [x] TASK-014 — Workspace and monorepo detection (v1.7.0): manifest-driven discovery for pnpm-workspace.yaml, package.json workspaces, Cargo workspace, pom.xml modules, settings.gradle include, with Bash+PowerShell parity and 7 new fixtures (see `.agentic/tasks/TASK-014-workspace-monorepo-detection.md`)
 - [x] TASK-015 — v1.8.0 release bookkeeping: deeper Android/Kotlin detection (see `.agentic/tasks/TASK-015-v180-release-bookkeeping.md`)
 - [x] TASK-016 — v1.9.0 release bookkeeping: context-module expansion + orchestration maturity (see `.agentic/tasks/TASK-016-v190-release-bookkeeping.md`)
+- [x] TASK-017 — Skills as a first-class category (v1.10.0, ADR-0014): `.agentic/skills/` registry with three initial skills, `validate-skills.sh`/`.ps1` with cross-language parity and stable diagnostics, `skill-selection-v1` schema, three-leg handoff gate, installer/bundle/upgrade registration, eval-harness third leg, `protocol_version` sweep to 1.10.0 (see `.agentic/tasks/TASK-017-skills-first-class-category.md`)
 
 ## Recent Decisions
 
@@ -38,8 +39,11 @@
 - ADR-0011 — Isolated multi-agent task coordination (see `docs/decisions/ADR-0011-isolated-multi-agent-task-coordination.md`)
 - ADR-0012 — Workspace and monorepo detection (see `docs/decisions/ADR-0012-workspace-monorepo-detection.md`)
 - ADR-0013 — Deeper Android and Kotlin detection (see `docs/decisions/ADR-0013-deeper-android-kotlin-detection.md`)
+- ADR-0014 — Skills as a first-class category (see `docs/decisions/ADR-0014-skills-as-first-class-category.md`)
 
 ## Notes
+
+- **v1.10.0 — skills as a first-class category** (in progress, `TASK-017`, ADR-0014): `.agentic/skills/` registry (`task-decomposition`, `verification-triage`, `release-verification`) with 17 fixtures, `validate-skills.sh`/`.ps1` parity, three-leg handoff gate, installer/bundle/upgrade registration, eval-harness `SKILLS_CONTRACT_VALID` leg on all eight scenarios; `protocol_version` sweep to `1.10.0`. See `TASK-017`, `CHANGELOG.md` `[1.10.0]`, and `ROADMAP.md` (Item 6 done).
 
 - **v1.9.0 — context-module expansion + orchestration maturity** (released 2026-09-04 as annotated tag `v1.9.0`): five new context modules (`performance`, `accessibility`, `i18n`, `mobile-adaptive`, `testing-infrastructure`) with 20 fixtures, installer/bundle/upgrade registration for all 10 modules; cross-platform coordinator integration tests in CI, `AGENTIC_WORKER_CMD` docs, stale-worktree GC policy, `coordinator.ps1` JSON-mode `Write-Log` parity fix; `protocol_version` sweep to `1.9.0`; `VERSION` bump to `1.9.0`. See `TASK-016`, `CHANGELOG.md` `[1.9.0]`, and `ROADMAP.md` (Items 4 + 5 done; Skills scoped after v1.9.0).
 

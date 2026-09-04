@@ -65,6 +65,10 @@ fixture scope.
 
 - security-review v1 loaded — fixture exercises the security-review floor
 
+## Skills
+
+- verification-triage v1 invoked — fixture exercises the skills leg of the handoff gate
+
 ## Verification
 
 ### Baseline

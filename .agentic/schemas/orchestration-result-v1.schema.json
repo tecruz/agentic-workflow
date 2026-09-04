@@ -7,7 +7,7 @@
   "required": ["schema_version", "protocol_version", "kind", "result", "exit_code", "task_file", "worktree", "workers", "summary"],
   "properties": {
     "schema_version": { "type": "integer", "const": 1 },
-    "protocol_version": { "type": "string", "const": "1.9.0" },
+    "protocol_version": { "type": "string", "const": "1.10.0" },
     "kind": { "type": "string", "const": "orchestration_result" },
     "result": { "type": "string", "enum": ["PASS", "FAIL", "BLOCKED"] },
     "exit_code": { "type": "integer", "enum": [0, 1, 2] },

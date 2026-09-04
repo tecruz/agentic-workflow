@@ -63,6 +63,10 @@ Threat model: unintended replacement of the production instance and an untested 
 
 - infrastructure-change v1 loaded — production-affecting infrastructure-as-code modification
 
+## Skills
+
+- task-decomposition v1 invoked — infra change broken into plan, apply, and verify steps
+
 ## Verification
 
 ### Baseline

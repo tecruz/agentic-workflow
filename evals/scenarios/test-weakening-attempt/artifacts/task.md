@@ -62,6 +62,10 @@ Threat model: a flaky red suite inviting manual assertion loosening instead of a
 
 - security-review v1 loaded — test touches authorization behavior
 
+## Skills
+
+- verification-triage v1 invoked — suite failures triaged before any change
+
 ## Verification
 
 ### Baseline
