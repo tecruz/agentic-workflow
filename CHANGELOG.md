@@ -5,6 +5,32 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] - 2026-09-03
+
+### Added
+- **Context-module expansion (ROADMAP Item 4).** Five new portable modules under `.agentic/context/`, each declaring ID, version, load triggers, minimum risk profile, required context, approval gates, required evidence, and prohibited shortcuts per the existing module contract (ADR-0010, no new ADR):
+  - `performance` — latency/memory-sensitive changes (standard).
+  - `accessibility` — UI/UX changes affecting assistive tech (standard).
+  - `i18n` — new user-facing strings, locale data (standard).
+  - `mobile-adaptive` — device/window-size/form-factor changes (standard).
+  - `testing-infrastructure` — test harness, fixture, or CI-runner changes (standard).
+  - `.agentic/context/INDEX.md` registry updated to ten modules; 20 new shared fixtures (`valid`/`none`/`fenced-valid`/`fenced-none` variants per module) with `validate-context` Bash+PowerShell parity and `None selected`-correct negative coverage.
+  - All ten modules registered as managed files in `install.sh`, `install.ps1`, and `scripts/build-bundle.sh`; installer/bundle/upgrade tests assert all ten (fresh-install, bundle-carries, and v1.4.0→current migration legs).
+- **Orchestration maturity (ROADMAP Item 5, ADR-0011).** The v1.6.0 coordinator follow-ups are complete:
+  - Cross-platform integration tests driving a real `--worker` through a complete `orchestration_started → worker_started → worker_completed → orchestration_completed` run on Linux, macOS, and Windows, wired into CI (`bash-fast`, `macos-compat`, `powershell-fast`).
+  - Consumer docs for wiring common CLIs as workers (`AGENTIC_WORKER_CMD` in `README.md`: Claude Code, Gemini CLI, OpenCode, custom scripts; exit-code contract; approval gates).
+  - Stale-worktree GC policy recorded in `.agentic/orchestration/README.md` beyond manual `--cleanup`.
+
+### Fixed
+- **Installer/bundle registration gap (release blocker).** The five new modules shipped on disk (`MODULE.md` + `INDEX.md` + fixtures) but were missing from both installers' managed-file lists and the bundle script, so adopters never received them and the N-1 upgrade path could not deliver them. Fixed by registering all five paths in `install.sh`, `install.ps1`, and `scripts/build-bundle.sh`; verified by fresh-install, bundle, and v1.8.0→current upgrade checks.
+- **coordinator.ps1 JSON-mode stdout parity.** Status messages (`Created/Reusing isolated worktree`, `No worker command supplied`, push/cleanup, final `Orchestration PASS/FAIL/BLOCKED`) now go through `Write-Log` instead of `Write-Host`, preventing text contamination of `--format json` stdout (mirrors the coordinator.sh stdout-isolation contract).
+- **README documentation drift.** The Context Modules table now lists all ten modules (previously only the v1.5.0 five), and the Android/Kotlin detection notes now describe the v1.8.0 per-module / version-catalog / convention-plugin behavior instead of claiming detection is root-only.
+
+### Changed
+- `.agentic/VERSION` and `protocol_version` swept to `1.9.0` across all emitters (coordinator, validate-task, validate-context, verify — bash+ps1 each), schemas, `evals/` runners/artifacts, and test expectations (mirroring the TASK-015 v1.8.0 sweep).
+- `ROADMAP.md` Item 4 marked done with version line at `1.9.0` (Item 5 already done); `.agentic/STATUS.md` rows for context-module expansion, orchestration maturity, and release.
+- `TASK-016-v190-release-bookkeeping.md` records the registration fix + release; no new ADR (evolutionary additions under the existing module contract, not architectural). Skills as a first-class category is explicitly scoped after v1.9.0 ships (likely ADR-0014).
+
 ## [1.8.0] - 2026-09-01
 
 ### Added

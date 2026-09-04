@@ -93,7 +93,7 @@ Describe 'validate-context.ps1 context-selection validator' {
         $doc.kind | Should -Be 'context_validation_result'
         $doc.result | Should -Be 'VALID'
         $doc.exit_code | Should -Be 0
-        $doc.protocol_version | Should -Be '1.8.0'
+        $doc.protocol_version | Should -Be '1.9.0'
         @($doc.selected_modules).Count | Should -Be 1
         $doc.selected_modules[0].id | Should -Be 'security-review'
         $doc.selected_modules[0].version | Should -Be 1

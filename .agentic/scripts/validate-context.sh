@@ -157,7 +157,7 @@ if profile in ("prototype", "standard", "high-assurance"):
 
 doc = {
     "schema_version": 1,
-    "protocol_version": "1.8.0",
+    "protocol_version": "1.9.0",
     "kind": "context_validation_result",
     "mode": mode,
     "result": res_str,
@@ -714,7 +714,7 @@ for chunk in os.environ.get("AGENTIC_SELECTED", "").split():
     selected.append({"id": mid, "version": int(mver)})
 doc = {
     "schema_version": 1,
-    "protocol_version": "1.8.0",
+    "protocol_version": "1.9.0",
     "kind": "context_validation_result",
     "mode": mode,
     "result": "VALID",

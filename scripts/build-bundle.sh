@@ -80,6 +80,11 @@ mkdir -p "$BUNDLE/.agentic/rules" \
          "$BUNDLE/.agentic/context/dependency-changes" \
          "$BUNDLE/.agentic/context/infrastructure-change" \
          "$BUNDLE/.agentic/context/public-api-change" \
+         "$BUNDLE/.agentic/context/performance" \
+         "$BUNDLE/.agentic/context/accessibility" \
+         "$BUNDLE/.agentic/context/i18n" \
+         "$BUNDLE/.agentic/context/mobile-adaptive" \
+         "$BUNDLE/.agentic/context/testing-infrastructure" \
          "$BUNDLE/.agentic/orchestration"
 
 # Root-level protocol entry points and installers.
@@ -102,7 +107,7 @@ cp "$ROOT/.agentic/tasks/README.md" "$BUNDLE/.agentic/tasks/"
 cp "$ROOT/.agentic/decisions/README.md" "$BUNDLE/.agentic/decisions/"
 cp "$ROOT"/.agentic/schemas/*.json "$BUNDLE/.agentic/schemas/"
 cp "$ROOT/.agentic/context/INDEX.md" "$BUNDLE/.agentic/context/"
-for _mod in security-review database-migrations dependency-changes infrastructure-change public-api-change; do
+for _mod in security-review database-migrations dependency-changes infrastructure-change public-api-change performance accessibility i18n mobile-adaptive testing-infrastructure; do
     cp "$ROOT/.agentic/context/$_mod/MODULE.md" "$BUNDLE/.agentic/context/$_mod/"
 done
 cp "$ROOT/.agentic/orchestration/README.md" "$BUNDLE/.agentic/orchestration/"

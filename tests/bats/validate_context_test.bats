@@ -130,7 +130,7 @@ doc = json.loads(sys.stdin.read())
 assert doc["kind"] == "context_validation_result", doc["kind"]
 assert doc["result"] == "VALID", doc["result"]
 assert doc["exit_code"] == 0, doc["exit_code"]
-assert doc["protocol_version"] == "1.8.0", doc["protocol_version"]
+assert doc["protocol_version"] == "1.9.0", doc["protocol_version"]
 assert [m["id"] for m in doc["selected_modules"]] == ["security-review"], doc["selected_modules"]
 assert doc["diagnostics"] == [], doc["diagnostics"]
 '

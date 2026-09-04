@@ -154,7 +154,7 @@ $Approval
             $json = $jsonLine | ConvertFrom-Json
             $json.result | Should -Be 'PASS'
             $json.exit_code | Should -Be 0
-            $json.protocol_version | Should -Be '1.8.0'
+            $json.protocol_version | Should -Be '1.9.0'
             $json.kind | Should -Be 'orchestration_result'
             $json.workers.Count | Should -Be 1
             $json.workers[0].status | Should -Be 'PASS'

@@ -151,7 +151,7 @@ make_git_repo() {
     [ "$status" -eq 0 ]
     echo "$output" | grep -q '"result":"PASS"'
     echo "$output" | grep -q '"exit_code":0'
-    echo "$output" | grep -q '"protocol_version":"1.8.0"'
+    echo "$output" | grep -q '"protocol_version":"1.9.0"'
     rm -rf "$TMPD"
 }
 

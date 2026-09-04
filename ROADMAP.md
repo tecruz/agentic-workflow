@@ -7,7 +7,7 @@
 
 ## Current state
 
-- **Version**: `1.8.0` (workspace/monorepo detection landed; deeper Android/Kotlin detection landed)
+- **Version**: `1.9.0` (workspace/monorepo detection landed; deeper Android/Kotlin detection landed; context-module expansion + orchestration maturity landed)
 - The core loop (`DISCOVER → CLASSIFY RISK → PLAN → IMPLEMENT → VERIFY →
   HANDOFF`), the honest verification model, the non-destructive installer, risk
   profiles + evidence contracts, context modules + behavioral evals, and the
@@ -56,19 +56,21 @@ This file. Plus:
 
 ## Medium-term (target v1.8+)
 
-### 4. Broaden the context-module registry
-`.agentic/context/INDEX.md` today ships five modules. Candidates, each declaring
-ID / version / load triggers / minimum profile per the existing module contract:
+### 4. Broaden the context-module registry — **done in v1.9.0**
+`.agentic/context/INDEX.md` now ships ten modules. Each declares ID / version /
+load triggers / minimum profile per the existing module contract:
 
-- `performance` — latency- or memory-sensitive changes (standard).
-- `accessibility` — UI/UX changes affecting assistive tech (standard).
-- `i18n` / `localization` — new user-facing strings, locale data (standard).
-- `mobile-adaptive` — device/window-size/form-factor changes (standard).
-- `testing-infrastructure` — test harness, fixture, or CI-runner changes
+- [x] `performance` — latency- or memory-sensitive changes (standard).
+- [x] `accessibility` — UI/UX changes affecting assistive tech (standard).
+- [x] `i18n` / `localization` — new user-facing strings, locale data (standard).
+- [x] `mobile-adaptive` — device/window-size/form-factor changes (standard).
+- [x] `testing-infrastructure` — test harness, fixture, or CI-runner changes
   (standard).
 
-Each new module must also add `validate-context` fixture + golden coverage, and
-`None selected`-correct negative fixtures.
+Each new module ships `validate-context` fixture + golden coverage, and
+`None selected`-correct negative fixtures (20 new fixtures: valid/none/fenced
+variants per module). All ten modules are registered in both installers and
+`build-bundle.sh` with installer/bundle/upgrade test coverage.
 
 ### 5. Orchestration maturity (ADR-0011)
 The v1.6.0 coordinator replaced the v1.5.0 stub. Remaining follow-up:

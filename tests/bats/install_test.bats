@@ -67,7 +67,7 @@ configure_test_git_identity() {
 @test "fresh install creates the context registry and context validators" {
     bash "$INSTALL" . >/dev/null 2>&1
     [ -f .agentic/context/INDEX.md ]
-    for mod in security-review database-migrations dependency-changes infrastructure-change public-api-change; do
+    for mod in security-review database-migrations dependency-changes infrastructure-change public-api-change performance accessibility i18n mobile-adaptive testing-infrastructure; do
         [ -f ".agentic/context/$mod/MODULE.md" ]
     done
     [ -f .agentic/scripts/validate-context.sh ]
@@ -77,6 +77,15 @@ configure_test_git_identity() {
     [ -f .agentic/schemas/context-selection-v1.schema.json ]
     grep -q $'\.agentic/context/INDEX\.md\tmanaged' .agentic/install-manifest.tsv
     grep -q $'\.agentic/context/security-review/MODULE\.md\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/context/database-migrations/MODULE\.md\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/context/dependency-changes/MODULE\.md\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/context/infrastructure-change/MODULE\.md\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/context/public-api-change/MODULE\.md\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/context/performance/MODULE\.md\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/context/accessibility/MODULE\.md\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/context/i18n/MODULE\.md\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/context/mobile-adaptive/MODULE\.md\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/context/testing-infrastructure/MODULE\.md\tmanaged' .agentic/install-manifest.tsv
     grep -q $'\.agentic/scripts/validate-context\.sh\tmanaged' .agentic/install-manifest.tsv
     grep -q $'\.agentic/scripts/validate-handoff\.sh\tmanaged' .agentic/install-manifest.tsv
     grep -q $'\.agentic/scripts/validate-handoff\.ps1\tmanaged' .agentic/install-manifest.tsv
@@ -993,6 +1002,11 @@ SHIM
     [ -f "$BUNDLE/.agentic/scripts/validate-task.ps1" ]
     [ -f "$BUNDLE/.agentic/scripts/validate-handoff.sh" ]
     [ -f "$BUNDLE/.agentic/scripts/validate-handoff.ps1" ]
+    [ -f "$BUNDLE/.agentic/context/INDEX.md" ]
+    for mod in security-review database-migrations dependency-changes infrastructure-change public-api-change performance accessibility i18n mobile-adaptive testing-infrastructure; do
+        [ -f "$BUNDLE/.agentic/context/$mod/MODULE.md" ]
+    done
+    [ -f "$BUNDLE/.agentic/schemas/context-selection-v1.schema.json" ]
     [ -f "$BUNDLE/.agentic/orchestration/README.md" ]
     [ -x "$BUNDLE/.agentic/orchestration/coordinator.sh" ]
     [ -f "$BUNDLE/.agentic/templates/task.md" ]

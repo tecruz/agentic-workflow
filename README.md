@@ -273,6 +273,11 @@ Specialist knowledge lives in portable, on-demand modules under
 | `dependency-changes` | `standard` | manifest/lockfile changes, dependency upgrades, supply-chain implications |
 | `infrastructure-change` | `high-assurance` | CI/CD, Terraform/OpenTofu, Kubernetes, cloud resources, deployment config |
 | `public-api-change` | `standard` | public endpoints, published interfaces, SDK contracts, backward compatibility |
+| `performance` | `standard` | latency/memory-sensitive changes, hot paths, caching, resource pooling |
+| `accessibility` | `standard` | UI/UX changes, color contrast, keyboard navigation, ARIA, screen readers |
+| `i18n` | `standard` | new/modified user-facing strings, locale data, date/number formatting, pluralization |
+| `mobile-adaptive` | `standard` | responsive breakpoints, touch targets, safe areas, orientation, PWA installability |
+| `testing-infrastructure` | `standard` | test framework/CI config, fixtures, coverage, flaky tests, test types |
 
 - During **DISCOVER** agents inspect `.agentic/context/INDEX.md`, select every
   module whose *Load when* triggers match the task, and record each selection
@@ -332,16 +337,20 @@ installed, so project type detection never depends on the local machine.
 | Go | `go.mod` | `go test ./...`, `go vet ./...` | `go-mod` |
 | Java (Maven) | `pom.xml` | `mvn test`, `mvn checkstyle:check`; `./mvnw` / `mvnw.cmd` when a wrapper is present | `java-maven`, `java-maven-wrapper` |
 | Java (Gradle) | `build.gradle` / `build.gradle.kts` | `gradle test`, `gradle check`; `./gradlew` / `gradlew.bat` when a wrapper is present | `gradle-wrapper` |
-| Android / Kotlin (Gradle) | root `build.gradle` / `build.gradle.kts` referencing `com.android` / `org.jetbrains.kotlin.android`, or a root `AndroidManifest.xml` | `test`, `lint`, `assembleDebug` via the Gradle wrapper or `gradle` | `android-gradle` |
+| Android / Kotlin (Gradle) | `build.gradle` / `build.gradle.kts` referencing `com.android` / `org.jetbrains.kotlin.android` (root or module), a version-catalog/convention-plugin declaration, or an `AndroidManifest.xml` | `test`, `lint`, `assembleDebug` via the Gradle wrapper or `gradle` | `android-gradle` |
 | .NET | `*.sln` / `*.csproj` | `dotnet test`, `dotnet format --verify-no-changes` | `dotnet-sln-only`, `dotnet-csproj-only` |
 | Workspace / monorepo | `pnpm-workspace.yaml` (`packages`), `package.json` `workspaces` (array or `{packages:[...]}`), `Cargo.toml` `[workspace]` `members`/`exclude`, `pom.xml` `<modules>`, `settings.gradle(.kts)` `include` (`:a:b` → `a/b`), plus legacy `apps/`, `services/`, `packages/`, `modules/` | merged detection per workspace package, deduplicated | `pnpm-workspace`, `npm-workspaces`, `yarn-workspaces-object`, `cargo-workspace`, `maven-modules`, `gradle-multimodule`, `pnpm-workspace-recursive`, `monorepo`, `nested-monorepo` |
 
 Detection notes:
 
-- **Android/Kotlin detection is basic root-project detection**: it inspects
-  root `build.gradle`/`build.gradle.kts` (and a root `AndroidManifest.xml`). It
-  does not yet follow Android plugins declared only in module build files,
-  version-catalog aliases, or convention plugins.
+- **Android/Kotlin detection** combines root and per-module signals (v1.8.0,
+  ADR-0013): root-level detection interprets version catalogs
+  (`gradle/libs.versions.toml`, e.g. `alias(libs.plugins.android.application)`)
+  and convention plugins (`id("...android...")`) in root build files; per-module
+  detection follows `com.android.*` / `org.jetbrains.kotlin.android` markers in
+  module build files and module `AndroidManifest.xml` files, emitting
+  wrapper-aware `test` / `lint` / `assembleDebug` checks per Android module
+  without cross-module contamination.
 - **Workspace discovery** now interprets `pnpm-workspace.yaml` `packages` (globs, `!` exclusions, `*`/`**`), `package.json` `workspaces` (array and object forms, `!` exclusions), `Cargo.toml` `[workspace]` `members` and `exclude` (globs), `pom.xml` `<modules>` (literal dirs, globs), and `settings.gradle(.kts)` `include` (`:lib:core` → `lib/core`). Results are deduplicated against the legacy one-level scan of `apps/`, `services/`, `packages/`, `modules/`. Nx, Turborepo, and Bazel are not yet interpreted.
 - The Gradle/Maven wrapper emitted is the platform script: `gradlew.bat` /
   `mvnw.cmd` on Windows, `./gradlew` / `./mvnw` on Linux/macOS.
