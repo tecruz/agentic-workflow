@@ -86,6 +86,8 @@ infrastructure).
 - tests/pester/JsonContracts.Tests.ps1 — skill JSON contract Describe (PS legs; Bash legs on Linux CI)
 - tests/fixtures/skill-tasks/ — 17 new shared fixtures (4 valid, 11 invalid, 2 blocked)
 - tests/fixtures/context-tasks/context-full-contract-ha.md — `## Skills` leg for the composite fixture
+- .agentic/tasks/TASK-002-risk-profiles-and-evidence-contracts.md, TASK-006-context-modules-and-evals.md — backfilled `- None required` (CI validates these through the three-leg gate; v1.5.0 context-backfill precedent)
+- .github/workflows/ci.yml — fast-CI shellcheck / bash -n / ps-syntax / PSScriptAnalyzer lists now cover validate-skills.sh/ps1
 - tests/ps-syntax.ps1 — include validate-skills.ps1
 - evals/run-evals.sh / run-evals.ps1 — `SKILLS_CONTRACT_VALID` leg (CHECK_ORDER + validators + record)
 - evals/generate-scenarios.ps1 — `skillsBlock` per scenario + `## Skills` in the task template; `Write-Utf8` now normalizes CRLF→LF so regeneration is byte-stable on Windows (also aligns the previously stale `verification-result.json` artifacts with the generator's `[ordered]` key order)
@@ -115,4 +117,7 @@ infrastructure).
 
 ## Remaining risks
 
-- New `## Skills` section is required on new tasks; historical tasks (TASK-001..016) predate it and are not re-validated — same precedent as the v1.5.0 context introduction.
+- Historical tasks predate `## Skills`. The CI-validated tasks (TASK-002,
+  TASK-006) were backfilled with `- None required` (same precedent as the
+  v1.5.0 context backfill); the remaining historical tasks (001, 003-005,
+  007-016) are not CI-validated and stay untouched.
