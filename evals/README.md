@@ -2,8 +2,8 @@
 
 Deterministic, offline harness evaluations for the agentic-workflow framework
 itself. Scenarios evaluate **observable behavior recorded in saved artifacts**
-— final task files, selected context modules, risk profiles, approvals,
-verification results — never hidden reasoning or chain-of-thought.
+— final task files, selected context modules, invoked skills, risk profiles,
+approvals, verification results — never hidden reasoning or chain-of-thought.
 
 No scenario calls an external model. No API keys are required. The runner is
 fully deterministic, so it is safe as a merge gate.
@@ -35,6 +35,7 @@ fixture artifacts and produces a `behavioral_evaluation_result` document:
 | TASK_ARTIFACT_PRESENT | Was a final task file produced? |
 | TASK_CONTRACT_VALID | Does `validate-task --handoff` accept the artifact task? |
 | CONTEXT_CONTRACT_VALID | Does `validate-context --handoff` accept the selections? |
+| SKILLS_CONTRACT_VALID | Does `validate-skills --handoff` accept the invocations? |
 | VERIFICATION_SCHEMA_VALID | Is `verification-result.json` a schema-valid PASS document whose summary agrees with its checks array? |
 | PROFILE_FLOOR_RESPECTED | Is the declared profile at least the scenario minimum? |
 | REQUIRED_MODULES_SELECTED | Were all required specialist modules selected? |
@@ -108,8 +109,9 @@ Regenerating fixtures:
     pwsh -NoProfile -File evals/generate-scenarios.ps1
 
 Every generated positive artifact is a full production task contract that
-passes both validators in handoff mode; CI additionally validates each emitted
-document against the managed schemas with the pinned `jsonschema` package.
+passes all three validators in handoff mode; CI additionally validates each
+emitted document against the managed schemas with the pinned `jsonschema`
+package.
 
 ## Distribution
 

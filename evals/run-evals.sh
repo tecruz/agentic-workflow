@@ -6,8 +6,9 @@
 # the REAL production contracts against them:
 #
 #   - scenario.json          validated against evals/schemas/scenario-v1.schema.json
-#   - artifacts/task.md      validated by validate-task --handoff and
-#                            validate-context --handoff (the actual gates)
+#   - artifacts/task.md      validated by validate-task --handoff,
+#                            validate-context --handoff, and
+#                            validate-skills --handoff (the actual gates)
 #   - verification-result.json
 #                            validated against the managed
 #                            verification-result-v1.schema.json, including
@@ -97,9 +98,11 @@ command -v python3 >/dev/null 2>&1 || { echo "ERROR: Python 3 is required for ru
 
 TASK_VALIDATOR="$SCRIPT_DIR/../.agentic/scripts/validate-task.sh"
 CONTEXT_VALIDATOR="$SCRIPT_DIR/../.agentic/scripts/validate-context.sh"
-if [ ! -f "$TASK_VALIDATOR" ] || [ ! -f "$CONTEXT_VALIDATOR" ]; then
+SKILLS_VALIDATOR="$SCRIPT_DIR/../.agentic/scripts/validate-skills.sh"
+if [ ! -f "$TASK_VALIDATOR" ] || [ ! -f "$CONTEXT_VALIDATOR" ] || [ ! -f "$SKILLS_VALIDATOR" ]; then
     TASK_VALIDATOR="$SCRIPT_DIR/../../.agentic/scripts/validate-task.sh"
     CONTEXT_VALIDATOR="$SCRIPT_DIR/../../.agentic/scripts/validate-context.sh"
+    SKILLS_VALIDATOR="$SCRIPT_DIR/../../.agentic/scripts/validate-skills.sh"
 fi
 
 # Under git-bash (Windows full-CI leg), $PWD-derived paths are MSYS-style
@@ -115,6 +118,7 @@ _to_native() {
 
 export AGENTIC_EVAL_TASK_VALIDATOR="$(_to_native "$TASK_VALIDATOR")"
 export AGENTIC_EVAL_CONTEXT_VALIDATOR="$(_to_native "$CONTEXT_VALIDATOR")"
+export AGENTIC_EVAL_SKILLS_VALIDATOR="$(_to_native "$SKILLS_VALIDATOR")"
 export AGENTIC_EVAL_SCENARIO_SCHEMA="$(_to_native "$SCRIPT_DIR/schemas/scenario-v1.schema.json")"
 export AGENTIC_EVAL_RESULT_SCHEMA="$(_to_native "$SCRIPT_DIR/schemas/evaluation-result-v1.schema.json")"
 export AGENTIC_EVAL_VERIFICATION_SCHEMA="$(_to_native "$SCRIPT_DIR/../.agentic/schemas/verification-result-v1.schema.json")"
@@ -133,6 +137,7 @@ scenarios_dir = os.environ["AGENTIC_EVAL_SCENARIOS_DIR"]
 fmt = os.environ["AGENTIC_EVAL_FORMAT"]
 task_validator = os.path.abspath(os.environ["AGENTIC_EVAL_TASK_VALIDATOR"])
 context_validator = os.path.abspath(os.environ["AGENTIC_EVAL_CONTEXT_VALIDATOR"])
+skills_validator = os.path.abspath(os.environ["AGENTIC_EVAL_SKILLS_VALIDATOR"])
 scenario_schema_path = os.path.abspath(os.environ["AGENTIC_EVAL_SCENARIO_SCHEMA"])
 result_schema_path = os.path.abspath(os.environ["AGENTIC_EVAL_RESULT_SCHEMA"])
 verification_schema_path = os.path.abspath(os.environ["AGENTIC_EVAL_VERIFICATION_SCHEMA"])
@@ -173,6 +178,7 @@ CHECK_ORDER = [
     "TASK_ARTIFACT_PRESENT",
     "TASK_CONTRACT_VALID",
     "CONTEXT_CONTRACT_VALID",
+    "SKILLS_CONTRACT_VALID",
     "VERIFICATION_SCHEMA_VALID",
     "PROFILE_FLOOR_RESPECTED",
     "REQUIRED_MODULES_SELECTED",
@@ -438,6 +444,26 @@ def run_context_validator(task_path):
     return ok, profile, ids, detail
 
 
+def run_skills_validator(task_path):
+    proc = subprocess.run(
+        [BASH_BIN, bash_path(skills_validator), "--handoff", "--format", "json", bash_path(task_path)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    profile = None
+    ids = []
+    detail = ""
+    ok = proc.returncode == 0
+    try:
+        doc = json.loads(proc.stdout.decode("utf-8", errors="replace"))
+        profile = doc.get("profile")
+        ids = [m.get("id") for m in doc.get("invoked_skills", []) if isinstance(m, dict)]
+    except ValueError:
+        ok = False
+        first = proc.stderr.decode("utf-8", errors="replace").strip().splitlines()
+        detail = first[0] if first else "validate-skills produced no result document (exit %d)" % proc.returncode
+    return ok, profile, ids, detail
+
+
 SUMMARY_FIELDS = ("checks_defined", "checks_run", "required_run",
                   "passed", "failed", "optional_failed", "blocked",
                   "optional_skipped")
@@ -511,6 +537,10 @@ def evaluate_scenario(scenario_path):
         ctx_ok, profile, module_ids, ctx_detail = run_context_validator(task_path)
         record("CONTEXT_CONTRACT_VALID", ctx_ok,
                "" if ctx_ok else (ctx_detail or "validate-context --handoff rejected the artifact task file"))
+
+        skl_ok, _skl_profile, _skill_ids, skl_detail = run_skills_validator(task_path)
+        record("SKILLS_CONTRACT_VALID", skl_ok,
+               "" if skl_ok else (skl_detail or "validate-skills --handoff rejected the artifact task file"))
 
         min_profile = expected.get("minimum_profile")
         prof_rank = PROFILE_RANK.get(profile, -1)
@@ -622,7 +652,7 @@ def finalize(sid, scenario_path, scenario, checks=None, details=None):
 
     doc = {
         "schema_version": 1,
-        "protocol_version": "1.9.0",
+        "protocol_version": "1.10.0",
         "kind": "behavioral_evaluation_result",
         "mode": "offline-fixture",
         "observed_result": observed,

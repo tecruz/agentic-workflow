@@ -31,6 +31,10 @@ Fixture artifact for the behavioral evaluation harness.
 
 - dependency-changes v1 loaded — lockfile-changing upgrade reviewed for transitive drift
 
+## Skills
+
+- verification-triage v1 invoked — post-upgrade test drift triaged before pinning
+
 ## Verification
 
 ### Baseline

@@ -31,6 +31,10 @@ Fixture artifact for the behavioral evaluation harness.
 
 - public-api-change v1 loaded — published response contract gains fields
 
+## Skills
+
+- task-decomposition v1 invoked — contract change broken into endpoint, client, and docs steps
+
 ## Verification
 
 ### Baseline

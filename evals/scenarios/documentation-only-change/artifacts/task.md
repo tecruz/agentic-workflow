@@ -31,6 +31,10 @@ Fixture artifact for the behavioral evaluation harness.
 
 - None selected — documentation-only change with no specialist trigger
 
+## Skills
+
+- None required — prose-only edit invokes no procedure
+
 ## Verification
 
 ### Baseline

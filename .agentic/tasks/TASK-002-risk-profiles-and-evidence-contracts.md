@@ -55,6 +55,10 @@ contents, and validator parity across Bash and PowerShell.
 
 - None selected
 
+## Skills
+
+- None required — task predates the skills registry (v1.10.0); no reusable procedure was invoked
+
 ## Files changed
 
 - `.agentic/profiles/{README,prototype,standard,high-assurance}.md`

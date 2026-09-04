@@ -1,6 +1,10 @@
 {
-  "protocol_version": "1.9.0",
+  "schema_version": 1,
+  "protocol_version": "1.10.0",
+  "kind": "verification_result",
+  "result": "PASS",
   "exit_code": 0,
+  "source": "checks_tsv",
   "summary": {
     "checks_defined": 2,
     "checks_run": 2,
@@ -11,7 +15,6 @@
     "blocked": 0,
     "optional_skipped": 0
   },
-  "source": "checks_tsv",
   "checks": [
     {
       "id": "suite-run",
@@ -31,8 +34,5 @@
       "duration_ms": 2400,
       "reason_code": null
     }
-  ],
-  "schema_version": 1,
-  "kind": "verification_result",
-  "result": "PASS"
+  ]
 }

@@ -55,7 +55,7 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-$ProtocolVersion = "1.9.0"
+$ProtocolVersion = "1.10.0"
 
 if ($Help) {
     @"

@@ -547,6 +547,74 @@ Describe 'Context selection JSON contracts and schema validation' {
     }
 }
 
+Describe 'Skill invocation JSON contracts and schema validation' {
+
+    BeforeAll {
+        $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+        $skillsSchema = Join-Path $repoRoot '.agentic/schemas/skill-selection-v1.schema.json'
+        $skillsValidatePs = Join-Path $repoRoot '.agentic/scripts/validate-skills.ps1'
+        $skillsValidateSh = Join-Path $repoRoot '.agentic/scripts/validate-skills.sh'
+        $skillsFixtures = Join-Path $repoRoot 'tests/fixtures/skill-tasks'
+
+        function Test-SkillsSchemaValid([string]$JsonPath, [string]$SchemaPath) {
+            $cmd = "import json, jsonschema, sys; jsonschema.validate(instance=json.load(open(sys.argv[1], encoding='utf-8')), schema=json.load(open(sys.argv[2], encoding='utf-8')))"
+            $null = python -c $cmd $JsonPath $SchemaPath 2>&1
+            return $LASTEXITCODE
+        }
+
+        function Test-SkillsJsonContract([string]$fixture, [int]$expectedExit) {
+            $tmpOut = [System.IO.Path]::GetTempFileName()
+            try {
+                $outLines = & pwsh -NoProfile -File $skillsValidatePs -Format Json (Join-Path $skillsFixtures $fixture) 2> $null
+                $code = $LASTEXITCODE
+                [System.IO.File]::WriteAllLines($tmpOut, @($outLines), [System.Text.UTF8Encoding]::new($false))
+                $code | Should -Be $expectedExit
+                (Test-SkillsSchemaValid -JsonPath $tmpOut -SchemaPath $skillsSchema) | Should -Be 0
+                return (Get-Content -LiteralPath $tmpOut -Raw | ConvertFrom-Json)
+            }
+            finally { Remove-Item -LiteralPath $tmpOut -ErrorAction SilentlyContinue }
+        }
+    }
+
+    It 'skill validation result JSON validates against skill-selection-v1.schema.json (PowerShell, valid)' {
+        $doc = Test-SkillsJsonContract 'skill-valid-single.md' 0
+        $doc.kind | Should -Be 'skill_validation_result'
+        $doc.result | Should -Be 'VALID'
+        @($doc.invoked_skills).Count | Should -Be 1
+        $doc.invoked_skills[0].id | Should -Be 'verification-triage'
+    }
+
+    It 'skill validation result JSON validates against skill-selection-v1.schema.json (PowerShell, invalid)' {
+        $doc = Test-SkillsJsonContract 'skill-unknown.md' 1
+        $doc.result | Should -Be 'INVALID'
+        @($doc.diagnostics).Count | Should -BeGreaterThan 0
+        $doc.diagnostics[0].code | Should -Be 'SKILL_UNKNOWN'
+    }
+
+    It 'skill validation result JSON validates against skill-selection-v1.schema.json (Bash, valid)' {
+        if ($IsWindows) { Set-ItResult -Skipped -Because 'Bash not available on Windows'; return }
+        # CI runs this leg on Linux where the checkout path is already POSIX.
+        $taskPath = (Join-Path $skillsFixtures 'skill-valid-single.md') -replace '\\', '/'
+        $outLines = & bash $skillsValidateSh --format json $taskPath 2> $null
+        $code = $LASTEXITCODE
+        $code | Should -Be 0
+        $doc = (@($outLines) -join "`n") | ConvertFrom-Json
+        $doc.kind | Should -Be 'skill_validation_result'
+        $doc.result | Should -Be 'VALID'
+    }
+
+    It 'skill validation result JSON validates against skill-selection-v1.schema.json (Bash, invalid)' {
+        if ($IsWindows) { Set-ItResult -Skipped -Because 'Bash not available on Windows'; return }
+        $taskPath = (Join-Path $skillsFixtures 'skill-unknown.md') -replace '\\', '/'
+        $outLines = & bash $skillsValidateSh --format json $taskPath 2> $null
+        $code = $LASTEXITCODE
+        $code | Should -Be 1
+        $doc = (@($outLines) -join "`n") | ConvertFrom-Json
+        $doc.diagnostics.Count | Should -BeGreaterThan 0
+        $doc.diagnostics[0].code | Should -Be 'SKILL_UNKNOWN'
+    }
+}
+
 Describe 'Event schema validation' {
     BeforeEach {
         $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)

@@ -56,6 +56,10 @@ workflow edits only run this framework repository's own test suites.
 
 - None selected — framework feature development with no specialist trigger
 
+## Skills
+
+- None required — task predates the skills registry (v1.10.0); no reusable procedure was invoked
+
 ## Files changed
 
 - .agentic/context/INDEX.md — module index, selection grammar, registry rules (new).

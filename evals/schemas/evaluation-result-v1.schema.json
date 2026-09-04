@@ -6,7 +6,7 @@
   "required": ["schema_version", "protocol_version", "kind", "mode", "observed_result", "expected_result", "expectation_matched", "result", "exit_code", "scenario_id", "summary", "checks", "diagnostics"],
   "properties": {
     "schema_version": { "type": "integer", "const": 1 },
-    "protocol_version": { "type": "string", "const": "1.9.0" },
+    "protocol_version": { "type": "string", "const": "1.10.0" },
     "kind": { "type": "string", "const": "behavioral_evaluation_result" },
     "mode": { "type": "string", "enum": ["offline-fixture"] },
     "observed_result": {

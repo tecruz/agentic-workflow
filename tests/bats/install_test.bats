@@ -92,6 +92,23 @@ configure_test_git_identity() {
     grep -q $'\.agentic/schemas/context-selection-v1\.schema\.json\tmanaged' .agentic/install-manifest.tsv
 }
 
+@test "fresh install creates the skills registry and skills validators" {
+    bash "$INSTALL" . >/dev/null 2>&1
+    [ -f .agentic/skills/INDEX.md ]
+    for sk in task-decomposition verification-triage release-verification; do
+        [ -f ".agentic/skills/$sk/SKILL.md" ]
+    done
+    [ -f .agentic/scripts/validate-skills.sh ]
+    [ -f .agentic/scripts/validate-skills.ps1 ]
+    [ -f .agentic/schemas/skill-selection-v1.schema.json ]
+    grep -q $'\.agentic/skills/INDEX\.md\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/skills/task-decomposition/SKILL\.md\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/skills/verification-triage/SKILL\.md\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/skills/release-verification/SKILL\.md\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/scripts/validate-skills\.sh\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/schemas/skill-selection-v1\.schema\.json\tmanaged' .agentic/install-manifest.tsv
+}
+
 @test "fresh install creates the orchestration stub and records it as managed" {
     bash "$INSTALL" . >/dev/null 2>&1
     [ -f .agentic/orchestration/README.md ]
@@ -117,15 +134,25 @@ configure_test_git_identity() {
     [ "$status" -eq 0 ]
 }
 
+@test "installed skills validator keeps its executable bit and runs directly" {
+    bash "$INSTALL" . >/dev/null 2>&1
+    [ -x .agentic/scripts/validate-skills.sh ]
+    printf '# TASK-T: t\n\n## Status\n\nStatus: done\nUpdated: 2026-09-04\n\n## Risk profile\n\nProfile: standard\n\n## Skills\n\n- verification-triage v1 invoked — smoke\n' > TASK-SMOKE-SKILLS.md
+    run ./.agentic/scripts/validate-skills.sh TASK-SMOKE-SKILLS.md
+    [ "$status" -eq 0 ]
+}
+
 @test "uninstall removes the context registry but leaves adopter tasks" {
     bash "$INSTALL" . >/dev/null 2>&1
     mkdir -p .agentic/tasks
     printf 'adopter evidence\n' > .agentic/tasks/TASK-900-adopter.md
     bash "$INSTALL" . --uninstall >/dev/null 2>&1
     [ ! -d .agentic/context ]
+    [ ! -d .agentic/skills ]
     [ ! -f .agentic/scripts/validate-handoff.sh ]
     [ ! -f .agentic/scripts/validate-handoff.ps1 ]
     [ ! -f .agentic/scripts/validate-context.sh ]
+    [ ! -f .agentic/scripts/validate-skills.sh ]
     [ -f .agentic/tasks/TASK-900-adopter.md ]
 }
 
@@ -1007,6 +1034,13 @@ SHIM
         [ -f "$BUNDLE/.agentic/context/$mod/MODULE.md" ]
     done
     [ -f "$BUNDLE/.agentic/schemas/context-selection-v1.schema.json" ]
+    [ -f "$BUNDLE/.agentic/skills/INDEX.md" ]
+    for sk in task-decomposition verification-triage release-verification; do
+        [ -f "$BUNDLE/.agentic/skills/$sk/SKILL.md" ]
+    done
+    [ -f "$BUNDLE/.agentic/scripts/validate-skills.sh" ]
+    [ -f "$BUNDLE/.agentic/scripts/validate-skills.ps1" ]
+    [ -f "$BUNDLE/.agentic/schemas/skill-selection-v1.schema.json" ]
     [ -f "$BUNDLE/.agentic/orchestration/README.md" ]
     [ -x "$BUNDLE/.agentic/orchestration/coordinator.sh" ]
     [ -f "$BUNDLE/.agentic/templates/task.md" ]

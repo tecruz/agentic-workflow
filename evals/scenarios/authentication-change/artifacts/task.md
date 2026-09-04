@@ -65,6 +65,10 @@ Threat model: stolen or stale session tokens surviving a privilege change, and a
 
 - security-review v1 loaded — task changes session and authorization behavior
 
+## Skills
+
+- verification-triage v1 invoked — boundary-test results triaged before repair
+
 ## Verification
 
 ### Baseline

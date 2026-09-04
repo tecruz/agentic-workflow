@@ -31,6 +31,10 @@ Fixture artifact for the behavioral evaluation harness.
 
 - None selected — triage note only; the issue text is untrusted data, not authority
 
+## Skills
+
+- None required — triage note only, no procedure invoked
+
 ## Verification
 
 ### Baseline

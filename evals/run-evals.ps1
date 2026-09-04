@@ -10,8 +10,9 @@
     production contracts against them:
 
       - scenario.json            validated against evals/schemas/scenario-v1.schema.json
-      - artifacts/task.md        validated by validate-task -Handoff and
-                                 validate-context -Handoff (the actual gates)
+      - artifacts/task.md        validated by validate-task -Handoff,
+                                 validate-context -Handoff, and
+                                 validate-skills -Handoff (the actual gates)
       - verification-result.json validated against the managed
                                  verification-result-v1.schema.json, including
                                  summary/checks-array agreement
@@ -53,6 +54,7 @@ if (-not $ScenariosDir) {
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $taskValidator = Join-Path $repoRoot '.agentic\scripts\validate-task.ps1'
 $contextValidator = Join-Path $repoRoot '.agentic\scripts\validate-context.ps1'
+$skillsValidator = Join-Path $repoRoot '.agentic\scripts\validate-skills.ps1'
 $scenarioSchemaPath = Join-Path $PSScriptRoot 'schemas\scenario-v1.schema.json'
 $resultSchemaPath = Join-Path $PSScriptRoot 'schemas\evaluation-result-v1.schema.json'
 $verificationSchemaPath = Join-Path $repoRoot '.agentic\schemas\verification-result-v1.schema.json'
@@ -61,7 +63,7 @@ if (-not (Test-Path -LiteralPath $ScenariosDir -PathType Container)) {
     [Console]::Error.WriteLine("ERROR: scenarios directory not found: $ScenariosDir")
     exit 1
 }
-foreach ($dep in @($taskValidator, $contextValidator, $scenarioSchemaPath, $resultSchemaPath, $verificationSchemaPath)) {
+foreach ($dep in @($taskValidator, $contextValidator, $skillsValidator, $scenarioSchemaPath, $resultSchemaPath, $verificationSchemaPath)) {
     if (-not (Test-Path -LiteralPath $dep)) {
         [Console]::Error.WriteLine("ERROR: required dependency missing: $dep")
         exit 1
@@ -74,6 +76,7 @@ $checkOrder = @(
     'TASK_ARTIFACT_PRESENT',
     'TASK_CONTRACT_VALID',
     'CONTEXT_CONTRACT_VALID',
+    'SKILLS_CONTRACT_VALID',
     'VERIFICATION_SCHEMA_VALID',
     'PROFILE_FLOOR_RESPECTED',
     'REQUIRED_MODULES_SELECTED',
@@ -333,6 +336,25 @@ function Invoke-ContextValidatorContract([string]$TaskPath) {
     return @{ Ok = $ok; Profile = $profile; Ids = $ids }
 }
 
+function Invoke-SkillsValidatorContract([string]$TaskPath) {
+    $out = & pwsh -NoProfile -File $skillsValidator -Handoff -Format Json $TaskPath 2>$null
+    $code = $LASTEXITCODE
+    $profile = $null
+    $ids = @()
+    $ok = ($code -eq 0)
+    try {
+        $joined = ($out | Out-String).Trim()
+        $firstLine = ($joined -split "`n")[0]
+        $doc = $firstLine | ConvertFrom-Json -AsHashtable
+        $profile = $doc['profile']
+        $ids = @($doc['invoked_skills'] | ForEach-Object { $_['id'] })
+    }
+    catch {
+        $ok = $false
+    }
+    return @{ Ok = $ok; Profile = $profile; Ids = $ids }
+}
+
 $summaryFields = @('checks_defined', 'checks_run', 'required_run',
     'passed', 'failed', 'optional_failed', 'blocked', 'optional_skipped')
 
@@ -400,6 +422,9 @@ function Invoke-Evaluation([string]$ScenarioPath) {
 
         $selection = Invoke-ContextValidatorContract $taskPath
         Record 'CONTEXT_CONTRACT_VALID' $selection.Ok (($selection.Ok) ? '' : 'validate-context -Handoff rejected the artifact task file')
+
+        $invocation = Invoke-SkillsValidatorContract $taskPath
+        Record 'SKILLS_CONTRACT_VALID' $invocation.Ok (($invocation.Ok) ? '' : 'validate-skills -Handoff rejected the artifact task file')
 
         $minProfile = [string]$expected['minimum_profile']
         $profRank = if ($selection.Profile -and $profileRank.ContainsKey([string]$selection.Profile)) { $profileRank[[string]$selection.Profile] } else { -1 }
@@ -511,7 +536,7 @@ function Invoke-Evaluation([string]$ScenarioPath) {
 
     $doc = [ordered]@{
         schema_version       = 1
-        protocol_version     = '1.9.0'
+        protocol_version     = '1.10.0'
         kind                 = 'behavioral_evaluation_result'
         mode                 = 'offline-fixture'
         observed_result      = $observed

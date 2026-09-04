@@ -1,0 +1,87 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SkillValidationResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "protocol_version", "kind", "mode", "result", "exit_code", "task_file", "profile", "invoked_skills", "diagnostics"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "protocol_version": { "type": "string", "const": "1.10.0" },
+    "kind": { "type": "string", "const": "skill_validation_result" },
+    "mode": { "type": "string", "enum": ["standard", "handoff"] },
+    "result": { "type": "string", "enum": ["VALID", "INVALID", "BLOCKED"] },
+    "exit_code": { "type": "integer", "enum": [0, 1, 2] },
+    "task_file": { "type": "string" },
+    "profile": { "type": ["string", "null"], "enum": ["prototype", "standard", "high-assurance", null] },
+    "invoked_skills": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "version"],
+        "properties": {
+          "id": { "type": "string" },
+          "version": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "section", "identifier", "message"],
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "SKILLS_SECTION_MISSING",
+              "SKILLS_REGISTRY_MISSING",
+              "SKILLS_REGISTRY_INVALID",
+              "SKILLS_PROFILE_INVALID",
+              "SKILL_UNKNOWN",
+              "SKILL_DUPLICATE",
+              "SKILL_RATIONALE_MISSING",
+              "SKILL_VERSION_UNSUPPORTED",
+              "SKILL_PROFILE_TOO_LOW",
+              "SKILL_SELECTION_UNRESOLVED",
+              "TOOLING_UNAVAILABLE"
+            ]
+          },
+          "section": { "type": ["string", "null"] },
+          "identifier": { "type": ["string", "null"] },
+          "message": { "type": "string" }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "result": { "const": "VALID" } }, "required": ["result"] },
+      "then": {
+        "properties": {
+          "exit_code": { "const": 0 },
+          "profile": { "type": "string", "enum": ["prototype", "standard", "high-assurance"] },
+          "diagnostics": { "type": "array", "maxItems": 0 }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "result": { "const": "INVALID" } }, "required": ["result"] },
+      "then": { "properties": { "exit_code": { "const": 1 }, "diagnostics": { "type": "array", "minItems": 1 } } }
+    },
+    {
+      "if": { "properties": { "result": { "const": "BLOCKED" } }, "required": ["result"] },
+      "then": { "properties": { "exit_code": { "const": 2 }, "diagnostics": { "type": "array", "minItems": 1 } } }
+    },
+    {
+      "if": { "properties": { "exit_code": { "const": 0 } }, "required": ["exit_code"] },
+      "then": {
+        "properties": {
+          "profile": { "type": "string", "enum": ["prototype", "standard", "high-assurance"] },
+          "diagnostics": { "type": "array", "maxItems": 0 }
+        }
+      }
+    }
+  ]
+}
