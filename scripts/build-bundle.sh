@@ -85,13 +85,13 @@ mkdir -p "$BUNDLE/.agentic/rules" \
          "$BUNDLE/.agentic/context/i18n" \
          "$BUNDLE/.agentic/context/mobile-adaptive" \
          "$BUNDLE/.agentic/context/testing-infrastructure" \
-          "$BUNDLE/.agentic/skills" \
-          "$BUNDLE/.agentic/skills/task-decomposition" \
-          "$BUNDLE/.agentic/skills/verification-triage" \
-          "$BUNDLE/.agentic/skills/release-verification" \
-          "$BUNDLE/.agentic/orchestration" \
-          "$BUNDLE/.cursor/rules" \
-          "$BUNDLE/.github/instructions"
+         "$BUNDLE/.agentic/skills" \
+         "$BUNDLE/.agentic/skills/task-decomposition" \
+         "$BUNDLE/.agentic/skills/verification-triage" \
+         "$BUNDLE/.agentic/skills/release-verification" \
+         "$BUNDLE/.agentic/orchestration" \
+         "$BUNDLE/.cursor/rules" \
+         "$BUNDLE/.github/instructions"
 
 # Root-level protocol entry points and installers.
 cp "$ROOT/AGENTS.md" "$ROOT/CLAUDE.md" "$ROOT/GEMINI.md" "$ROOT/.aider.conf.yml" "$BUNDLE/"
