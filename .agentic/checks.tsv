@@ -12,7 +12,7 @@ required	sh-syntax-validate-context	.	bash	-n	.agentic/scripts/validate-context.
 required	sh-syntax-validate-skills	.	bash	-n	.agentic/scripts/validate-skills.sh
 required	sh-syntax-validate-handoff	.	bash	-n	.agentic/scripts/validate-handoff.sh
 required	sh-syntax-coordinator	.	bash	-n	.agentic/orchestration/coordinator.sh
-required	handoff-gate	.	bash	.agentic/scripts/validate-handoff.sh	.agentic/tasks/TASK-017-skills-first-class-category.md
+required	handoff-gate	.	bash	.agentic/scripts/validate-handoff.sh	.agentic/tasks/TASK-019-adapters-and-performance.md
 required	ps-syntax	.	pwsh	-NoProfile	-File	tests/ps-syntax.ps1
 required	bats	.	bats	tests/bats
 required	pester	.	pwsh	-NoProfile	-Command	Import-Module Pester -MinimumVersion 5.0; $r = Invoke-Pester -Script 'tests/pester' -PassThru; if ($r.FailedCount -gt 0) { exit 1 }

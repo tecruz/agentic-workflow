@@ -36,7 +36,7 @@
 #                        backed up to .agentic-backup/ first. Without this flag
 #                        unverifiable legacy files are preserved as conflicts.
 #   --backup             Back up files to .agentic-backup/ before modifying.
-#   --tools LIST         Comma-separated tool adapters: claude,gemini,aider,all.
+#   --tools LIST         Comma-separated tool adapters: claude,gemini,aider,cursor,copilot,all.
 #                        Default: claude,gemini,aider. AGENTS.md is always
 #                        installed; other tools read AGENTS.md natively.
 #   --generate-checks    Write .agentic/checks.tsv from the detected stack.
@@ -77,7 +77,7 @@ Options:
                        backed up to .agentic-backup/ first. Without this flag
                        unverifiable legacy files are preserved as conflicts.
   --backup             Back up files to .agentic-backup/ before modifying.
-  --tools LIST         Comma-separated tool adapters: claude,gemini,aider,all.
+  --tools LIST         Comma-separated tool adapters: claude,gemini,aider,cursor,copilot,all.
                        Default: claude,gemini,aider. AGENTS.md is always
                        installed; other tools read AGENTS.md natively.
   --generate-checks    Write .agentic/checks.tsv from the detected stack.
@@ -144,24 +144,24 @@ TARGET_DIR="$(cd "$TARGET_DIR" && pwd)"
 
 _tools_lower="$(printf '%s' "$TOOLS_RAW" | tr '[:upper:]' '[:lower:]')"
 if [ "$_tools_lower" = "all" ]; then
-    TOOLS=(claude gemini aider)
+    TOOLS=(claude gemini aider cursor copilot)
 else
     # Detect trailing/leading/double commas which `read` silently drops
     case "$TOOLS_RAW" in
         ""|,*|*,|*,,*)
-            echo "Error: unknown tool '' (expected claude, gemini, aider, or all)" >&2; exit 2 ;;
+            echo "Error: unknown tool '' (expected claude, gemini, aider, cursor, copilot, or all)" >&2; exit 2 ;;
     esac
     IFS=',' read -r -a TOOLS <<< "$TOOLS_RAW"
     for t in "${TOOLS[@]}"; do
         case "$t" in
-            "" ) echo "Error: unknown tool '' (expected claude, gemini, aider, or all)" >&2; exit 2 ;;
+            "" ) echo "Error: unknown tool '' (expected claude, gemini, aider, cursor, copilot, or all)" >&2; exit 2 ;;
         esac
     done
 fi
 for t in "${TOOLS[@]}"; do
     case "$t" in
-        claude|gemini|aider) ;;
-        *) echo "Error: unknown tool '$t' (expected claude, gemini, aider, or all)" >&2; exit 2 ;;
+        claude|gemini|aider|cursor|copilot) ;;
+        *) echo "Error: unknown tool '$t' (expected claude, gemini, aider, cursor, copilot, or all)" >&2; exit 2 ;;
     esac
 done
 # Deduplicate preserving order (prevents duplicate manifest rows).
@@ -251,6 +251,8 @@ for t in "${TOOLS[@]}"; do
         claude) MERGE_FILES+=("CLAUDE.md") ;;
         gemini) MERGE_FILES+=("GEMINI.md") ;;
         aider)  MANAGED_FILES+=(".aider.conf.yml") ;;
+        cursor) MANAGED_FILES+=(".cursor/rules/agentic-protocol.mdc") ;;
+        copilot) MANAGED_FILES+=(".github/instructions/agentic-protocol.instructions.md") ;;
     esac
 done
 
@@ -306,6 +308,14 @@ done
 case " $MANAGED_PATHS " in
     *" .aider.conf.yml "*) ;;
     *) MANAGED_PATHS="$MANAGED_PATHS .aider.conf.yml" ;;
+esac
+case " $MANAGED_PATHS " in
+    *" .cursor/rules/agentic-protocol.mdc "*) ;;
+    *) MANAGED_PATHS="$MANAGED_PATHS .cursor/rules/agentic-protocol.mdc" ;;
+esac
+case " $MANAGED_PATHS " in
+    *" .github/instructions/agentic-protocol.instructions.md "*) ;;
+    *) MANAGED_PATHS="$MANAGED_PATHS .github/instructions/agentic-protocol.instructions.md" ;;
 esac
 
 # Prints the one legitimate category for a canonical manifest path, or returns
@@ -1322,6 +1332,8 @@ check_partial() {
             claude) rel="CLAUDE.md" ;;
             gemini) rel="GEMINI.md" ;;
             aider) rel=".aider.conf.yml" ;;
+            cursor) rel=".cursor/rules/agentic-protocol.mdc" ;;
+            copilot) rel=".github/instructions/agentic-protocol.instructions.md" ;;
             *) continue ;;
         esac
         if [ ! -e "$TARGET_DIR/$rel" ]; then

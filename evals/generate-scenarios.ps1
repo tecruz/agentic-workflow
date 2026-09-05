@@ -167,7 +167,7 @@ function New-VerificationDoc {
     # insertion order of [ordered] dictionaries.
     [ordered]@{
         schema_version   = 1
-        protocol_version = '1.10.0'
+        protocol_version = '1.11.0'
         kind             = 'verification_result'
         result           = 'PASS'
         exit_code        = 0

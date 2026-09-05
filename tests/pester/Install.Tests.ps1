@@ -609,6 +609,34 @@ Describe 'install.ps1' {
         finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
     }
 
+    It 'installs the cursor and copilot bridges when selected' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp -Tools 'cursor,copilot' *> $null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path (Join-Path $tmp '.cursor\rules\agentic-protocol.mdc') | Should -Be $true
+            Test-Path (Join-Path $tmp '.github\instructions\agentic-protocol.instructions.md') | Should -Be $true
+            (Get-Content -Raw (Join-Path $tmp '.cursor\rules\agentic-protocol.mdc')) -match 'alwaysApply: true' | Should -Be $true
+            (Get-Content -Raw (Join-Path $tmp '.github\instructions\agentic-protocol.instructions.md')) -match 'applyTo:' | Should -Be $true
+            (Get-Content -Raw (Join-Path $tmp '.cursor\rules\agentic-protocol.mdc')) -match 'AGENTS.md' | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'update prunes deselected cursor and copilot bridges' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp -Tools all *> $null
+            Test-Path (Join-Path $tmp '.cursor\rules\agentic-protocol.mdc') | Should -Be $true
+            Test-Path (Join-Path $tmp '.github\instructions\agentic-protocol.instructions.md') | Should -Be $true
+            & $install -Target $tmp -Tools claude *> $null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path (Join-Path $tmp '.cursor\rules\agentic-protocol.mdc') | Should -Be $false
+            Test-Path (Join-Path $tmp '.github\instructions\agentic-protocol.instructions.md') | Should -Be $false
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
     It 'a deselected merge adapter keeps its custom content' {
         $tmp = New-TestDir
         try {
@@ -1463,7 +1491,9 @@ Describe 'install.ps1' {
             if (-not $bundleRoot) { Set-ItResult -Skipped -Because 'could not locate bundle after zip extraction' }
 
             Test-Path (Join-Path $bundleRoot 'tests') | Should -Be $false
-            Test-Path (Join-Path $bundleRoot '.github') | Should -Be $false
+            Test-Path (Join-Path $bundleRoot '.github\workflows') | Should -Be $false
+            Test-Path (Join-Path $bundleRoot '.github\instructions\agentic-protocol.instructions.md') | Should -Be $true
+            Test-Path (Join-Path $bundleRoot '.cursor\rules\agentic-protocol.mdc') | Should -Be $true
             Test-Path (Join-Path $bundleRoot 'docs') | Should -Be $false
             Test-Path (Join-Path $bundleRoot 'evals') | Should -Be $false
             Test-Path (Join-Path $bundleRoot '.agentic\checks.tsv') | Should -Be $false
@@ -1495,6 +1525,9 @@ Describe 'install.ps1' {
             Test-Path (Join-Path $bundleRoot '.agentic\scripts\validate-skills.ps1') | Should -Be $true
             Test-Path (Join-Path $bundleRoot '.agentic\scripts\validate-skills.sh') | Should -Be $true
             Test-Path (Join-Path $bundleRoot '.agentic\schemas\skill-selection-v1.schema.json') | Should -Be $true
+            # v1.11.0 payload: cursor/copilot bridges ship.
+            Test-Path (Join-Path $bundleRoot '.cursor\rules\agentic-protocol.mdc') | Should -Be $true
+            Test-Path (Join-Path $bundleRoot '.github\instructions\agentic-protocol.instructions.md') | Should -Be $true
             Test-Path (Join-Path $bundleRoot '.agentic\orchestration\README.md') | Should -Be $true
             Test-Path (Join-Path $bundleRoot '.agentic\orchestration\coordinator.sh') | Should -Be $true
         }
@@ -1583,6 +1616,13 @@ Describe 'install.ps1' {
             foreach ($p in @('.agentic/profiles/README.md', '.agentic/profiles/prototype.md', '.agentic/profiles/standard.md', '.agentic/profiles/high-assurance.md', '.agentic/scripts/validate-task.sh', '.agentic/scripts/validate-task.ps1', '.agentic/templates/task.md')) {
                 $manifestText -match "$p`tmanaged`t" | Should -Be $true
             }
+
+            # v1.11.0 N-1 delivery: the upgrade installs the new bridges and
+            # records them as managed.
+            Test-Path (Join-Path $tmp '.cursor\rules\agentic-protocol.mdc') | Should -Be $true
+            Test-Path (Join-Path $tmp '.github\instructions\agentic-protocol.instructions.md') | Should -Be $true
+            $manifestText -match ".cursor/rules/agentic-protocol.mdc`tmanaged`t" | Should -Be $true
+            $manifestText -match ".github/instructions/agentic-protocol.instructions.md`tmanaged`t" | Should -Be $true
 
             Test-Path (Join-Path $tmp '.agentic\WORKFLOW.md.new') | Should -Be $true
             Test-Path (Join-Path $tmp '.aider.conf.yml.new') | Should -Be $true

@@ -5,6 +5,58 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.0] - 2026-09-05
+
+### Added
+- **Opt-in Cursor and Copilot adapters (ROADMAP Later-item).** Two thin
+  import-only bridges with no protocol duplication (ADR-0001): `--tools
+  cursor` installs `.cursor/rules/agentic-protocol.mdc` (`alwaysApply: true`,
+  pointer to `AGENTS.md` + `.agentic/WORKFLOW.md`, covering Agent mode where
+  legacy `.cursorrules` are invisible); `--tools copilot` installs
+  `.github/instructions/agentic-protocol.instructions.md` (`applyTo: **`,
+  pointer to `AGENTS.md`; the legacy v1.0 `.github/copilot-instructions.md`
+  path is untouched). Both are managed files in `install.sh`/`install.ps1`
+  with manifest registration, deselect-prune coverage, and `all` inclusion
+  (the default `claude,gemini,aider` set is unchanged). `AGENTS.md` §6 and the
+  README tool tables now document the 2026 landscape, including that Codex
+  CLI and other `AGENTS.md`-native tools need no adapter.
+- **`tests/perf/benchmark.sh` / `benchmark.ps1`.** Dev-only harness timing
+  contract validation + full text/JSON runs on a synthetic large contract
+  (default 300 no-op checks); not part of `checks.tsv`.
+
+### Changed
+- **Verifier large-contract performance (ROADMAP Later-item).** Same
+  contracts, same results, linear scaling — JSON/event output byte-identical
+  modulo `duration_ms` (proven by HEAD-vs-worktree equivalence runs in both
+  languages):
+  - `verify.sh`: per-check `python3 -c` timing spawns replaced by `now_ms()`
+    (EPOCHREALTIME → `date +%s%3N` → `SECONDS`); `json_escape` rewritten to
+    `printf -v` builtins with a zero-fork fast path (~500x on a 55-char ID);
+    duplicate-ID validation O(n²)→O(1) on bash 4+ (bash 3.2 linear fallback
+    kept); per-line `cd && pwd -P` resolution cached per distinct directory;
+    workspace seen/excluded membership O(1) on bash 4+.
+  - `verify.ps1`: project root resolved once per validation; per-check
+    command and working-directory resolutions cached per run (with `$null`
+    -safe sentinels).
+  - Measured on this host (300 checks): Bash validation 3.2s→0.45s,
+    PowerShell validation 4.1s→0.4s; 600-check scaling is linear again.
+- `.agentic/VERSION` and `protocol_version` swept to `1.11.0` across all
+  emitters (coordinator, validate-task, validate-context, validate-skills,
+  verify — bash+ps1 each), schemas, `evals/` runners/artifacts/schema, and
+  test expectations; the `checks.tsv` handoff-gate check now targets
+  `.agentic/tasks/TASK-019-adapters-and-performance.md`.
+- `scripts/build-bundle.sh` carries the two bridges; the bundle leak gate is
+  narrowed from `.github` to `.github/workflows` (`.github/instructions/` is
+  adopter payload, CI workflows still never travel).
+- `ROADMAP.md` Later-items for adapters + large-checks.tsv performance marked
+  done with version line at `1.11.0`; README gains the adapter rows and
+  `--tools` values.
+
+### Fixed
+- `json_escape` now emits strict 4-digit `\u00XX` escapes (`\u0001`,
+  previously the invalid 2-digit `\u01`). No test pinned the old form; JSON
+  output now parses under strict parsers.
+
 ## [1.10.0] - 2026-09-04
 
 ### Added

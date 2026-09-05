@@ -29,6 +29,7 @@
 - [x] TASK-016 — v1.9.0 release bookkeeping: context-module expansion + orchestration maturity (see `.agentic/tasks/TASK-016-v190-release-bookkeeping.md`)
 - [x] TASK-017 — Skills as a first-class category (v1.10.0, ADR-0014): `.agentic/skills/` registry with three initial skills, `validate-skills.sh`/`.ps1` with cross-language parity and stable diagnostics, `skill-selection-v1` schema, three-leg handoff gate, installer/bundle/upgrade registration, eval-harness third leg, `protocol_version` sweep to 1.10.0 (see `.agentic/tasks/TASK-017-skills-first-class-category.md`)
 - [x] TASK-018 — v1.10.0 release publication: annotated tag, published assets, supersede bookkeeping (see `.agentic/tasks/TASK-018-v1100-release-publication.md`)
+- [x] TASK-019 — Agent-tool adapters + checks.tsv performance (v1.11.0): opt-in `cursor`/`copilot` import-only bridges with installer/bundle/upgrade registration, verifier startup optimizations with cross-language output equivalence, `tests/perf/` benchmark, `protocol_version` sweep to 1.11.0 (see `.agentic/tasks/TASK-019-adapters-and-performance.md`)
 
 ## Recent Decisions
 

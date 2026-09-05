@@ -126,7 +126,7 @@ doc = json.loads(sys.stdin.read())
 assert doc["kind"] == "skill_validation_result", doc["kind"]
 assert doc["result"] == "VALID", doc["result"]
 assert doc["exit_code"] == 0, doc["exit_code"]
-assert doc["protocol_version"] == "1.10.0", doc["protocol_version"]
+assert doc["protocol_version"] == "1.11.0", doc["protocol_version"]
 assert [m["id"] for m in doc["invoked_skills"]] == ["verification-triage"], doc["invoked_skills"]
 assert doc["diagnostics"] == [], doc["diagnostics"]
 '

@@ -64,6 +64,13 @@ $script:RanRequired = $false
 $script:Blocked = $false
 $script:Detected = $false
 $script:CheckResults = @()
+# Per-run caches: command discovery and physical-path resolution cost a
+# process/filesystem round-trip each, so on large checks.tsv contracts (one
+# entry per monorepo package) they dominated verifier startup. Entries are
+# keyed by the exact lookup string within a single verifier run; the
+# filesystem is not expected to change mid-run.
+$script:CommandCache = @{}
+$script:CwdCache = @{}
 
 function Write-Log {
     param([string] $Message)
@@ -90,7 +97,7 @@ function Output-VerificationJson {
 
     $resultObject = [ordered]@{
         schema_version   = 1
-        protocol_version = "1.10.0"
+        protocol_version = "1.11.0"
         kind             = "verification_result"
         result           = $ResultStr
         exit_code        = $ExitCode
@@ -171,7 +178,12 @@ else {
 
 function Test-Command {
     param([string] $Name)
-    return [bool](Get-Command $Name -ErrorAction SilentlyContinue)
+    if ($script:CommandCache.ContainsKey("cmd:$Name")) {
+        return $script:CommandCache["cmd:$Name"]
+    }
+    $found = [bool](Get-Command $Name -ErrorAction SilentlyContinue)
+    $script:CommandCache["cmd:$Name"] = $found
+    return $found
 }
 
 function Get-CwdDisplay {
@@ -229,11 +241,20 @@ function Invoke-Check {
     $cwdDisplay = Get-CwdDisplay $Cwd
 
     $cwdAbsolute = Join-Path (Get-Location).Path $Cwd
-    try {
-        $resolvedCwdPath = Resolve-PhysicalPath $cwdAbsolute
+    if ($script:CwdCache.ContainsKey($cwdAbsolute)) {
+        $resolvedCwdPath = $script:CwdCache[$cwdAbsolute]
+        if ([string]::IsNullOrEmpty($resolvedCwdPath)) { $resolvedCwdPath = $null }
     }
-    catch {
-        $resolvedCwdPath = $null
+    else {
+        try {
+            $resolvedCwdPath = Resolve-PhysicalPath $cwdAbsolute
+        }
+        catch {
+            $resolvedCwdPath = $null
+        }
+        # A hashtable assignment of $null removes the key, so a missing
+        # directory caches as "" (still falsy for every downstream test).
+        $script:CwdCache[$cwdAbsolute] = if ($null -eq $resolvedCwdPath) { "" } else { $resolvedCwdPath }
     }
     if (-not $resolvedCwdPath -or -not [System.IO.Directory]::Exists($resolvedCwdPath)) {
         if ($Requirement -eq 'required') { $script:Blocked = $true }
@@ -269,9 +290,16 @@ function Invoke-Check {
             $resolvedExe = (Resolve-Path -LiteralPath $candidate).Path
         }
     }
+    elseif ($script:CommandCache.ContainsKey("exe:$Exe")) {
+        $resolvedExe = $script:CommandCache["exe:$Exe"]
+        if ([string]::IsNullOrEmpty($resolvedExe)) { $resolvedExe = $null }
+    }
     else {
         $found = Get-Command $Exe -ErrorAction SilentlyContinue
         if ($found) { $resolvedExe = $found.Source }
+        # A hashtable assignment of $null removes the key, so a missing
+        # executable caches as "" (still falsy for every downstream test).
+        $script:CommandCache["exe:$Exe"] = if ($null -eq $resolvedExe) { "" } else { $resolvedExe }
     }
 
     if (-not $resolvedExe) {
@@ -1066,6 +1094,22 @@ function Test-ChecksTsvValidation {
     $lineNum = 0
     $seenIds = @{}
     $rootPath = (Get-Location).Path
+    # The project root resolves identically for every line: compute it once
+    # instead of once per check line (dominant cost on large contracts).
+    try {
+        $resolvedRoot = Resolve-PhysicalPath $rootPath
+    }
+    catch {
+        throw ".agentic/checks.tsv project root '$rootPath' cannot be resolved ($($_.Exception.Message))."
+    }
+    $resolvedRootTrimmed = $resolvedRoot.TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar
+    )
+    $rootPrefix = $resolvedRootTrimmed + [System.IO.Path]::DirectorySeparatorChar
+    # Distinct working directories are few (often one); cache each physical
+    # resolution so a 300-package contract pays it once per directory.
+    $resolvedCwdCache = @{}
 
     foreach ($rawLine in $lines) {
         $lineNum++
@@ -1096,20 +1140,20 @@ function Test-ChecksTsvValidation {
         $seenIds[$id] = $true
 
         $targetCwd = Join-Path $rootPath $cwd
-        try {
-            $resolvedCwd = Resolve-PhysicalPath $targetCwd
-            $resolvedRoot = Resolve-PhysicalPath $rootPath
+        if ($resolvedCwdCache.ContainsKey($targetCwd)) {
+            $resolvedCwd = $resolvedCwdCache[$targetCwd]
         }
-        catch {
-            throw ".agentic/checks.tsv line $lineNum working directory '$cwd' cannot be resolved ($($_.Exception.Message))."
+        else {
+            try {
+                $resolvedCwd = Resolve-PhysicalPath $targetCwd
+            }
+            catch {
+                throw ".agentic/checks.tsv line $lineNum working directory '$cwd' cannot be resolved ($($_.Exception.Message))."
+            }
+            $resolvedCwdCache[$targetCwd] = $resolvedCwd
         }
         # Confinement requires an exact match or root followed by the directory
         # separator; a sibling path sharing the root's name prefix must not pass.
-        $resolvedRootTrimmed = $resolvedRoot.TrimEnd(
-            [System.IO.Path]::DirectorySeparatorChar,
-            [System.IO.Path]::AltDirectorySeparatorChar
-        )
-        $rootPrefix = $resolvedRootTrimmed + [System.IO.Path]::DirectorySeparatorChar
         $insideRoot =
             $resolvedCwd.Equals($resolvedRootTrimmed, $script:VerifierPathComparison) -or
             $resolvedCwd.StartsWith($rootPrefix, $script:VerifierPathComparison)

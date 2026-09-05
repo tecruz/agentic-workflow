@@ -68,6 +68,10 @@ The installer also manages the lifecycle of what it installed:
 - **Deselect an adapter**: re-run with a smaller `--tools`/`-Tools` list (e.g.
   `--tools claude`). The deselected adapter's files are removed; any custom
   content you added to a merge file outside the protocol block is preserved.
+  Available adapters: `claude`, `gemini`, `aider` (default set), plus opt-in
+  `cursor` (`.cursor/rules/agentic-protocol.mdc`) and `copilot`
+  (`.github/instructions/agentic-protocol.instructions.md`); `all` selects
+  every adapter. Codex CLI and other `AGENTS.md`-native tools need no adapter.
 - **`--prune`** (`-Prune`): removes every file no longer part of the install
   (deselected adapters, renamed framework files) and the legacy v1.0 adapter
   files (`.cursorrules`, `.windsurfrules`, `.clinerules`, `CONVENTIONS.md`,
@@ -403,6 +407,8 @@ CI on any mismatch. Both the Bats and Pester suites run on all three platforms;
 ├── AGENTS.md                      # Canonical protocol — single source of truth
 ├── CLAUDE.md / GEMINI.md          # Import-only entry points
 ├── .aider.conf.yml                # Aider reads AGENTS.md + WORKFLOW.md
+├── .cursor/rules/agentic-protocol.mdc                         # Opt-in Cursor bridge (`--tools cursor`)
+├── .github/instructions/agentic-protocol.instructions.md      # Opt-in Copilot bridge (`--tools copilot`)
 ├── install.sh / install.ps1       # Non-destructive cross-platform installers
 ├── scripts/
 │   └── build-bundle.sh            # Packages the clean adopter distribution
@@ -448,11 +454,12 @@ CI on any mismatch. Both the Bats and Pester suites run on all three platforms;
 | **OpenCode** | Reads `AGENTS.md` natively |
 | **Claude Code** | `CLAUDE.md` imports `AGENTS.md` + `.agentic/WORKFLOW.md` |
 | **Gemini CLI** | `GEMINI.md` imports `AGENTS.md` + `.agentic/WORKFLOW.md` |
-| **Cursor** | Reads `AGENTS.md` directly |
+| **Cursor** | Reads `AGENTS.md` directly; opt-in `--tools cursor` adds `.cursor/rules/agentic-protocol.mdc` (pointer only) |
 | **Windsurf** | Discovers `AGENTS.md` automatically |
 | **Cline / Roo Code** | Recognizes `AGENTS.md` as a rule source |
-| **GitHub Copilot** | Supports `AGENTS.md` files |
+| **GitHub Copilot** | Supports `AGENTS.md` files; opt-in `--tools copilot` adds `.github/instructions/agentic-protocol.instructions.md` (pointer only) |
 | **Aider** | `.aider.conf.yml` reads `AGENTS.md` + `.agentic/WORKFLOW.md` |
+| **Codex CLI and other `AGENTS.md`-native tools** | No adapter needed; install with the default `--tools` set |
 
 Entry points contain only imports or pointers — never duplicated protocol
 content. Change the protocol in **one place** (`AGENTS.md`) and every tool
