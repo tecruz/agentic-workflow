@@ -193,7 +193,10 @@ jobs:
           VERSION="$(cat .agentic/VERSION)"
           BUNDLE="dist/agentic-workflow-$VERSION"
           FAIL=0
-          for leak in tests .github docs evals .agentic/checks.tsv CHANGELOG.md README.md CONTRIBUTING.md SECURITY.md; do
+          # `.github` is narrowed to `.github/workflows`: `.github/instructions/`
+          # is adopter payload (the opt-in Copilot bridge, v1.11.0); framework
+          # CI workflows must still never travel.
+          for leak in tests .github/workflows docs evals .agentic/checks.tsv CHANGELOG.md README.md CONTRIBUTING.md SECURITY.md; do
             if [ -e "$BUNDLE/$leak" ]; then
               echo "::error Bundle leaked '$leak'"
               FAIL=1
