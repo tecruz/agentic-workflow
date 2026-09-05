@@ -128,6 +128,30 @@ trap cleanup_verify EXIT
 # project-relative so absolute user-home paths never leak into JSON output.
 PROJECT_ROOT="$(pwd -P)"
 
+# Associative-array fast paths (bash 4+ only). bash 3.2 (macOS) keeps the
+# linear fallbacks below; correctness never depends on this flag.
+ASSOC_OK=0
+if [ "${BASH_VERSINFO[0]:-0}" -ge 4 ]; then ASSOC_OK=1; fi
+
+# Millisecond clock without spawning an interpreter per check. Spawning
+# `python3 -c` twice per check dominated verifier overhead on large
+# checks.tsv contracts (tens of milliseconds per check just for timing).
+# Prefers bash 5 EPOCHREALTIME, then GNU date %3N, then SECONDS fallback.
+now_ms() {
+    if [ -n "${EPOCHREALTIME:-}" ]; then
+        local _sec="${EPOCHREALTIME%%.*}" _frac="${EPOCHREALTIME#*.}000"
+        printf '%s%s' "$_sec" "${_frac:0:3}"
+        return
+    fi
+    local _d
+    _d="$(date +%s%3N 2>/dev/null)" || _d=""
+    if [[ "$_d" =~ ^[0-9]+$ ]]; then
+        printf '%s' "$_d"
+        return
+    fi
+    printf '%d' "$((SECONDS * 1000))"
+}
+
 log() {
     if [ "$FORMAT" = "json" ]; then
         printf '%s\n' "$*" >&2
@@ -275,7 +299,7 @@ output_json_checked() {
         source_value="\"source\":\"checks_tsv\""
     fi
 
-    printf '{"schema_version":1,"protocol_version":"1.10.0","kind":"verification_result","result":"%s","exit_code":%d,%s,"summary":%s,"checks":[%s]}\n' \
+    printf '{"schema_version":1,"protocol_version":"1.11.0","kind":"verification_result","result":"%s","exit_code":%d,%s,"summary":%s,"checks":[%s]}\n' \
         "$res_str" "$exit_code" "$source_value" "$summary" "$checks_json"
 }
 
@@ -309,6 +333,12 @@ complete_verification() {
 # Handles: backslash, double-quote, tab, newline, carriage-return,
 # and remaining C0 control characters (0x00-0x1F except the above) as \u00XX.
 # UTF-8 continuation bytes (>= 0x80) pass through as valid JSON.
+#
+# Performance: the common case (no remaining C0 controls after the expansion
+# replacements) returns with zero forks. The slow path is pure bash builtins
+# via `printf -v` — the previous per-character `$(printf ...)` command
+# substitution forked a subshell per input character (~65ms per 55-char ID,
+# dominating JSON output on large checks.tsv contracts).
 json_escape() {
     local s="$1"
     # Quick escape for common JSON special characters.
@@ -319,20 +349,31 @@ json_escape() {
     s="${s//$'\t'/\\t}"
     s="${s//$'\n'/\\n}"
     s="${s//$'\r'/\\r}"
-    # Remaining C0 control characters (0x00-0x1F) are escaped as \u00XX.
+    # Fast path: no remaining C0 control characters, nothing more to do.
+    case "$s" in
+        *[$'\x01'-$'\x08'$'\x0b'$'\x0c'$'\x0e'-$'\x1f']*) ;;
+        *) printf '%s' "$s"; return ;;
+    esac
+    # Slow path: escape remaining C0 control characters (0x00-0x1F) as \u00XX.
     # UTF-8 continuation bytes (>= 0x80) pass through as valid JSON.
-    local result="" i len ch ascii
+    local result="" i len ch ascii hex
     len="${#s}"
     for (( i = 0; i < len; i++ )); do
         ch="${s:i:1}"
-        ascii=$(printf '%d' "'$ch" 2>/dev/null || echo 0)
+        # `printf -v` avoids the fork a $(...) substitution would cost here.
+        if printf -v ascii '%d' "'$ch" 2>/dev/null; then
+            :
+        else
+            ascii=""
+        fi
         # Guard against non-numeric ascii (e.g. multi-byte UTF-8 start)
         if ! [[ "$ascii" =~ ^[0-9]+$ ]] || [ "$ascii" -gt 255 ]; then
             # Pass through unknown characters as-is
             result+="$ch"
         elif [ "$ascii" -lt 32 ] && [ "$ascii" -ne 9 ] && [ "$ascii" -ne 10 ] && [ "$ascii" -ne 13 ]; then
             # Control character: escape as \u00XX
-            result+="$(printf '\\u%02x' "$ascii")"
+            printf -v hex '\\u%04x' "$ascii"
+            result+="$hex"
         else
             result+="$ch"
         fi
@@ -478,7 +519,7 @@ run_check() {
     fi
 
     local start_ms
-    start_ms="$(python3 -c 'import time; print(int(time.time()*1000))' 2>/dev/null || python -c 'import time; print(int(time.time()*1000))' 2>/dev/null || echo 0)"
+    start_ms="$(now_ms)"
 
     # bash 3.2 (macOS) treats expanding an empty array under `set -u` as an
     # unbound variable, so branch on whether the check takes arguments.
@@ -505,7 +546,7 @@ run_check() {
     fi
 
     local end_ms
-    end_ms="$(python3 -c 'import time; print(int(time.time()*1000))' 2>/dev/null || python -c 'import time; print(int(time.time()*1000))' 2>/dev/null || echo 0)"
+    end_ms="$(now_ms)"
     local duration_ms=$(( end_ms - start_ms ))
     [ "$duration_ms" -ge 0 ] || duration_ms=0
 
@@ -703,6 +744,15 @@ workspace_expand_pattern() {
     fi
 }
 
+# Records an excluded workspace directory, keeping the O(1) map in sync on
+# bash 4+ (see detect()). Relies on excluded_dirs / excluded_dirs_map being
+# visible in the caller's scope (dynamic scope via Bash).
+exclude_dir() {
+    local dir="$1"
+    excluded_dirs+=("$dir")
+    if [ "${ASSOC_OK:-0}" -eq 1 ]; then excluded_dirs_map[$dir]=1; fi
+}
+
 # Emits checks for a single package directory, appending to output_lines and
 # tracking seen_packages/excluded_dirs for workspace deduplication. Relies on
 # output_lines, seen_packages, and excluded_dirs being visible in the caller's
@@ -720,14 +770,20 @@ emit_checks_for_dir() {
         node_modules|target|build|.venv|.git) return ;;
     esac
     local seen=0 s
-    for s in "${seen_packages[@]:-}"; do
-        if [ "$s" = "$dir" ]; then seen=1; break; fi
-    done
-    if [ "$seen" -eq 1 ]; then return; fi
-    for s in "${excluded_dirs[@]:-}"; do
-        if [ "$s" = "$dir" ]; then return; fi
-    done
+    if [ "${ASSOC_OK:-0}" -eq 1 ]; then
+        [ -n "${seen_packages_map[$dir]+x}" ] && return
+        [ -n "${excluded_dirs_map[$dir]+x}" ] && return
+    else
+        for s in "${seen_packages[@]:-}"; do
+            if [ "$s" = "$dir" ]; then seen=1; break; fi
+        done
+        if [ "$seen" -eq 1 ]; then return; fi
+        for s in "${excluded_dirs[@]:-}"; do
+            if [ "$s" = "$dir" ]; then return; fi
+        done
+    fi
     seen_packages+=("$dir")
+    if [ "${ASSOC_OK:-0}" -eq 1 ]; then seen_packages_map[$dir]=1; fi
     local prefix="${dir//\//-}"
     prefix="${prefix//\\/-}"
     if [ -f "$dir/package.json" ]; then
@@ -843,6 +899,12 @@ detect() {
     local -a output_lines=()
     local -a seen_packages=()
     local -a excluded_dirs=()
+    # O(1) membership sets shadowing the arrays above on bash 4+ (dynamic
+    # scope makes them visible to emit_checks_for_dir; bash 3.2 never
+    # executes the declaration and keeps the linear scans).
+    if [ "$ASSOC_OK" -eq 1 ]; then
+        local -A seen_packages_map=() excluded_dirs_map=()
+    fi
 
     if [ -f package.json ]; then
         echo "Detected: Node.js project (package.json)" >&2
@@ -983,7 +1045,7 @@ detect() {
         for pat in "${_pnpm_excludes[@]:-}"; do
             while IFS= read -r d; do
                 [ -z "$d" ] && continue
-                excluded_dirs+=("$d")
+                exclude_dir "$d"
             done < <(workspace_expand_pattern "$pat")
         done
         for pat in "${_pnpm_includes[@]:-}"; do
@@ -1022,7 +1084,7 @@ detect() {
                     pat="${pat#!}"
                     while IFS= read -r d; do
                         [ -z "$d" ] && continue
-                        excluded_dirs+=("$d")
+                        exclude_dir "$d"
                     done < <(workspace_expand_pattern "$pat")
                 else
                     while IFS= read -r d; do
@@ -1049,7 +1111,7 @@ detect() {
                     [ -z "$pat" ] && continue
                     while IFS= read -r d; do
                         [ -z "$d" ] && continue
-                        excluded_dirs+=("$d")
+                        exclude_dir "$d"
                     done < <(workspace_expand_pattern "$pat")
                 done < <(printf '%s' "$_exclude_block" | grep -oE '"[^"]*"' | sed 's/^"//;s/"$//' || true)
             fi
@@ -1214,6 +1276,16 @@ validate_checks_tsv() {
     local line_num=0
     local line
     local -a seen_ids=()
+    # O(1) duplicate-ID set on bash 4+; bash 3.2 keeps the linear scan above.
+    # Resolved-directory cache (parallel arrays: distinct working directories
+    # are few, so a linear scan here stays O(1) amortized while avoiding one
+    # subshell fork per check line).
+    local -a rc_keys=() rc_vals=()
+    local use_map=0
+    if [ "$ASSOC_OK" -eq 1 ]; then
+        local -A seen_map=()
+        use_map=1
+    fi
     local root_dir
     root_dir="$(pwd -P)"
 
@@ -1258,18 +1330,23 @@ validate_checks_tsv() {
         fi
 
         local duplicate=0 seen
-        # Guarded expansion: bash 3.2 (macOS) treats expanding an empty array
-        # under `set -u` as an unbound variable.
-        if [ "${#seen_ids[@]}" -gt 0 ]; then
-            for seen in "${seen_ids[@]}"; do
-                if [ "$seen" = "$id" ]; then duplicate=1; break; fi
-            done
+        if [ "$use_map" -eq 1 ]; then
+            if [ -n "${seen_map[$id]+x}" ]; then duplicate=1; fi
+            seen_map[$id]=1
+        else
+            # Guarded expansion: bash 3.2 (macOS) treats expanding an empty array
+            # under `set -u` as an unbound variable.
+            if [ "${#seen_ids[@]}" -gt 0 ]; then
+                for seen in "${seen_ids[@]}"; do
+                    if [ "$seen" = "$id" ]; then duplicate=1; break; fi
+                done
+            fi
+            seen_ids+=("$id")
         fi
         if [ "$duplicate" -eq 1 ]; then
             echo "ERROR: .agentic/checks.tsv line $line_num has duplicate check ID '$id'." >&2
             exit 1
         fi
-        seen_ids+=("$id")
 
         # Lexical confinement: reject a working directory whose `..` components
         # pop above the project root without requiring the directory to exist.
@@ -1282,8 +1359,23 @@ validate_checks_tsv() {
         # subdirectory. A missing directory is not a configuration error here;
         # run_check reports it as BLOCKED (exit 2).
         if [ -e "$cwd" ]; then
-            local resolved_cwd
-            resolved_cwd="$(cd "$cwd" 2>/dev/null && pwd -P)" || true
+            local resolved_cwd="" _rc_hit=0 _rc_i
+            # Guarded expansion: bash 3.2 (macOS) treats expanding an empty
+            # array under `set -u` as an unbound variable.
+            if [ "${#rc_keys[@]}" -gt 0 ]; then
+                for _rc_i in "${!rc_keys[@]}"; do
+                    if [ "${rc_keys[$_rc_i]}" = "$cwd" ]; then
+                        resolved_cwd="${rc_vals[$_rc_i]}"
+                        _rc_hit=1
+                        break
+                    fi
+                done
+            fi
+            if [ "$_rc_hit" -eq 0 ]; then
+                resolved_cwd="$(cd "$cwd" 2>/dev/null && pwd -P)" || true
+                rc_keys+=("$cwd")
+                rc_vals+=("$resolved_cwd")
+            fi
             if [ -z "$resolved_cwd" ]; then
                 echo "ERROR: .agentic/checks.tsv line $line_num working directory '$cwd' cannot be resolved." >&2
                 exit 1

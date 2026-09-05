@@ -7,7 +7,7 @@
 
 ## Current state
 
-- **Version**: `1.10.0` (workspace/monorepo detection landed; deeper Android/Kotlin detection landed; context-module expansion + orchestration maturity landed; skills as a first-class category landed)
+- **Version**: `1.11.0` (workspace/monorepo detection landed; deeper Android/Kotlin detection landed; context-module expansion + orchestration maturity landed; skills as a first-class category landed; Cursor/Copilot bridges + verifier large-contract performance landed)
 - The core loop (`DISCOVER → CLASSIFY RISK → PLAN → IMPLEMENT → VERIFY →
   HANDOFF`), the honest verification model, the non-destructive installer, risk
   profiles + evidence contracts, context modules + behavioral evals, and the
@@ -97,13 +97,33 @@ registry now ships parallel to context modules (ADR-0014):
 
 ## Later / ideas (no target)
 
+- **More agent-tool adapters — done in v1.11.0.** Two opt-in import-only
+  bridges following the existing `CLAUDE.md` / `GEMINI.md` pattern (no
+  protocol duplication, ADR-0001): `--tools cursor` installs
+  `.cursor/rules/agentic-protocol.mdc` (`alwaysApply: true`, pointer to
+  `AGENTS.md` + `.agentic/WORKFLOW.md`, covering Agent mode where legacy
+  `.cursorrules` are invisible); `--tools copilot` installs
+  `.github/instructions/agentic-protocol.instructions.md` (`applyTo: **`,
+  pointer to `AGENTS.md`). Codex CLI and other `AGENTS.md`-native tools need
+  no adapter (documented in the `AGENTS.md` §6 / README tool tables).
+  Registered in both installers, `build-bundle.sh` (bundle leak gate narrowed
+  from `.github` to `.github/workflows`), and the install manifest with
+  deselect-prune coverage; `all` includes them, the default set is unchanged.
+- **Performance of large checks.tsv — done in v1.11.0.** Verifier startup
+  profiled on a 300/600-check synthetic contract (`tests/perf/benchmark.sh` /
+  `.ps1`) and the quadratic/overhead hotspots removed without behavior change
+  (JSON/event output byte-identical modulo `duration_ms`): Bash no longer
+  spawns `python3` twice per check (`now_ms`: EPOCHREALTIME → `date +%s%3N` →
+  `SECONDS`), `json_escape` no longer forks per character (`printf -v` +
+  fast path, ~500x), duplicate-ID validation and workspace seen/excluded
+  sets are O(1) on bash 4+ with bash 3.2 fallbacks, and per-line
+  `cd && pwd -P` resolution is cached per distinct directory; PowerShell
+  resolves the project root once and caches command + working-directory
+  lookups per run. Validation on 300 checks: ~4s → <0.5s (both languages);
+  scaling is linear again. Bonus correctness fix: `\u` escapes now emit the
+  strict 4-digit form (`\u0001`, previously `\u01`).
 - **Optional-check policy review** — re-examine whether `optional` check
   failures should ever be promotable to blocking warnings on CI.
-- **More agent-tool adapters** — add import-only entry points as new tools ship
-  agent-instructions support (following the existing `CLAUDE.md` / `GEMINI.md`
-  pattern).
-- **Performance of large checks.tsv** — profile verifier startup on monorepos
-  with hundreds of packages after item 1 lands.
 
 ## How items land
 

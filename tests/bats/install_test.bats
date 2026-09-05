@@ -242,6 +242,31 @@ keep me" ]
     [ ! -f .aider.conf.yml ]
 }
 
+@test "--tools cursor,copilot installs both import-only bridges" {
+    bash "$INSTALL" . --tools cursor,copilot >/dev/null 2>&1
+    [ -f .cursor/rules/agentic-protocol.mdc ]
+    [ -f .github/instructions/agentic-protocol.instructions.md ]
+    grep -q "alwaysApply: true" .cursor/rules/agentic-protocol.mdc
+    grep -q "applyTo:" .github/instructions/agentic-protocol.instructions.md
+    grep -q "AGENTS.md" .cursor/rules/agentic-protocol.mdc
+    grep -q "AGENTS.md" .github/instructions/agentic-protocol.instructions.md
+}
+
+@test "--tools all includes the cursor and copilot bridges" {
+    bash "$INSTALL" . --tools all >/dev/null 2>&1
+    [ -f .cursor/rules/agentic-protocol.mdc ]
+    [ -f .github/instructions/agentic-protocol.instructions.md ]
+}
+
+@test "deselecting cursor and copilot prunes their bridges" {
+    bash "$INSTALL" . --tools all >/dev/null 2>&1
+    [ -f .cursor/rules/agentic-protocol.mdc ]
+    bash "$INSTALL" . --tools claude >/dev/null 2>&1
+    [ ! -f .cursor/rules/agentic-protocol.mdc ]
+    [ ! -f .github/instructions/agentic-protocol.instructions.md ]
+    ! grep -q 'agentic-protocol' .agentic/install-manifest.tsv
+}
+
 @test "--generate-checks writes stack-detected checks into .agentic/checks.tsv" {
     printf '{"name":"x","scripts":{"test":"true"}}\n' > package.json
     bash "$INSTALL" . --generate-checks >/dev/null 2>&1
@@ -1008,7 +1033,9 @@ SHIM
     BUNDLE="$REPO_ROOT/dist/agentic-workflow-$(cat "$REPO_ROOT/.agentic/VERSION")"
     [ ! -e "$BUNDLE/.agentic/checks.tsv" ]
     [ ! -e "$BUNDLE/tests" ]
-    [ ! -e "$BUNDLE/.github" ]
+    [ ! -e "$BUNDLE/.github/workflows" ]
+    [ -f "$BUNDLE/.github/instructions/agentic-protocol.instructions.md" ]
+    [ -f "$BUNDLE/.cursor/rules/agentic-protocol.mdc" ]
     [ ! -e "$BUNDLE/docs" ]
     [ ! -e "$BUNDLE/CHANGELOG.md" ]
     [ ! -e "$BUNDLE/README.md" ]
@@ -1044,6 +1071,9 @@ SHIM
     [ -f "$BUNDLE/.agentic/orchestration/README.md" ]
     [ -x "$BUNDLE/.agentic/orchestration/coordinator.sh" ]
     [ -f "$BUNDLE/.agentic/templates/task.md" ]
+    # v1.11.0 payload: cursor/copilot import-only bridges ship in the bundle.
+    [ -f "$BUNDLE/.cursor/rules/agentic-protocol.mdc" ]
+    [ -f "$BUNDLE/.github/instructions/agentic-protocol.instructions.md" ]
 }
 
 @test "end-to-end: install from the bundle into an empty project" {
@@ -1425,6 +1455,12 @@ SH
     for f in ".agentic/profiles/README.md" ".agentic/profiles/prototype.md" ".agentic/profiles/standard.md" ".agentic/profiles/high-assurance.md" ".agentic/scripts/validate-task.sh" ".agentic/scripts/validate-task.ps1" ".agentic/templates/task.md"; do
         awk -F '\t' -v expected="$f" '$1 == expected && $2 == "managed" { found = 1 } END { exit found ? 0 : 1 }' .agentic/install-manifest.tsv
     done
+
+    # v1.11.0 N-1 delivery: the upgrade installs the new bridges as managed.
+    [ -f .cursor/rules/agentic-protocol.mdc ]
+    [ -f .github/instructions/agentic-protocol.instructions.md ]
+    awk -F '\t' '$1 == ".cursor/rules/agentic-protocol.mdc" && $2 == "managed" { found = 1 } END { exit found ? 0 : 1 }' .agentic/install-manifest.tsv
+    awk -F '\t' '$1 == ".github/instructions/agentic-protocol.instructions.md" && $2 == "managed" { found = 1 } END { exit found ? 0 : 1 }' .agentic/install-manifest.tsv
 
     # Verify modified managed files produced .new conflict candidates and compare byte-for-byte with current managed sources
     [ -f .agentic/WORKFLOW.md.new ]

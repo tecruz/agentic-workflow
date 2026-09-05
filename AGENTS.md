@@ -109,11 +109,12 @@ Reusable procedures live in the on-demand registry under `.agentic/skills/` — 
 | **OpenCode** | Reads `AGENTS.md` natively |
 | **Claude Code** | `CLAUDE.md` imports `@AGENTS.md` and `@.agentic/WORKFLOW.md` |
 | **Gemini CLI** | `GEMINI.md` imports `@./AGENTS.md` and `@./.agentic/WORKFLOW.md` |
-| **Cursor** | Reads root and nested `AGENTS.md` directly |
+| **Cursor** | Reads root and nested `AGENTS.md` directly; opt-in `--tools cursor` adds `.cursor/rules/agentic-protocol.mdc` (`alwaysApply`, pointer only) for Agent-mode discovery |
 | **Windsurf** | Discovers and scopes `AGENTS.md` automatically |
 | **Cline / Roo Code** | Recognizes `AGENTS.md` as a supported rule source |
-| **GitHub Copilot** | Supports one or more repository `AGENTS.md` files |
+| **GitHub Copilot** | Supports one or more repository `AGENTS.md` files; opt-in `--tools copilot` adds `.github/instructions/agentic-protocol.instructions.md` (`applyTo: **`, pointer only) |
 | **Aider** | `.aider.conf.yml` reads `AGENTS.md` and `.agentic/WORKFLOW.md` |
+| **Codex CLI and other `AGENTS.md`-native tools** | No adapter needed; install with the default `--tools` set |
 
 Entry points contain only imports or pointers — never duplicated protocol content.
 

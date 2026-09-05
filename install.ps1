@@ -45,7 +45,7 @@
     Back up files to .agentic-backup/ before modifying.
 
 .PARAMETER Tools
-    Comma-separated tool adapters: claude,gemini,aider,all.
+    Comma-separated tool adapters: claude,gemini,aider,cursor,copilot,all.
     Default: claude,gemini,aider. AGENTS.md is always installed; other tools
     read AGENTS.md natively.
 
@@ -98,7 +98,7 @@ Usage:
   ./install.ps1 [-Target <dir>] [options]
 
   -Target <dir>          Project directory to install into (default: current).
-  -Tools <list>          Comma-separated adapters: claude,gemini,aider,all.
+  -Tools <list>          Comma-separated adapters: claude,gemini,aider,cursor,copilot,all.
                          Default: claude,gemini,aider. AGENTS.md is always
                          installed; other tools read AGENTS.md natively.
   -Update                Update an existing install (default when a manifest
@@ -160,15 +160,15 @@ $script:CategoryComparer = [System.StringComparer]::Ordinal
 
 $ToolsList = @()
 if ($Tools -eq "all") {
-    $ToolsList = @("claude", "gemini", "aider")
+    $ToolsList = @("claude", "gemini", "aider", "cursor", "copilot")
 }
 else {
     $ToolsList = @($Tools -split ',')
 }
 foreach ($t in $ToolsList) {
-    if ([string]::IsNullOrWhiteSpace($t) -or $t -notin @("claude", "gemini", "aider")) {
+    if ([string]::IsNullOrWhiteSpace($t) -or $t -notin @("claude", "gemini", "aider", "cursor", "copilot")) {
         if ([string]::IsNullOrWhiteSpace($t)) { $t = '' }
-        Write-Host "Error: unknown tool '$t' (expected claude, gemini, aider, or all)."
+        Write-Host "Error: unknown tool '$t' (expected claude, gemini, aider, cursor, copilot, or all)."
         exit 2
     }
 }
@@ -258,6 +258,8 @@ foreach ($t in $ToolsList) {
         "claude" { $MergeFiles += "CLAUDE.md" }
         "gemini" { $MergeFiles += "GEMINI.md" }
         "aider"  { $ManagedFiles += ".aider.conf.yml" }
+        "cursor" { $ManagedFiles += ".cursor/rules/agentic-protocol.mdc" }
+        "copilot" { $ManagedFiles += ".github/instructions/agentic-protocol.instructions.md" }
     }
 }
 
@@ -310,6 +312,8 @@ foreach ($f in $ManagedFiles) {
     if ($f -notin $ManagedPaths) { $ManagedPaths += $f }
 }
 if (".aider.conf.yml" -notin $ManagedPaths) { $ManagedPaths += ".aider.conf.yml" }
+if (".cursor/rules/agentic-protocol.mdc" -notin $ManagedPaths) { $ManagedPaths += ".cursor/rules/agentic-protocol.mdc" }
+if (".github/instructions/agentic-protocol.instructions.md" -notin $ManagedPaths) { $ManagedPaths += ".github/instructions/agentic-protocol.instructions.md" }
 
 # Comparer-backed sets for category membership and duplicate detection. Built
 # once here so every manifest validation and prune decision uses the same
@@ -1387,6 +1391,8 @@ function Assert-NotPartial {
             "claude" { "CLAUDE.md" }
             "gemini" { "GEMINI.md" }
             "aider"  { ".aider.conf.yml" }
+            "cursor" { ".cursor/rules/agentic-protocol.mdc" }
+            "copilot" { ".github/instructions/agentic-protocol.instructions.md" }
             default  { $null }
         }
         if ($rel -and -not (Test-Path -LiteralPath (Join-Path $TargetDir $rel))) {

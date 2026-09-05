@@ -89,10 +89,14 @@ mkdir -p "$BUNDLE/.agentic/rules" \
          "$BUNDLE/.agentic/skills/task-decomposition" \
          "$BUNDLE/.agentic/skills/verification-triage" \
          "$BUNDLE/.agentic/skills/release-verification" \
-         "$BUNDLE/.agentic/orchestration"
+         "$BUNDLE/.agentic/orchestration" \
+         "$BUNDLE/.cursor/rules" \
+         "$BUNDLE/.github/instructions"
 
 # Root-level protocol entry points and installers.
 cp "$ROOT/AGENTS.md" "$ROOT/CLAUDE.md" "$ROOT/GEMINI.md" "$ROOT/.aider.conf.yml" "$BUNDLE/"
+cp "$ROOT/.cursor/rules/agentic-protocol.mdc" "$BUNDLE/.cursor/rules/"
+cp "$ROOT/.github/instructions/agentic-protocol.instructions.md" "$BUNDLE/.github/instructions/"
 cp "$ROOT/LICENSE" "$BUNDLE/"
 cp "$ROOT/install.sh" "$ROOT/install.ps1" "$BUNDLE/"
 
@@ -123,8 +127,10 @@ cp "$ROOT/.agentic/orchestration/coordinator.sh" "$ROOT/.agentic/orchestration/c
 
 # Safety: the bundle must never leak the framework's own checks, dev-only
 # dirs, or the behavioral-evaluation harness (evals are framework-development
-# material, not adopter payload).
-for leak in ".agentic/checks.tsv" "tests" ".github" "docs" "evals" "CHANGELOG.md" "README.md" "CONTRIBUTING.md" "SECURITY.md"; do
+# material, not adopter payload). `.github` is narrowed to `.github/workflows`
+# because `.github/instructions/` is adopter payload (the opt-in Copilot
+# bridge); the framework's own CI workflows must still never travel.
+for leak in ".agentic/checks.tsv" "tests" ".github/workflows" "docs" "evals" "CHANGELOG.md" "README.md" "CONTRIBUTING.md" "SECURITY.md"; do
     if [ -e "$BUNDLE/$leak" ]; then
         echo "ERROR: bundle leaked '$leak'; aborting." >&2
         exit 1

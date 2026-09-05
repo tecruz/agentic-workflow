@@ -1,0 +1,15 @@
+---
+applyTo: "**"
+---
+
+# Universal Agentic Development Protocol (Copilot bridge)
+
+This repository follows the Universal Agentic Development Protocol.
+The canonical instructions live in `AGENTS.md`; this file is a thin
+import-only bridge and duplicates nothing on purpose.
+
+- Read `AGENTS.md` and `.agentic/WORKFLOW.md` before starting any task.
+- Follow the 5-phase loop (`DISCOVER → CLASSIFY RISK → PLAN → IMPLEMENT →
+  VERIFY → HANDOFF`) and the risk profile declared in the task file.
+- `.agentic/checks.tsv` is the authoritative definition of done.
+- Change the protocol in `AGENTS.md`, never here.

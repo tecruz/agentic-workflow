@@ -536,7 +536,7 @@ function Invoke-Evaluation([string]$ScenarioPath) {
 
     $doc = [ordered]@{
         schema_version       = 1
-        protocol_version     = '1.10.0'
+        protocol_version     = '1.11.0'
         kind                 = 'behavioral_evaluation_result'
         mode                 = 'offline-fixture'
         observed_result      = $observed

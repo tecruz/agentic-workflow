@@ -136,7 +136,7 @@ $Approval
             $r = Invoke-Coord $tmp @('-Approve', '-Worker', 'exit 0', '-Format', 'Json', '.agentic/tasks/TASK-904.md')
             $r.Code | Should -Be 0
             $r.Output | Should -Match '"result":"PASS"'
-            $r.Output | Should -Match '"protocol_version":"1.10.0"'
+            $r.Output | Should -Match '"protocol_version":"1.11.0"'
         } finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
     }
 
