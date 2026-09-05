@@ -1340,7 +1340,9 @@ SH
     BUNDLE="$EXTRACT_DIR/agentic-workflow-$VERSION"
 
     [ ! -e "$BUNDLE/tests" ]
-    [ ! -e "$BUNDLE/.github" ]
+    [ ! -e "$BUNDLE/.github/workflows" ]
+    [ -f "$BUNDLE/.github/instructions/agentic-protocol.instructions.md" ]
+    [ -f "$BUNDLE/.cursor/rules/agentic-protocol.mdc" ]
     [ ! -e "$BUNDLE/docs" ]
     [ ! -e "$BUNDLE/.agentic/checks.tsv" ]
     [ ! -e "$BUNDLE/CHANGELOG.md" ]
@@ -1366,7 +1368,9 @@ SH
     [ -n "$BUNDLE" ] || skip "could not locate bundle after zip extraction"
 
     [ ! -e "$BUNDLE/tests" ]
-    [ ! -e "$BUNDLE/.github" ]
+    [ ! -e "$BUNDLE/.github/workflows" ]
+    [ -f "$BUNDLE/.github/instructions/agentic-protocol.instructions.md" ]
+    [ -f "$BUNDLE/.cursor/rules/agentic-protocol.mdc" ]
     [ ! -e "$BUNDLE/docs" ]
     [ ! -e "$BUNDLE/.agentic/checks.tsv" ]
     [ ! -e "$BUNDLE/CHANGELOG.md" ]
