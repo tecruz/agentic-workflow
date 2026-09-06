@@ -1183,10 +1183,11 @@ detect() {
         # nx.json projects can be an object {"app": "apps/app", "lib": "libs/lib"}
         # or absent/default (* means infer from package.json workspaces).
         if grep -q '"projects"' nx.json 2>/dev/null; then
-            # Extract directory values: lines matching "key": "value" (value is a dir)
+            # Extract directory values: lines matching "key": "value" (value is a dir).
+            # POSIX character classes: BSD grep/sed (macOS Bash 3.2) lack \s.
             local _nx_dirs
-            _nx_dirs="$(grep -oE '"[a-zA-Z0-9._-]+"\s*:\s*"[^"]+"' nx.json \
-                | sed -E 's/^[^:]*:\s*"([^"]+)".*/\1/' || true)"
+            _nx_dirs="$(grep -oE '"[a-zA-Z0-9._-]+"[[:space:]]*:[[:space:]]*"[^"]+"' nx.json \
+                | sed -E 's/^[^:]*:[[:space:]]*"([^"]+)".*/\1/' || true)"
             local _nxd
             while IFS= read -r _nxd; do
                 [ -z "$_nxd" ] && continue
