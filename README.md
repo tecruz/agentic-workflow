@@ -528,6 +528,9 @@ Enable JSONL event stream with `--events .agentic/runs/run.jsonl`. Events:
 ---
 
 ## Customization
+
+- **Change the protocol**: edit `AGENTS.md` and `.agentic/WORKFLOW.md` — the
+  entry points pick it up automatically; re-run the installer to push updates
   into adopting projects.
 - **Add stack-specific rules**: drop a new file into `.agentic/rules/` and
   reference it from `AGENTS.md`.

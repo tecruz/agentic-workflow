@@ -122,8 +122,16 @@ registry now ships parallel to context modules (ADR-0014):
   lookups per run. Validation on 300 checks: ~4s → <0.5s (both languages);
   scaling is linear again. Bonus correctness fix: `\u` escapes now emit the
   strict 4-digit form (`\u0001`, previously `\u01`).
-- **Optional-check policy review** — re-examine whether `optional` check
-  failures should ever be promotable to blocking warnings on CI.
+- **Optional-check policy review** — **Resolved**: optional check failures
+  must never be promotable to blocking. ADR-0002 establishes the invariant
+  that `optional` checks run when tooling is available but never fail a run;
+  the JSON schema enforces this structurally (`optional_failed` is separate
+  from `failed`, and PASS invariants constrain only `failed`). Adding a
+  `--strict-optional` promotion flag would undermine the honest verification
+  model without clear benefit — adopters who need stricter gating should mark
+  the check `required` in `checks.tsv` instead.
+
+All later-items have landed as of v1.11.0.
 
 ## How items land
 
