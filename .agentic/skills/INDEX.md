@@ -22,6 +22,9 @@
 | task-decomposition | 1 | standard | Breaking a request into atomic, verifiable steps before planning |
 | verification-triage | 1 | standard | Diagnosing a check failure, forming a root-cause hypothesis, repairing |
 | release-verification | 1 | standard | Confirming VERSION/CHANGELOG/tag agreement, bundle and archive integrity |
+| dependency-audit | 1 | standard | Manifest or lockfile changes, dependency upgrades, supply-chain implications |
+| migration-rollback | 1 | high-assurance | Schema changes, backfills, destructive data operations needing a recovery plan |
+| perf-investigation | 1 | standard | Latency/memory regressions, benchmark-justified hot-path changes |
 
 ## Rules
 

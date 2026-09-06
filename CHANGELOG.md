@@ -5,7 +5,31 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.11.0] - 2026-09-05
+## [1.12.0] - 2026-09-06
+
+### Added
+- **Three new skills** (expanding the skills registry under ADR-0014):
+  `dependency-audit` (standard profile, CI-integrated dependency checks),
+  `migration-rollback` (high-assurance profile, reversible migration
+  planning with preflight checks and checkpoint commits), and
+  `perf-investigation` (standard profile, Perfetto/system-trace-driven
+  performance analysis). Registered in `install.sh`/`install.ps1`,
+  `build-bundle.sh`, and `skills/INDEX.md`. Covered by Bats/Pester
+  validator tests.
+- **Nx, Turborepo, and Bazel workspace detection** (ADR-0015). `verify.sh`
+  and `verify.ps1` now detect `nx.json` (project paths via `projects`
+  field), `turbo.json` (delegates to existing package-manager workspace
+  detection), and `WORKSPACE`/`WORKSPACE.bazel` (emits `bazel test //...`
+  and `bazel build //...` at the workspace root). Two new fixtures
+  (`nx-workspace`, `bazel-workspace`) with golden contracts; covered by
+  `run-fixtures.sh`/`run-fixtures.ps1`.
+
+### Changed
+- **.NET lint-check gating parity.** `dotnet-lint` is now emitted only
+  when an `.editorconfig` file exists at the workspace root (the driver
+  for `dotnet format`), closing a gap with the pnpm/yarn/bun/Python/Maven
+  gating pattern documented in ADR-0002. Go and Rust remain intentionally
+  unconditional (standard toolchain components). Fixture golden updated.
 
 ### Added
 - **Opt-in Cursor and Copilot adapters (ROADMAP Later-item).** Two thin

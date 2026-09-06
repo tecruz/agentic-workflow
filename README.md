@@ -313,6 +313,9 @@ parallel to context modules:
 | `task-decomposition` | `standard` | breaking a request into atomic, verifiable steps before planning |
 | `verification-triage` | `standard` | diagnosing a check failure, forming a root-cause hypothesis, repairing |
 | `release-verification` | `standard` | confirming VERSION/CHANGELOG/tag agreement, bundle and archive integrity |
+| `dependency-audit` | `standard` | manifest or lockfile changes, dependency upgrades, supply-chain implications |
+| `migration-rollback` | `high-assurance` | schema changes, backfills, destructive data operations needing a recovery plan |
+| `perf-investigation` | `standard` | latency/memory regressions, benchmark-justified hot-path changes |
 
 - During **PLAN** agents inspect `.agentic/skills/INDEX.md`, invoke every
   skill whose *Invoked when* triggers match the task, and record each
@@ -372,7 +375,7 @@ installed, so project type detection never depends on the local machine.
 | Java (Maven) | `pom.xml` | `mvn test`, `mvn checkstyle:check`; `./mvnw` / `mvnw.cmd` when a wrapper is present | `java-maven`, `java-maven-wrapper` |
 | Java (Gradle) | `build.gradle` / `build.gradle.kts` | `gradle test`, `gradle check`; `./gradlew` / `gradlew.bat` when a wrapper is present | `gradle-wrapper` |
 | Android / Kotlin (Gradle) | `build.gradle` / `build.gradle.kts` referencing `com.android` / `org.jetbrains.kotlin.android` (root or module), a version-catalog/convention-plugin declaration, or an `AndroidManifest.xml` | `test`, `lint`, `assembleDebug` via the Gradle wrapper or `gradle` | `android-gradle` |
-| .NET | `*.sln` / `*.csproj` | `dotnet test`, `dotnet format --verify-no-changes` | `dotnet-sln-only`, `dotnet-csproj-only` |
+| .NET | `*.sln` / `*.csproj` | `dotnet test`; `dotnet format --verify-no-changes` when a `.editorconfig` is present | `dotnet-sln-only`, `dotnet-csproj-only` |
 | Workspace / monorepo | `pnpm-workspace.yaml` (`packages`), `package.json` `workspaces` (array or `{packages:[...]}`), `Cargo.toml` `[workspace]` `members`/`exclude`, `pom.xml` `<modules>`, `settings.gradle(.kts)` `include` (`:a:b` → `a/b`), plus legacy `apps/`, `services/`, `packages/`, `modules/` | merged detection per workspace package, deduplicated | `pnpm-workspace`, `npm-workspaces`, `yarn-workspaces-object`, `cargo-workspace`, `maven-modules`, `gradle-multimodule`, `pnpm-workspace-recursive`, `monorepo`, `nested-monorepo` |
 
 Detection notes:
@@ -385,13 +388,19 @@ Detection notes:
   module build files and module `AndroidManifest.xml` files, emitting
   wrapper-aware `test` / `lint` / `assembleDebug` checks per Android module
   without cross-module contamination.
-- **Workspace discovery** now interprets `pnpm-workspace.yaml` `packages` (globs, `!` exclusions, `*`/`**`), `package.json` `workspaces` (array and object forms, `!` exclusions), `Cargo.toml` `[workspace]` `members` and `exclude` (globs), `pom.xml` `<modules>` (literal dirs, globs), and `settings.gradle(.kts)` `include` (`:lib:core` → `lib/core`). Results are deduplicated against the legacy one-level scan of `apps/`, `services/`, `packages/`, `modules/`. Nx, Turborepo, and Bazel are not yet interpreted.
+- **Workspace discovery** now interprets `pnpm-workspace.yaml` `packages` (globs, `!` exclusions, `*`/`**`), `package.json` `workspaces` (array and object forms, `!` exclusions), `Cargo.toml` `[workspace]` `members` and `exclude` (globs), `pom.xml` `<modules>` (literal dirs, globs), and `settings.gradle(.kts)` `include` (`:lib:core` → `lib/core`). Results are deduplicated against the legacy one-level scan of `apps/`, `services/`, `packages/`, `modules/`. **Nx** (`nx.json` `projects` field) discovers workspace members that may not appear in the package-manager workspace list. **Turborepo** (`turbo.json`) is recognized and delegates to the existing package-manager workspace detection. **Bazel** (`WORKSPACE`/`WORKSPACE.bazel`) emits `bazel test //...` and `bazel build //...` at the workspace root.
 - The Gradle/Maven wrapper emitted is the platform script: `gradlew.bat` /
   `mvnw.cmd` on Windows, `./gradlew` / `./mvnw` on Linux/macOS.
-- **Optional-check gating**: pnpm/yarn/bun `lint` checks are emitted only when
-  `package.json` defines a `lint` script (npm keeps `--if-present`); the Python
-  `ruff` check only when Ruff is configured (`[tool.ruff]`, `ruff.toml`, or
-  `.ruff.toml`); `maven-lint` only when the POM references Checkstyle.
+- **Lint-check gating**: lint checks are emitted only when the project shows
+  an adoption signal, so a tool the project never adopted cannot produce a
+  false BLOCKED/FAIL. pnpm/yarn/bun `lint` requires a `lint` script in
+  `package.json` (npm keeps `--if-present`); the Python `ruff` check requires
+  Ruff configuration (`[tool.ruff]`, `ruff.toml`, or `.ruff.toml`);
+  `maven-lint` requires Checkstyle in the POM; `dotnet-lint` requires a
+  `.editorconfig` (dotnet format's driver). Go `go vet` and Rust
+  `cargo clippy -- -D warnings` are intentionally unconditional: both are
+  standard toolchain components with no optional-adoption signal, and their
+  strictness is the point.
 
 The fixture smoke harnesses (`tests/fixtures/run-fixtures.sh` and
 `tests/fixtures/run-fixtures.ps1`) exercise the complete fixture list and fail

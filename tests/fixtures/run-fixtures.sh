@@ -109,6 +109,8 @@ expect_detect maven-modules         mvn module-a
 expect_detect gradle-multimodule    gradle app-gradle
 expect_detect android-version-catalog gradle app-android-unit
 expect_detect android-convention-plugin gradle app-android-unit
+expect_detect nx-workspace          libs-ui apps-web
+expect_detect bazel-workspace       bazel
 expect_detect pnpm-workspace-recursive npm packages-foo
 expect_detect unsupported         __none__
 

@@ -1,0 +1,7 @@
+{
+  "projects": {
+    "web": "apps/web",
+    "ui": "libs/ui"
+  },
+  "defaultProject": "web"
+}

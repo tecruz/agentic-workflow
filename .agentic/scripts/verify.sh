@@ -299,7 +299,7 @@ output_json_checked() {
         source_value="\"source\":\"checks_tsv\""
     fi
 
-    printf '{"schema_version":1,"protocol_version":"1.11.0","kind":"verification_result","result":"%s","exit_code":%d,%s,"summary":%s,"checks":[%s]}\n' \
+    printf '{"schema_version":1,"protocol_version":"1.12.0","kind":"verification_result","result":"%s","exit_code":%d,%s,"summary":%s,"checks":[%s]}\n' \
         "$res_str" "$exit_code" "$source_value" "$summary" "$checks_json"
 }
 
@@ -619,6 +619,17 @@ ruff_configured() {
     return 1
 }
 
+# Returns 0 when the directory $1 has adopted dotnet format. `dotnet format`
+# is driven by the repository's `.editorconfig` (and analyzer settings), so a
+# project without one has not adopted it and the lint check would only
+# produce a false BLOCKED/FAIL later — the same adoption-signal logic used
+# for JS lint scripts, Ruff, and Checkstyle.
+dotnet_format_configured() {
+    local dir="$1"
+    [ -f "$dir/.editorconfig" ] && return 0
+    return 1
+}
+
 # Returns 0 when $1 is the project root and the project uses Android/Kotlin-Android
 # Gradle. Checks root-level build files, version catalogs, and convention plugins.
 # This is used for ROOT-LEVEL detection.
@@ -882,7 +893,9 @@ emit_checks_for_dir() {
     if compgen -G "$dir/*.sln" >/dev/null 2>&1 || compgen -G "$dir/*.csproj" >/dev/null 2>&1; then
         echo "Detected: Workspace .NET project ($dir)" >&2
         output_lines+=("required	${prefix}-dotnet-test	$dir	dotnet	test")
-        output_lines+=("required	${prefix}-dotnet-lint	$dir	dotnet	format	--verify-no-changes")
+        if dotnet_format_configured "$dir"; then
+            output_lines+=("required	${prefix}-dotnet-lint	$dir	dotnet	format	--verify-no-changes")
+        fi
     fi
 }
 
@@ -1007,7 +1020,9 @@ detect() {
     if compgen -G '*.sln' >/dev/null 2>&1 || compgen -G '*.csproj' >/dev/null 2>&1; then
         echo "Detected: .NET project (*.sln / *.csproj)" >&2
         output_lines+=("required	dotnet-test	.	dotnet	test")
-        output_lines+=("required	dotnet-lint	.	dotnet	format	--verify-no-changes")
+        if dotnet_format_configured .; then
+            output_lines+=("required	dotnet-lint	.	dotnet	format	--verify-no-changes")
+        fi
     fi
 
     # Workspace manifest detection: pnpm, npm/yarn, Cargo, Maven, Gradle.
@@ -1160,6 +1175,43 @@ detect() {
             done <<< "$_gradle_includes"
         fi
     done
+
+    # Nx monorepo (nx.json): projects field lists workspace member directories
+    # that may fall outside the package-manager's workspace field.
+    if [ -f nx.json ]; then
+        echo "Detected: Nx workspace (nx.json)" >&2
+        # nx.json projects can be an object {"app": "apps/app", "lib": "libs/lib"}
+        # or absent/default (* means infer from package.json workspaces).
+        if grep -q '"projects"' nx.json 2>/dev/null; then
+            # Extract directory values: lines matching "key": "value" (value is a dir).
+            # POSIX character classes: BSD grep/sed (macOS Bash 3.2) lack \s.
+            local _nx_dirs
+            _nx_dirs="$(grep -oE '"[a-zA-Z0-9._-]+"[[:space:]]*:[[:space:]]*"[^"]+"' nx.json \
+                | sed -E 's/^[^:]*:[[:space:]]*"([^"]+)".*/\1/' || true)"
+            local _nxd
+            while IFS= read -r _nxd; do
+                [ -z "$_nxd" ] && continue
+                emit_checks_for_dir "$_nxd"
+            done <<< "$_nx_dirs"
+        fi
+        # If projects was absent or * (default), existing package-manager
+        # workspace detection (pnpm/npm/yarn) already discovered members.
+    fi
+
+    # Turborepo (turbo.json): a task-runner overlay on package-manager workspaces.
+    # turbo.json defines pipeline task dependencies, not project paths; workspace
+    # members are discovered by the existing pnpm/npm/yarn detection above.
+    if [ -f turbo.json ]; then
+        echo "Detected: Turborepo workspace (turbo.json)" >&2
+    fi
+
+    # Bazel (WORKSPACE / WORKSPACE.bazel): emits bazel test //... and build //...
+    # at the workspace root; //... covers all targets in sub-packages.
+    if [ -f WORKSPACE ] || [ -f WORKSPACE.bazel ]; then
+        echo "Detected: Bazel workspace (WORKSPACE)" >&2
+        output_lines+=("required	bazel-test	.	bazel	test	//...")
+        output_lines+=("required	bazel-build	.	bazel	build	//...")
+    fi
 
     for base in apps services packages modules; do
         if [ -d "$base" ]; then

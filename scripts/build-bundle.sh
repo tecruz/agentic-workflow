@@ -89,6 +89,9 @@ mkdir -p "$BUNDLE/.agentic/rules" \
          "$BUNDLE/.agentic/skills/task-decomposition" \
          "$BUNDLE/.agentic/skills/verification-triage" \
          "$BUNDLE/.agentic/skills/release-verification" \
+         "$BUNDLE/.agentic/skills/dependency-audit" \
+         "$BUNDLE/.agentic/skills/migration-rollback" \
+         "$BUNDLE/.agentic/skills/perf-investigation" \
          "$BUNDLE/.agentic/orchestration" \
          "$BUNDLE/.cursor/rules" \
          "$BUNDLE/.github/instructions"
@@ -119,7 +122,7 @@ for _mod in security-review database-migrations dependency-changes infrastructur
     cp "$ROOT/.agentic/context/$_mod/MODULE.md" "$BUNDLE/.agentic/context/$_mod/"
 done
 cp "$ROOT/.agentic/skills/INDEX.md" "$BUNDLE/.agentic/skills/"
-for _sk in task-decomposition verification-triage release-verification; do
+for _sk in task-decomposition verification-triage release-verification dependency-audit migration-rollback perf-investigation; do
     cp "$ROOT/.agentic/skills/$_sk/SKILL.md" "$BUNDLE/.agentic/skills/$_sk/"
 done
 cp "$ROOT/.agentic/orchestration/README.md" "$BUNDLE/.agentic/orchestration/"

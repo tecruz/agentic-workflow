@@ -95,7 +95,7 @@ configure_test_git_identity() {
 @test "fresh install creates the skills registry and skills validators" {
     bash "$INSTALL" . >/dev/null 2>&1
     [ -f .agentic/skills/INDEX.md ]
-    for sk in task-decomposition verification-triage release-verification; do
+    for sk in task-decomposition verification-triage release-verification dependency-audit migration-rollback perf-investigation; do
         [ -f ".agentic/skills/$sk/SKILL.md" ]
     done
     [ -f .agentic/scripts/validate-skills.sh ]
@@ -1062,7 +1062,7 @@ SHIM
     done
     [ -f "$BUNDLE/.agentic/schemas/context-selection-v1.schema.json" ]
     [ -f "$BUNDLE/.agentic/skills/INDEX.md" ]
-    for sk in task-decomposition verification-triage release-verification; do
+    for sk in task-decomposition verification-triage release-verification dependency-audit migration-rollback perf-investigation; do
         [ -f "$BUNDLE/.agentic/skills/$sk/SKILL.md" ]
     done
     [ -f "$BUNDLE/.agentic/scripts/validate-skills.sh" ]

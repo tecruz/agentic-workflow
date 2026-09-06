@@ -28,6 +28,14 @@ Describe 'validate-skills.ps1 skill-invocation validator' {
         Invoke-Validator 'skill-valid-multi.md' | Select-Object -ExpandProperty Code | Should -Be 0
     }
 
+    It 'VALID (0) for the v1.12.0 expansion skills' {
+        Invoke-Validator 'skill-valid-new-skills.md' | Select-Object -ExpandProperty Code | Should -Be 0
+    }
+
+    It 'INVALID (1) when a standard task invokes the high-assurance migration-rollback skill' {
+        Invoke-Validator 'skill-migration-profile-floor.md' | Select-Object -ExpandProperty Code | Should -Be 1
+    }
+
     It 'VALID (0) for the None required sentinel' {
         Invoke-Validator 'skill-valid-none.md' | Select-Object -ExpandProperty Code | Should -Be 0
     }
@@ -102,7 +110,7 @@ Describe 'validate-skills.ps1 skill-invocation validator' {
         $doc.kind | Should -Be 'skill_validation_result'
         $doc.result | Should -Be 'VALID'
         $doc.exit_code | Should -Be 0
-        $doc.protocol_version | Should -Be '1.11.0'
+        $doc.protocol_version | Should -Be '1.12.0'
         @($doc.invoked_skills).Count | Should -Be 1
         $doc.invoked_skills[0].id | Should -Be 'verification-triage'
         $doc.invoked_skills[0].version | Should -Be 1

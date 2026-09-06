@@ -97,7 +97,7 @@ function Output-VerificationJson {
 
     $resultObject = [ordered]@{
         schema_version   = 1
-        protocol_version = "1.11.0"
+        protocol_version = "1.12.0"
         kind             = "verification_result"
         result           = $ResultStr
         exit_code        = $ExitCode
@@ -493,6 +493,16 @@ function Test-RuffConfig {
            (Test-Path -LiteralPath (Join-Path $Path '.ruff.toml'))
 }
 
+function Test-DotnetFormatConfig {
+    # Returns true when the directory $Path has adopted dotnet format. `dotnet
+    # format` is driven by the repository's `.editorconfig` (and analyzer
+    # settings), so a project without one has not adopted it and the lint
+    # check would only produce a false BLOCKED/FAIL later — the same
+    # adoption-signal logic used for JS lint scripts, Ruff, and Checkstyle.
+    param([string] $Path)
+    return Test-Path -LiteralPath (Join-Path $Path '.editorconfig')
+}
+
 function Test-MavenCheckstyle {
     # The lint check is only emitted for Maven projects that configured it.
     param([string] $Path)
@@ -712,7 +722,9 @@ function Get-DetectedChecks {
         if ((Get-ChildItem -Path $dir -Filter *.sln -File -ErrorAction SilentlyContinue) -or (Get-ChildItem -Path $dir -Filter *.csproj -File -ErrorAction SilentlyContinue)) {
             Write-Log "Detected: Workspace .NET project ($dir)"
             $script:WorkspaceLines += "required`t${prefix}-dotnet-test`t${dir}`tdotnet`ttest"
-            $script:WorkspaceLines += "required`t${prefix}-dotnet-lint`t${dir}`tdotnet`tformat`t--verify-no-changes"
+            if (Test-DotnetFormatConfig $dir) {
+                $script:WorkspaceLines += "required`t${prefix}-dotnet-lint`t${dir}`tdotnet`tformat`t--verify-no-changes"
+            }
         }
     }
 
@@ -807,7 +819,9 @@ function Get-DetectedChecks {
         (Get-ChildItem -Path . -Filter *.csproj -File -ErrorAction SilentlyContinue)) {
         Write-Log "Detected: .NET project (*.sln / *.csproj)"
         $lines += "required`tdotnet-test`t.`tdotnet`ttest"
-        $lines += "required`tdotnet-lint`t.`tdotnet`tformat`t--verify-no-changes"
+        if (Test-DotnetFormatConfig '.') {
+            $lines += "required`tdotnet-lint`t.`tdotnet`tformat`t--verify-no-changes"
+        }
     }
 
     # Sync root checks to workspace script vars
@@ -937,6 +951,36 @@ function Get-DetectedChecks {
                 }
             }
         }
+    }
+
+    # Nx monorepo (nx.json): projects field lists workspace member directories
+    # that may fall outside the package-manager's workspace field.
+    if (Test-Path -LiteralPath 'nx.json') {
+        Write-Log "Detected: Nx workspace (nx.json)"
+        if ((Get-Content -LiteralPath 'nx.json' -Raw -ErrorAction SilentlyContinue) -match '"projects"') {
+            $nxText = Get-Content -LiteralPath 'nx.json' -ErrorAction SilentlyContinue
+            $nxDirs = @($nxText | ForEach-Object { if ($_ -match '"[^"]+"\s*:\s*"([^"]+)"') { $Matches[1] } })
+            foreach ($d in $nxDirs) {
+                if ($d -and $d -notmatch "[\t\n\r\x1f\p{Cc}]") { Emit-PackageChecks -Dir $d }
+            }
+        }
+        # If projects was absent or * (default), existing package-manager
+        # workspace detection already discovered members.
+    }
+
+    # Turborepo (turbo.json): a task-runner overlay on package-manager workspaces.
+    # turbo.json defines pipeline task dependencies, not project paths; workspace
+    # members are discovered by the existing pnpm/npm/yarn detection above.
+    if (Test-Path -LiteralPath 'turbo.json') {
+        Write-Log "Detected: Turborepo workspace (turbo.json)"
+    }
+
+    # Bazel (WORKSPACE / WORKSPACE.bazel): emits bazel test //... and build //...
+    # at the workspace root; //... covers all targets in sub-packages.
+    if ((Test-Path -LiteralPath 'WORKSPACE') -or (Test-Path -LiteralPath 'WORKSPACE.bazel')) {
+        Write-Log "Detected: Bazel workspace (WORKSPACE)"
+        $script:WorkspaceLines += "required`tbazel-test`t.`tbazel`ttest`t//..."
+        $script:WorkspaceLines += "required`tbazel-build`t.`tbazel`tbuild`t//..."
     }
 
     foreach ($base in @('apps', 'services', 'packages', 'modules')) {
