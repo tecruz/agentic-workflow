@@ -979,8 +979,8 @@ function Get-DetectedChecks {
     # at the workspace root; //... covers all targets in sub-packages.
     if ((Test-Path -LiteralPath 'WORKSPACE') -or (Test-Path -LiteralPath 'WORKSPACE.bazel')) {
         Write-Log "Detected: Bazel workspace (WORKSPACE)"
-        $lines += "required`tbazel-test`t.`tbazel`ttest`t//..."
-        $lines += "required`tbazel-build`t.`tbazel`tbuild`t//..."
+        $script:WorkspaceLines += "required`tbazel-test`t.`tbazel`ttest`t//..."
+        $script:WorkspaceLines += "required`tbazel-build`t.`tbazel`tbuild`t//..."
     }
 
     foreach ($base in @('apps', 'services', 'packages', 'modules')) {
