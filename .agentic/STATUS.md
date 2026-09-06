@@ -31,6 +31,7 @@
 - [x] TASK-018 — v1.10.0 release publication: annotated tag, published assets, supersede bookkeeping (see `.agentic/tasks/TASK-018-v1100-release-publication.md`)
 - [x] TASK-019 — Agent-tool adapters + checks.tsv performance (v1.11.0): opt-in `cursor`/`copilot` import-only bridges with installer/bundle/upgrade registration, verifier startup optimizations with cross-language output equivalence, `tests/perf/` benchmark, `protocol_version` sweep to 1.11.0 (see `.agentic/tasks/TASK-019-adapters-and-performance.md`)
 - [x] TASK-020 — v1.11.0 release publication: annotated tag, published assets, supersede bookkeeping (see `.agentic/tasks/TASK-020-v1110-release-publication.md`)
+- [x] TASK-021 — README customization fix + optional-check policy resolution: restored dropped Customization intro/first bullet, resolved ROADMAP optional-check review as no-change (ADR-0002 invariant holds; no --strict-optional flag) (see `.agentic/tasks/TASK-021-readme-fix-and-optional-policy.md`)
 
 ## Recent Decisions
 
