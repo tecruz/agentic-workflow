@@ -118,6 +118,8 @@ Expect-Detect "maven-modules" @("mvn", "module-a")
 Expect-Detect "gradle-multimodule" @("gradle", "app-gradle")
 Expect-Detect "android-version-catalog" @("gradle", "app-android-unit")
 Expect-Detect "android-convention-plugin" @("gradle", "app-android-unit")
+Expect-Detect "nx-workspace" @("nx", "apps-web")
+Expect-Detect "bazel-workspace" @("bazel")
 Expect-Detect "pnpm-workspace-recursive" @("npm", "packages-foo")
 Expect-Detect "unsupported" @("__none__")
 

@@ -1,0 +1,6 @@
+required	apps-web-node-lint	apps/web	npm	run	lint	--if-present
+required	apps-web-node-test	apps/web	npm	test
+required	libs-ui-node-lint	libs/ui	npm	run	lint	--if-present
+required	libs-ui-node-test	libs/ui	npm	test
+required	node-lint	.	npm	run	lint	--if-present
+required	node-test	.	npm	test

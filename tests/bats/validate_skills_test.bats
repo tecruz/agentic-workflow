@@ -29,6 +29,16 @@ classify_with_registry() {  # classify_with_registry <registry-dir> <fixture>
     [ "$status" -eq 0 ]
 }
 
+@test "VALID (0) for the v1.12.0 expansion skills" {
+    classify skill-valid-new-skills.md
+    [ "$status" -eq 0 ]
+}
+
+@test "INVALID (1) when a standard task invokes the high-assurance migration-rollback skill" {
+    classify skill-migration-profile-floor.md
+    [ "$status" -eq 1 ]
+}
+
 @test "VALID (0) for the None required sentinel" {
     classify skill-valid-none.md
     [ "$status" -eq 0 ]

@@ -123,14 +123,14 @@ Describe 'install.ps1' {
         try {
             & $install -Target $tmp *> $null
             Test-Path (Join-Path $tmp '.agentic\skills\INDEX.md') | Should -Be $true
-            foreach ($sk in @('task-decomposition','verification-triage','release-verification')) {
+            foreach ($sk in @('task-decomposition','verification-triage','release-verification','dependency-audit','migration-rollback','perf-investigation')) {
                 Test-Path (Join-Path $tmp ".agentic\skills\$sk\SKILL.md") | Should -Be $true
             }
             Test-Path (Join-Path $tmp '.agentic\scripts\validate-skills.ps1') | Should -Be $true
             Test-Path (Join-Path $tmp '.agentic\schemas\skill-selection-v1.schema.json') | Should -Be $true
             $manifest = Get-Content -Raw (Join-Path $tmp '.agentic\install-manifest.tsv')
             $manifest -match "\.agentic/skills/INDEX\.md`tmanaged" | Should -Be $true
-            foreach ($sk in @('task-decomposition','verification-triage','release-verification')) {
+            foreach ($sk in @('task-decomposition','verification-triage','release-verification','dependency-audit','migration-rollback','perf-investigation')) {
                 $manifest -match "\.agentic/skills/$sk/SKILL\.md`tmanaged" | Should -Be $true
             }
             $manifest -match "\.agentic/scripts/validate-skills\.ps1`tmanaged" | Should -Be $true
@@ -1519,7 +1519,7 @@ Describe 'install.ps1' {
             Test-Path (Join-Path $bundleRoot '.agentic\schemas\context-selection-v1.schema.json') | Should -Be $true
             # v1.10.0 payload: skills registry, validators, and schema ship.
             Test-Path (Join-Path $bundleRoot '.agentic\skills\INDEX.md') | Should -Be $true
-            foreach ($sk in @('task-decomposition','verification-triage','release-verification')) {
+            foreach ($sk in @('task-decomposition','verification-triage','release-verification','dependency-audit','migration-rollback','perf-investigation')) {
                 Test-Path (Join-Path $bundleRoot ".agentic\skills\$sk\SKILL.md") | Should -Be $true
             }
             Test-Path (Join-Path $bundleRoot '.agentic\scripts\validate-skills.ps1') | Should -Be $true
@@ -1771,7 +1771,7 @@ Describe 'install.ps1' {
             Test-Path (Join-Path $tmp '.agentic\schemas\context-selection-v1.schema.json') | Should -Be $true
             # v1.10.0 additions landed as managed files.
             Test-Path (Join-Path $tmp '.agentic\skills\INDEX.md') | Should -Be $true
-            foreach ($sk in @('task-decomposition','verification-triage','release-verification')) {
+            foreach ($sk in @('task-decomposition','verification-triage','release-verification','dependency-audit','migration-rollback','perf-investigation')) {
                 Test-Path (Join-Path $tmp ".agentic\skills\$sk\SKILL.md") | Should -Be $true
             }
             Test-Path (Join-Path $tmp '.agentic\scripts\validate-skills.ps1') | Should -Be $true
