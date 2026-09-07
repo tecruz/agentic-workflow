@@ -7,7 +7,7 @@
 
 ## Current state
 
-- **Version**: `1.11.0` (workspace/monorepo detection landed; deeper Android/Kotlin detection landed; context-module expansion + orchestration maturity landed; skills as a first-class category landed; Cursor/Copilot bridges + verifier large-contract performance landed)
+- **Version**: `1.12.0` (workspace/monorepo detection landed; deeper Android/Kotlin detection landed; context-module expansion + orchestration maturity landed; skills as a first-class category landed; Cursor/Copilot bridges + verifier large-contract performance landed; Nx/Turborepo/Bazel workspace detection landed; .NET lint-check gating parity landed; skills expansion landed)
 - The core loop (`DISCOVER → CLASSIFY RISK → PLAN → IMPLEMENT → VERIFY →
   HANDOFF`), the honest verification model, the non-destructive installer, risk
   profiles + evidence contracts, context modules + behavioral evals, and the
@@ -131,7 +131,7 @@ registry now ships parallel to context modules (ADR-0014):
   model without clear benefit — adopters who need stricter gating should mark
   the check `required` in `checks.tsv` instead.
 
-All later-items have landed as of v1.11.0.
+All later-items have landed as of v1.12.0.
 
 ## How items land
 

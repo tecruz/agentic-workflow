@@ -32,6 +32,7 @@
 - [x] TASK-019 — Agent-tool adapters + checks.tsv performance (v1.11.0): opt-in `cursor`/`copilot` import-only bridges with installer/bundle/upgrade registration, verifier startup optimizations with cross-language output equivalence, `tests/perf/` benchmark, `protocol_version` sweep to 1.11.0 (see `.agentic/tasks/TASK-019-adapters-and-performance.md`)
 - [x] TASK-020 — v1.11.0 release publication: annotated tag, published assets, supersede bookkeeping (see `.agentic/tasks/TASK-020-v1110-release-publication.md`)
 - [x] TASK-021 — README customization fix + optional-check policy resolution: restored dropped Customization intro/first bullet, resolved ROADMAP optional-check review as no-change (ADR-0002 invariant holds; no --strict-optional flag) (see `.agentic/tasks/TASK-021-readme-fix-and-optional-policy.md`)
+- [x] TASK-022 — v1.12.0 release bookkeeping: skills expansion (3 new skills), .NET lint-check gating parity, Nx/Turborepo/Bazel workspace detection (ADR-0015), annotated tag (see `.agentic/tasks/TASK-022-v1120-release-bookkeeping.md`)
 
 ## Recent Decisions
 
@@ -44,10 +45,13 @@
 - ADR-0012 — Workspace and monorepo detection (see `docs/decisions/ADR-0012-workspace-monorepo-detection.md`)
 - ADR-0013 — Deeper Android and Kotlin detection (see `docs/decisions/ADR-0013-deeper-android-kotlin-detection.md`)
 - ADR-0014 — Skills as a first-class category (see `docs/decisions/ADR-0014-skills-as-first-class-category.md`)
+- ADR-0015 — Nx, Turborepo, and Bazel workspace detection (see `docs/decisions/ADR-0015-nx-turborepo-bazel-detection.md`)
 
 ## Notes
 
-- **v1.11.0 — agent-tool adapters + verifier performance** (released 2026-09-05 as annotated tag `v1.11.0` on `2fa065a`): opt-in `cursor` (`alwaysApply` `.mdc`) / `copilot` (`applyTo: **` instructions) import-only bridges with installer/bundle/upgrade registration; verifier startup optimizations with cross-language output equivalence (Bash validate 3.2s→0.45s, PS 4.1s→0.4s on 300 checks); `tests/perf/` benchmark twins; `protocol_version` sweep to `1.11.0`; published 3 assets as Latest (`agentic-workflow-1.11.0.tar.gz`, `.zip`, `SHA256SUMS`). The v1.10.0 release is marked as superseded. See `TASK-019`, `TASK-020`, `CHANGELOG.md` `[1.11.0]`, and `ROADMAP.md` (Later-items done).
+- **v1.12.0 — skills expansion + Nx/Turborepo/Bazel workspace detection** (released 2026-09-07 as annotated tag `v1.12.0` on `88ec62b`): three new skills (`dependency-audit`, `migration-rollback`, `perf-investigation`) expanding the skills registry under ADR-0014; `.editorconfig`-gated `dotnet-lint` emission closing the lint-check gating parity gap; Nx (`nx.json` `projects` field), Turborepo (`turbo.json` signal), and Bazel (`WORKSPACE`/`WORKSPACE.bazel` emitting `bazel test //...` and `bazel build //...`) workspace detection (ADR-0015); two new fixtures (`nx-workspace`, `bazel-workspace`) with golden contracts; `protocol_version` sweep to `1.12.0`; published 3 assets as Latest (`agentic-workflow-1.12.0.tar.gz`, `.zip`, `SHA256SUMS`). The v1.11.0 release is marked as superseded. See `TASK-022`, `ADR-0015`, `CHANGELOG.md` `[1.12.0]`, and `ROADMAP.md` (all items done).
+
+- **v1.11.0 — agent-tool adapters + verifier performance** (released 2026-09-05 as annotated tag `v1.11.0` on `2fa065a`): opt-in `cursor` (`alwaysApply` `.mdc`) / `copilot` (`applyTo: **` instructions) import-only bridges with installer/bundle/upgrade registration; verifier startup optimizations with cross-language output equivalence (Bash validate 3.2s→0.45s, PS 4.1s→0.4s on 300 checks); `tests/perf/` benchmark twins; `protocol_version` sweep to `1.11.0`; published 3 assets as Latest (`agentic-workflow-1.11.0.tar.gz`, `.zip`, `SHA256SUMS`). The v1.10.0 release is marked as superseded. See `TASK-019`, `TASK-020`, `CHANGELOG.md` `[1.11.0]`, and `ROADMAP.md` (Later-items done). Superseded by v1.12.0.
 
 - **v1.10.0 — skills as a first-class category** (released 2026-09-04 as annotated tag `v1.10.0` on `48f7d91`): `.agentic/skills/` registry (`task-decomposition`, `verification-triage`, `release-verification`) with 17 fixtures, `validate-skills.sh`/`.ps1` parity, three-leg handoff gate, installer/bundle/upgrade registration, eval-harness `SKILLS_CONTRACT_VALID` leg on all eight scenarios; `protocol_version` sweep to `1.10.0`; published 3 assets as Latest (`agentic-workflow-1.10.0.tar.gz`, `.zip`, `SHA256SUMS`). The v1.9.0 release is marked as superseded. See `TASK-017`, `TASK-018`, `ADR-0014`, `CHANGELOG.md` `[1.10.0]`, and `ROADMAP.md` (Item 6 done). Superseded by v1.11.0.
 
