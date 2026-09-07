@@ -1183,11 +1183,13 @@ detect() {
         # nx.json projects can be an object {"app": "apps/app", "lib": "libs/lib"}
         # or absent/default (* means infer from package.json workspaces).
         if grep -q '"projects"' nx.json 2>/dev/null; then
-            # Extract directory values: lines matching "key": "value" (value is a dir).
-            # POSIX character classes: BSD grep/sed (macOS Bash 3.2) lack \s.
+            # Key regex: any non-quote char (supports scoped keys @org/pkg).
+            # Filter known non-directory scalars (defaultProject, cli, etc.).
             local _nx_dirs
-            _nx_dirs="$(grep -oE '"[a-zA-Z0-9._-]+"[[:space:]]*:[[:space:]]*"[^"]+"' nx.json \
-                | sed -E 's/^[^:]*:[[:space:]]*"([^"]+)".*/\1/' || true)"
+            _nx_dirs="$(grep -oE '"[^"]+"[[:space:]]*:[[:space:]]*"[^"]+"' nx.json \
+                | sed -E 's/^[^:]*:[[:space:]]*"([^"]+)".*/\1/' \
+                | grep -vE '^(defaultProject|defaultBase|cli|nxCloudAccessToken|pluginsPath)$' \
+                || true)"
             local _nxd
             while IFS= read -r _nxd; do
                 [ -z "$_nxd" ] && continue
@@ -1195,7 +1197,7 @@ detect() {
             done <<< "$_nx_dirs"
         fi
         # If projects was absent or * (default), existing package-manager
-        # workspace detection (pnpm/npm/yarn) already discovered members.
+        # workspace detection already discovered members.
     fi
 
     # Turborepo (turbo.json): a task-runner overlay on package-manager workspaces.

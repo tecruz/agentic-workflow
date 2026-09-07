@@ -89,6 +89,26 @@ jobs:
           bash -n .agentic/scripts/validate-skills.sh
           bash -n .agentic/scripts/validate-handoff.sh
 
+      - name: protocol_version sweep consistency
+        run: |
+          EXPECTED="$(cat .agentic/VERSION)"
+          echo "Expected protocol_version: $EXPECTED"
+          # Check emitters, schemas, coordinator, and evals (not historical
+          # task records or README notes, which legitimately reference old versions).
+          FOUND="$(grep -roh --include='*.sh' --include='*.ps1' --include='*.json' --include='*.tsv' \
+            'protocol_version[^0-9]*[0-9]\+\.[0-9]\+\.[0-9]\+' \
+            .agentic/scripts/ .agentic/schemas/ .agentic/orchestration/ \
+            evals/run-evals.sh evals/run-evals.ps1 evals/generate-scenarios.ps1 \
+            evals/schemas/ evals/scenarios/ \
+            | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | sort -u)"
+          if [ "$FOUND" != "$EXPECTED" ]; then
+            echo "FAIL: protocol_version mismatch"
+            echo "Expected: $EXPECTED"
+            echo "Found: $FOUND"
+            exit 1
+          fi
+          echo "PASS: all protocol_version sites agree on $EXPECTED"
+
       - name: Validate completed tasks through the composite handoff gate
         run: |
           bash .agentic/scripts/validate-handoff.sh .agentic/tasks/TASK-002-risk-profiles-and-evidence-contracts.md

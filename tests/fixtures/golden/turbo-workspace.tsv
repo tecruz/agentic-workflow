@@ -1,0 +1,4 @@
+required	node-lint	.	npm	run	lint	--if-present
+required	node-test	.	npm	test
+required	packages-foo-node-lint	packages/foo	npm	run	lint	--if-present
+required	packages-foo-node-test	packages/foo	npm	test
