@@ -30,7 +30,7 @@ total=${#task_files[@]}
 
 declare -A status_count
 for tf in "${task_files[@]}"; do
-  s="$(sed -n 's/^Status:[[:space:]]*\(.*\)$/\1/p' "$tf" 2>/dev/null | head -1 || true)"
+  s="$(sed -n 's/^Status:[[:space:]]*\(.*\)$/\1/p' "$tf" 2>/dev/null || true)"
   s="$(trim "$s")"
   [ -z "$s" ] && s="unknown"
   status_count["$s"]=$(( ${status_count["$s"]:-0} + 1 ))
@@ -53,7 +53,7 @@ for tf in "${task_files[@]}"; do
       break
     fi
     if $in_section && [[ "$line" =~ ^-\ (.+)\ v[0-9]+\ loaded\  ]]; then
-      mod_id="$(echo "$line" | sed -E 's/^- ([^ ]+) v[0-9]+ loaded.*/\1/')"
+      mod_id="$(echo "$line" | sed -E 's/^- ([^ ]+) v[0-9]+ loaded.*/\1/' || true)"
       module_tasks["$mod_id"]="${module_tasks["$mod_id"]:+${module_tasks["$mod_id"]}, }${base}"
       module_total=$(( module_total + 1 ))
     fi
@@ -88,7 +88,7 @@ done
 
 declare -A profile_count
 for tf in "${task_files[@]}"; do
-  p="$(sed -n 's/^Profile:[[:space:]]*\(.*\)$/\1/p' "$tf" 2>/dev/null | head -1 || true)"
+  p="$(sed -n 's/^Profile:[[:space:]]*\(.*\)$/\1/p' "$tf" 2>/dev/null || true)"
   p="$(trim "$p")"
   [ -z "$p" ] && p="unknown"
   profile_count["$p"]=$(( ${profile_count["$p"]:-0} + 1 ))
@@ -108,15 +108,15 @@ fi
 # which BSD grep on macOS does not support.
 extract_proto_version() {  # extract_proto_version <file> → version or empty
     local f="$1" v
-    v="$(sed -n 's/.*"protocol_version"[[:space:]]*:[[:space:]]*"\([0-9][^"]*\)".*/\1/p' "$f" 2>/dev/null | head -1)"
+    v="$(sed -n 's/.*"protocol_version"[[:space:]]*:[[:space:]]*"\([0-9][^"]*\)".*/\1/p' "$f" 2>/dev/null)"
     if [ -z "$v" ]; then
-        v="$(sed -n 's/.*protocol_version[[:space:]]*=[[:space:]]*"\([0-9][^"]*\)".*/\1/p' "$f" 2>/dev/null | head -1)"
+        v="$(sed -n 's/.*protocol_version[[:space:]]*=[[:space:]]*"\([0-9][^"]*\)".*/\1/p' "$f" 2>/dev/null)"
     fi
     if [ -z "$v" ]; then
-        v="$(sed -n 's/.*PROTOCOL_VERSION="\([0-9][^"]*\)".*/\1/p' "$f" 2>/dev/null | head -1)"
+        v="$(sed -n 's/.*PROTOCOL_VERSION="\([0-9][^"]*\)".*/\1/p' "$f" 2>/dev/null)"
     fi
     if [ -z "$v" ]; then
-        v="$(sed -n 's/.*ProtocolVersion[[:space:]]*=[[:space:]]*"\([0-9][^"]*\)".*/\1/p' "$f" 2>/dev/null | head -1)"
+        v="$(sed -n 's/.*ProtocolVersion[[:space:]]*=[[:space:]]*"\([0-9][^"]*\)".*/\1/p' "$f" 2>/dev/null)"
     fi
     printf '%s' "$v"
 }

@@ -10,11 +10,11 @@ Describe 'health-report.ps1 project health summary' {
     BeforeEach {
         $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
         $script:report = Join-Path $repoRoot '.agentic' 'scripts' 'health-report.ps1'
-    }
 
-    function Invoke-HealthReport {
-        $out = & pwsh -NoProfile -File $script:report 2>&1
-        return @{ Code = $LASTEXITCODE; Text = ($out | Out-String).Trim() }
+        function Invoke-HealthReport {
+            $out = & pwsh -NoProfile -File $script:report 2>&1
+            return @{ Code = $LASTEXITCODE; Text = ($out | Out-String).Trim() }
+        }
     }
 
     It 'exits 0 and renders the expected sections' {
