@@ -113,7 +113,9 @@ $protoFiles = @(
     'scripts/validate-context.sh',
     'scripts/validate-context.ps1',
     'scripts/validate-skills.sh',
-    'scripts/validate-skills.ps1'
+    'scripts/validate-skills.ps1',
+    'orchestration/coordinator.sh',
+    'orchestration/coordinator.ps1'
 )
 
 $protoVersions = @{}  # short-name → version
@@ -123,19 +125,22 @@ foreach ($rel in $protoFiles) {
     $content = Get-Content $full -Raw
     $pv = $null
     # JSON form: "protocol_version": "x.y.z"
-    if ($content -match '"protocol_version":\s*"([^"]+)"') {
+    if ($content -match '"protocol_version":\s*"([0-9][^"]*)"') {
         $pv = $Matches[1]
     }
-    # PS form: protocol_version = 'x.y.z'
-    if (-not $pv -and $content -match "protocol_version\s*=\s*'([^']+)'") {
+    # PS form: protocol_version = "x.y.z"
+    if (-not $pv -and $content -match 'protocol_version\s*=\s*"([0-9][^"]*)"') {
+        $pv = $Matches[1]
+    }
+    # Coordinator form: $ProtocolVersion = "x.y.z"
+    if (-not $pv -and $content -match '\$ProtocolVersion\s*=\s*"([0-9][^"]*)"') {
         $pv = $Matches[1]
     }
     if ($pv) { $protoVersions[(Split-Path $rel -Leaf)] = $pv }
 }
 
-# Also check evals/run-evals.sh
+# Also check evals/run-evals.sh (dev-repo only; absent in adopter installs).
 $evalsSh = Join-Path $AgenticDir '..' 'evals' 'run-evals.sh'
-if (-not (Test-Path $evalsSh)) { $evalsSh = Join-Path $AgenticDir 'evals' 'run-evals.sh' }
 if (Test-Path $evalsSh) {
     $content = Get-Content $evalsSh -Raw
     if ($content -match '"protocol_version":\s*"([^"]+)"') {

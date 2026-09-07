@@ -1,6 +1,6 @@
 # Handoff Verdict
 
-> Copy this template into `.agentic/verdicts/` when marking a task `done` in the HANDOFF phase. It is the single public gate that summarizes what changed, what was verified, and what remains. All three production validators (`validate-task`, `validate-context`, `validate-skills`) must pass before a handoff is accepted.
+> Copy this template into `.agentic/tasks/` alongside the task file when marking a task `done` in the HANDOFF phase. It is the single public gate that summarizes what changed, what was verified, and what remains. All three production validators (`validate-task`, `validate-context`, `validate-skills`) must pass before a handoff is accepted.
 
 ## Task Reference
 

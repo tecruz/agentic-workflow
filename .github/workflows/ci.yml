@@ -170,7 +170,7 @@ jobs:
         shell: pwsh
         run: |
           $err = $false
-          foreach ($f in @('install.ps1', '.agentic/scripts/verify.ps1', '.agentic/scripts/validate-task.ps1', '.agentic/scripts/validate-context.ps1', '.agentic/scripts/validate-skills.ps1', '.agentic/scripts/validate-handoff.ps1')) {
+          foreach ($f in @('install.ps1', '.agentic/scripts/verify.ps1', '.agentic/scripts/validate-task.ps1', '.agentic/scripts/validate-context.ps1', '.agentic/scripts/validate-skills.ps1', '.agentic/scripts/validate-handoff.ps1', '.agentic/scripts/health-report.ps1')) {
             try { [scriptblock]::Create((Get-Content -Raw -LiteralPath $f)) | Out-Null }
             catch { Write-Error $_.Exception.Message; $err = $true }
           }
@@ -180,7 +180,7 @@ jobs:
         shell: pwsh
         run: |
           $results = @()
-          foreach ($f in @('install.ps1', '.agentic/scripts/verify.ps1', '.agentic/scripts/validate-task.ps1', '.agentic/scripts/validate-context.ps1', '.agentic/scripts/validate-skills.ps1', '.agentic/scripts/validate-handoff.ps1')) {
+          foreach ($f in @('install.ps1', '.agentic/scripts/verify.ps1', '.agentic/scripts/validate-task.ps1', '.agentic/scripts/validate-context.ps1', '.agentic/scripts/validate-skills.ps1', '.agentic/scripts/validate-handoff.ps1', '.agentic/scripts/health-report.ps1')) {
             $results += Invoke-ScriptAnalyzer -Path $f -Severity Error
           }          $results | Format-Table -AutoSize
           if ($results) { exit 1 }

@@ -56,18 +56,28 @@ configure_test_git_identity() {
     [ -f .agentic/scripts/validate-task.sh ]
     [ -f .agentic/scripts/validate-task.ps1 ]
     [ -f .agentic/templates/task.md ]
+    [ -f .agentic/templates/VERDICT.md ]
+    [ -f .agentic/templates/SPIKE.md ]
+    [ -f .agentic/templates/CHORE_MAINTENANCE.md ]
+    [ -f .agentic/scripts/health-report.sh ]
+    [ -f .agentic/scripts/health-report.ps1 ]
     # validate-task.sh must be executable in the installed tree
     [ -x .agentic/scripts/validate-task.sh ]
     # all new files are framework-managed and recorded in the manifest
     grep -q $'\.agentic/profiles/README\.md\tmanaged' .agentic/install-manifest.tsv
     grep -q $'\.agentic/scripts/validate-task\.sh\tmanaged' .agentic/install-manifest.tsv
     grep -q $'\.agentic/templates/task\.md\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/templates/VERDICT\.md\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/templates/SPIKE\.md\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/templates/CHORE_MAINTENANCE\.md\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/scripts/health-report\.sh\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/scripts/health-report\.ps1\tmanaged' .agentic/install-manifest.tsv
 }
 
 @test "fresh install creates the context registry and context validators" {
     bash "$INSTALL" . >/dev/null 2>&1
     [ -f .agentic/context/INDEX.md ]
-    for mod in security-review database-migrations dependency-changes infrastructure-change public-api-change performance accessibility i18n mobile-adaptive testing-infrastructure; do
+    for mod in security-review database-migrations dependency-changes infrastructure-change public-api-change performance accessibility i18n mobile-adaptive testing-infrastructure data-integrity api-design-patterns error-handling; do
         [ -f ".agentic/context/$mod/MODULE.md" ]
     done
     [ -f .agentic/scripts/validate-context.sh ]
@@ -86,6 +96,9 @@ configure_test_git_identity() {
     grep -q $'\.agentic/context/i18n/MODULE\.md\tmanaged' .agentic/install-manifest.tsv
     grep -q $'\.agentic/context/mobile-adaptive/MODULE\.md\tmanaged' .agentic/install-manifest.tsv
     grep -q $'\.agentic/context/testing-infrastructure/MODULE\.md\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/context/data-integrity/MODULE\.md\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/context/api-design-patterns/MODULE\.md\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/context/error-handling/MODULE\.md\tmanaged' .agentic/install-manifest.tsv
     grep -q $'\.agentic/scripts/validate-context\.sh\tmanaged' .agentic/install-manifest.tsv
     grep -q $'\.agentic/scripts/validate-handoff\.sh\tmanaged' .agentic/install-manifest.tsv
     grep -q $'\.agentic/scripts/validate-handoff\.ps1\tmanaged' .agentic/install-manifest.tsv
@@ -1056,8 +1069,10 @@ SHIM
     [ -f "$BUNDLE/.agentic/scripts/validate-task.ps1" ]
     [ -f "$BUNDLE/.agentic/scripts/validate-handoff.sh" ]
     [ -f "$BUNDLE/.agentic/scripts/validate-handoff.ps1" ]
+    [ -f "$BUNDLE/.agentic/scripts/health-report.sh" ]
+    [ -f "$BUNDLE/.agentic/scripts/health-report.ps1" ]
     [ -f "$BUNDLE/.agentic/context/INDEX.md" ]
-    for mod in security-review database-migrations dependency-changes infrastructure-change public-api-change performance accessibility i18n mobile-adaptive testing-infrastructure; do
+    for mod in security-review database-migrations dependency-changes infrastructure-change public-api-change performance accessibility i18n mobile-adaptive testing-infrastructure data-integrity api-design-patterns error-handling; do
         [ -f "$BUNDLE/.agentic/context/$mod/MODULE.md" ]
     done
     [ -f "$BUNDLE/.agentic/schemas/context-selection-v1.schema.json" ]
@@ -1071,6 +1086,9 @@ SHIM
     [ -f "$BUNDLE/.agentic/orchestration/README.md" ]
     [ -x "$BUNDLE/.agentic/orchestration/coordinator.sh" ]
     [ -f "$BUNDLE/.agentic/templates/task.md" ]
+    [ -f "$BUNDLE/.agentic/templates/VERDICT.md" ]
+    [ -f "$BUNDLE/.agentic/templates/SPIKE.md" ]
+    [ -f "$BUNDLE/.agentic/templates/CHORE_MAINTENANCE.md" ]
     # v1.11.0 payload: cursor/copilot import-only bridges ship in the bundle.
     [ -f "$BUNDLE/.cursor/rules/agentic-protocol.mdc" ]
     [ -f "$BUNDLE/.github/instructions/agentic-protocol.instructions.md" ]
@@ -1465,6 +1483,20 @@ SH
     [ -f .github/instructions/agentic-protocol.instructions.md ]
     awk -F '\t' '$1 == ".cursor/rules/agentic-protocol.mdc" && $2 == "managed" { found = 1 } END { exit found ? 0 : 1 }' .agentic/install-manifest.tsv
     awk -F '\t' '$1 == ".github/instructions/agentic-protocol.instructions.md" && $2 == "managed" { found = 1 } END { exit found ? 0 : 1 }' .agentic/install-manifest.tsv
+
+    # v1.13.0-era payload: verdict/chore/spike templates, health-report twins,
+    # and the three new context modules land as managed.
+    [ -f .agentic/templates/VERDICT.md ]
+    [ -f .agentic/templates/SPIKE.md ]
+    [ -f .agentic/templates/CHORE_MAINTENANCE.md ]
+    [ -f .agentic/scripts/health-report.sh ]
+    [ -f .agentic/scripts/health-report.ps1 ]
+    for mod in data-integrity api-design-patterns error-handling; do
+        [ -f ".agentic/context/$mod/MODULE.md" ]
+        awk -F '\t' -v m=".agentic/context/$mod/MODULE.md" '$1 == m && $2 == "managed" { found = 1 } END { exit found ? 0 : 1 }' .agentic/install-manifest.tsv
+    done
+    awk -F '\t' '$1 == ".agentic/templates/VERDICT.md" && $2 == "managed" { found = 1 } END { exit found ? 0 : 1 }' .agentic/install-manifest.tsv
+    awk -F '\t' '$1 == ".agentic/scripts/health-report.sh" && $2 == "managed" { found = 1 } END { exit found ? 0 : 1 }' .agentic/install-manifest.tsv
 
     # Verify modified managed files produced .new conflict candidates and compare byte-for-byte with current managed sources
     [ -f .agentic/WORKFLOW.md.new ]

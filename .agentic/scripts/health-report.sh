@@ -30,7 +30,7 @@ total=${#task_files[@]}
 
 declare -A status_count
 for tf in "${task_files[@]}"; do
-  s="$(grep -m1 -oP '(?<=^Status: ).*' "$tf" 2>/dev/null || true)"
+  s="$(sed -n 's/^Status:[[:space:]]*\(.*\)$/\1/p' "$tf" 2>/dev/null | head -1 || true)"
   s="$(trim "$s")"
   [ -z "$s" ] && s="unknown"
   status_count["$s"]=$(( ${status_count["$s"]:-0} + 1 ))
@@ -88,7 +88,7 @@ done
 
 declare -A profile_count
 for tf in "${task_files[@]}"; do
-  p="$(grep -m1 -oP '(?<=^Profile: ).*' "$tf" 2>/dev/null || true)"
+  p="$(sed -n 's/^Profile:[[:space:]]*\(.*\)$/\1/p' "$tf" 2>/dev/null | head -1 || true)"
   p="$(trim "$p")"
   [ -z "$p" ] && p="unknown"
   profile_count["$p"]=$(( ${profile_count["$p"]:-0} + 1 ))
@@ -103,7 +103,24 @@ else
   file_version="(missing)"
 fi
 
-# Collect protocol_version from scripts that embed it
+# Collect protocol_version from every emitter that embeds it (Bash + PowerShell
+# twins, coordinator, and the eval runner). Portable BRE sed — no GNU grep -P,
+# which BSD grep on macOS does not support.
+extract_proto_version() {  # extract_proto_version <file> → version or empty
+    local f="$1" v
+    v="$(sed -n 's/.*"protocol_version"[[:space:]]*:[[:space:]]*"\([0-9][^"]*\)".*/\1/p' "$f" 2>/dev/null | head -1)"
+    if [ -z "$v" ]; then
+        v="$(sed -n 's/.*protocol_version[[:space:]]*=[[:space:]]*"\([0-9][^"]*\)".*/\1/p' "$f" 2>/dev/null | head -1)"
+    fi
+    if [ -z "$v" ]; then
+        v="$(sed -n 's/.*PROTOCOL_VERSION="\([0-9][^"]*\)".*/\1/p' "$f" 2>/dev/null | head -1)"
+    fi
+    if [ -z "$v" ]; then
+        v="$(sed -n 's/.*ProtocolVersion[[:space:]]*=[[:space:]]*"\([0-9][^"]*\)".*/\1/p' "$f" 2>/dev/null | head -1)"
+    fi
+    printf '%s' "$v"
+}
+
 declare -A proto_versions       # file → version string
 proto_files=(
   "$AGENTIC_DIR/scripts/verify.sh"
@@ -114,20 +131,19 @@ proto_files=(
   "$AGENTIC_DIR/scripts/validate-context.ps1"
   "$AGENTIC_DIR/scripts/validate-skills.sh"
   "$AGENTIC_DIR/scripts/validate-skills.ps1"
+  "$AGENTIC_DIR/orchestration/coordinator.sh"
+  "$AGENTIC_DIR/orchestration/coordinator.ps1"
 )
 
 for pf in "${proto_files[@]}"; do
-  [ -f "$pf" ] || continue
-  pv="$(grep -oP '"protocol_version"\s*:\s*"\K[^"]+' "$pf" 2>/dev/null | head -1 || true)"
-  [ -z "$pv" ] && pv="$(grep -oP "protocol_version\s*=\s*'\K[^']+" "$pf" 2>/dev/null | head -1 || true)"
+  pv="$(extract_proto_version "$pf")"
   [ -n "$pv" ] && proto_versions["$pf"]="$pv"
 done
 
-# Also check evals/run-evals.sh
+# Also check evals/run-evals.sh (dev-repo only; absent in adopter installs).
 evals_sh="$AGENTIC_DIR/../evals/run-evals.sh"
-[ -f "$evals_sh" ] || evals_sh="$AGENTIC_DIR/evals/run-evals.sh"
 if [ -f "$evals_sh" ]; then
-  pv="$(grep -oP '"protocol_version"\s*:\s*"\K[^"]+' "$evals_sh" 2>/dev/null | head -1 || true)"
+  pv="$(extract_proto_version "$evals_sh")"
   [ -n "$pv" ] && proto_versions["$evals_sh"]="$pv"
 fi
 
@@ -148,7 +164,7 @@ echo ""
 
 echo "── Tasks ─────────────────────────────────────────────────────────────"
 echo "  Total: $total"
-for s in "${!status_count[@]}"; do
+for s in $(printf '%s\n' "${!status_count[@]}" | sort); do
   echo "    $s: ${status_count[$s]}"
 done
 echo ""
@@ -156,7 +172,7 @@ echo ""
 echo "── Context Module Usage ──────────────────────────────────────────────"
 echo "  Total selections: $module_total"
 if [ ${#module_tasks[@]} -gt 0 ]; then
-  for mod in "${!module_tasks[@]}"; do
+  for mod in $(printf '%s\n' "${!module_tasks[@]}" | sort); do
     echo "    $mod:"
     IFS=',' read -ra task_list <<< "${module_tasks[$mod]}"
     for t in "${task_list[@]}"; do
@@ -171,7 +187,7 @@ echo ""
 echo "── Skill Invocation Usage ────────────────────────────────────────────"
 echo "  Total invocations: $skill_total"
 if [ ${#skill_tasks[@]} -gt 0 ]; then
-  for sk in "${!skill_tasks[@]}"; do
+  for sk in $(printf '%s\n' "${!skill_tasks[@]}" | sort); do
     echo "    $sk:"
     IFS=',' read -ra task_list <<< "${skill_tasks[$sk]}"
     for t in "${task_list[@]}"; do
@@ -184,7 +200,7 @@ fi
 echo ""
 
 echo "── Profile Distribution ─────────────────────────────────────────────"
-for p in "${!profile_count[@]}"; do
+for p in $(printf '%s\n' "${!profile_count[@]}" | sort); do
   echo "    $p: ${profile_count[$p]}"
 done
 echo ""
@@ -194,7 +210,7 @@ echo "  .agentic/VERSION: $file_version"
 
 all_match=true
 if [ ${#proto_versions[@]} -gt 0 ]; then
-  for pf in "${!proto_versions[@]}"; do
+  for pf in $(printf '%s\n' "${!proto_versions[@]}" | sort); do
     pv="${proto_versions[$pf]}"
     short="$(basename "$pf")"
     if [ "$pv" = "$file_version" ]; then

@@ -16,7 +16,7 @@ The orchestration flow follows a deterministic pipeline:
 1. **Task file parse**: The coordinator reads the task file (`.agentic/tasks/TASK-XXX.md`), extracts its ID, validates required approval gates, and checks for an existing lock file.
 2. **Worktree creation**: A `git worktree` is created at `.agentic/orchestration/worktrees/<task-id>` on branch `orchestration/<task-id>`. If the worktree already exists (from a previous run), the coordinator reuses it. A lock file is written with the current PID.
 3. **Worker spawn**: The coordinator forks a subprocess running the command specified by `--worker` (or `AGENTIC_WORKER_CMD`). The worker inherits the worktree as its working directory and receives the task file path as its context.
-4. **Event stream**: While the worker runs, stdout/stderr are captured. On completion, the coordinator emits a JSONL event stream (`orchestration-events-v1`) with `task_start`, `task_complete`, and `task_error` events, plus an aggregated `orchestration-result-v1` document pairing the exit code with the outcome.
+4. **Event stream**: While the worker runs, stdout/stderr are captured. On completion, the coordinator emits a JSONL event stream (`orchestration-events-v1`) with `orchestration_started`, `worker_started`, `worker_completed`, and `orchestration_completed` events, plus an aggregated `orchestration-result-v1` document pairing the exit code with the outcome.
 5. **Cleanup**: If `--cleanup` is passed and the worker exits successfully (code 0), the worktree and branch are removed. On failure, the worktree is preserved for inspection. The lock file is always removed on exit.
 
 ## Usage
@@ -93,7 +93,7 @@ Each task gets its own worktree and lock file. The lock prevents the same task f
 
 | Failure | Behavior | Resolution |
 | :--- | :--- | :--- |
-| **Worker crash (exit non-0)** | Coordinator emits `task_error` event, preserves the worktree, exits with the worker's exit code. | Inspect worktree at `.agentic/orchestration/worktrees/<id>/`. Fix the issue and re-run, or remove the worktree manually. |
+| **Worker crash (exit non-0)** | Coordinator emits `worker_completed` with the failing status, preserves the worktree, exits with the worker's exit code. | Inspect worktree at `.agentic/orchestration/worktrees/<id>/`. Fix the issue and re-run, or remove the worktree manually. |
 | **Lock contention (concurrent tasks)** | If two coordinator processes attempt the same task ID, the second sees an existing lock file and exits with code 2 (BLOCKED). | Wait for the first process to finish. The lock is per-task-ID, not global — different tasks do not contend. |
 | **Stale worktree (PID gone)** | On startup, the coordinator detects a lock file whose PID no longer exists, removes the stale lock, and proceeds. | No action needed; the coordinator self-heals. If the worktree itself is orphaned, run `git worktree prune`. |
 | **Approval gate blocking** | A task file has unchecked or missing gates. The coordinator refuses to spawn and exits with code 2. | Edit the task file, check the required `AG-N` gate, and re-run. |
