@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Debug: log the first failing command on macOS
+_debug_exit() { echo "health-report.sh: ERR at line $1 exit=$2" >&2; }
+trap '_debug_exit $LINENO $?' ERR
+
 # ── Health Report ──────────────────────────────────────────────────────────────
 # Scans .agentic/ and prints a plain-text summary of task state, context module
 # usage, skill invocation usage, profile distribution, VERSION/protocol_version
