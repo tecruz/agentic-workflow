@@ -35,7 +35,10 @@ expect_code() {  # expect_code <fixture> <expected>
 expect_detect() {  # expect_detect <fixture> <tool1> [tool2...]
     local name="$1"; shift
     local out missing=0 t
-    out="$(cd "$FIX/$name" && bash "$VERIFY" --emit-checks 2>/dev/null)"
+    # Capture stderr too (2>&1): "Detected:" signal logs live on stderr and
+    # are the only observable output for signal-only detections (turbo.json).
+    # Parity with run-fixtures.ps1 Expect-Detect (2>&1).
+    out="$(cd "$FIX/$name" && bash "$VERIFY" --emit-checks 2>&1)"
     if [ "${1:-}" = "__none__" ]; then
         [ -z "$out" ] || missing=1
     else
@@ -111,6 +114,7 @@ expect_detect android-version-catalog gradle app-android-unit
 expect_detect android-convention-plugin gradle app-android-unit
 expect_detect nx-workspace          libs-ui apps-web
 expect_detect bazel-workspace       bazel
+expect_detect turbo-workspace       turbo
 expect_detect pnpm-workspace-recursive npm packages-foo
 expect_detect unsupported         __none__
 

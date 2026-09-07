@@ -958,8 +958,11 @@ function Get-DetectedChecks {
     if (Test-Path -LiteralPath 'nx.json') {
         Write-Log "Detected: Nx workspace (nx.json)"
         if ((Get-Content -LiteralPath 'nx.json' -Raw -ErrorAction SilentlyContinue) -match '"projects"') {
-            $nxText = Get-Content -LiteralPath 'nx.json' -ErrorAction SilentlyContinue
-            $nxDirs = @($nxText | ForEach-Object { if ($_ -match '"[^"]+"\s*:\s*"([^"]+)"') { $Matches[1] } })
+            # Key regex: any non-quote char (supports scoped keys @org/pkg).
+            # Filter known non-directory scalars (defaultProject, cli, etc.).
+            $nxLines = Get-Content -LiteralPath 'nx.json' -ErrorAction SilentlyContinue
+            $nxDirs = @($nxLines | ForEach-Object { if ($_ -match '"[^"]+"\s*:\s*"([^"]+)"') { $Matches[1] } } |
+                Where-Object { $_ -notmatch '^(defaultProject|defaultBase|cli|nxCloudAccessToken|pluginsPath)$' })
             foreach ($d in $nxDirs) {
                 if ($d -and $d -notmatch "[\t\n\r\x1f\p{Cc}]") { Emit-PackageChecks -Dir $d }
             }

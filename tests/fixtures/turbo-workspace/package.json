@@ -1,0 +1,5 @@
+{
+  "name": "turbo-workspace",
+  "private": true,
+  "workspaces": ["packages/*"]
+}
