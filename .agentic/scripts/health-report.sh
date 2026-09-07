@@ -108,15 +108,19 @@ fi
 # which BSD grep on macOS does not support.
 extract_proto_version() {  # extract_proto_version <file> → version or empty
     local f="$1" v
-    v="$(sed -n 's/.*"protocol_version"[[:space:]]*:[[:space:]]*"\([0-9][^"]*\)".*/\1/p' "$f" 2>/dev/null | head -n 1 || true)"
+    v="$(sed -n 's/.*"protocol_version"[[:space:]]*:[[:space:]]*"\([0-9][^"]*\)".*/\1/p' "$f" 2>/dev/null || true)"
+    v="${v%%$'\n'*}"
     if [ -z "$v" ]; then
-        v="$(sed -n 's/.*protocol_version[[:space:]]*=[[:space:]]*"\([0-9][^"]*\)".*/\1/p' "$f" 2>/dev/null | head -n 1 || true)"
+        v="$(sed -n 's/.*protocol_version[[:space:]]*=[[:space:]]*"\([0-9][^"]*\)".*/\1/p' "$f" 2>/dev/null || true)"
+        v="${v%%$'\n'*}"
     fi
     if [ -z "$v" ]; then
-        v="$(sed -n 's/.*PROTOCOL_VERSION="\([0-9][^"]*\)".*/\1/p' "$f" 2>/dev/null | head -n 1 || true)"
+        v="$(sed -n 's/.*PROTOCOL_VERSION="\([0-9][^"]*\)".*/\1/p' "$f" 2>/dev/null || true)"
+        v="${v%%$'\n'*}"
     fi
     if [ -z "$v" ]; then
-        v="$(sed -n 's/.*ProtocolVersion[[:space:]]*=[[:space:]]*"\([0-9][^"]*\)".*/\1/p' "$f" 2>/dev/null | head -n 1 || true)"
+        v="$(sed -n 's/.*ProtocolVersion[[:space:]]*=[[:space:]]*"\([0-9][^"]*\)".*/\1/p' "$f" 2>/dev/null || true)"
+        v="${v%%$'\n'*}"
     fi
     printf '%s' "$v"
 }
