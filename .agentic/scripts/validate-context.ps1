@@ -124,7 +124,7 @@ function Output-ContextJson {
 
     $resultObject = [ordered]@{
         schema_version   = 1
-        protocol_version = "1.12.0"
+        protocol_version = "1.12.1"
         kind             = "context_validation_result"
         mode             = if ($Handoff) { "handoff" } else { "standard" }
         result           = $Result

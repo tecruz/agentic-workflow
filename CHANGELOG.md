@@ -5,6 +5,30 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.1] - 2026-09-07
+
+### Fixed
+- **Nx projects parsing parity.** Bash key regex expanded to match any
+  non-quoted value (supports scoped `@org/pkg` keys); non-directory scalars
+  (`defaultProject`, `cli`, `defaultBase`, `npmClient`, `packageManager`)
+  filtered out. Aligns Bash behavior with PowerShell after the v1.12.0
+  ADR-0015 landing exposed the mismatch.
+- **Missing turborepo fixture.** ADR-0015 stated Turborepo detection would
+  be covered by a fixture variant; none existed. Added `turbo-workspace`
+  fixture (`turbo.json` + `package.json` workspaces) with golden contract and
+  `run-fixtures.sh`/`run-fixtures.ps1` registration.
+- **`.gitattributes` CRLF golden quirk.** `*.tsv` and `*.json` files not
+  covered — root cause of the Windows CRLF golden-mismatch quirk documented
+  since v1.8.0. One-line fix.
+- **Fixture harness stderr parity.** Bash `expect_detect` in
+  `run-fixtures.sh` now captures stderr (`2>&1`) to match PS1's
+  `Expect-Detect` semantics. Without this, signal-only detections whose
+  tokens live exclusively on stderr (e.g. Turborepo `turbo`) failed on
+  Ubuntu/macOS where Windows passed.
+- **CI protocol_version sweep gate.** No CI step verified that all code
+  emitters, schemas, and evals agree with `.agentic/VERSION`. Added a fast
+  grep-based CI step that catches incomplete version sweeps before they land.
+
 ## [1.12.0] - 2026-09-07
 
 ### Added

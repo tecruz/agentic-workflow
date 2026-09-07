@@ -29,7 +29,7 @@ classify_with_registry() {  # classify_with_registry <registry-dir> <fixture>
     [ "$status" -eq 0 ]
 }
 
-@test "VALID (0) for the v1.12.0 expansion skills" {
+@test "VALID (0) for the v1.12.1 expansion skills" {
     classify skill-valid-new-skills.md
     [ "$status" -eq 0 ]
 }
@@ -136,7 +136,7 @@ doc = json.loads(sys.stdin.read())
 assert doc["kind"] == "skill_validation_result", doc["kind"]
 assert doc["result"] == "VALID", doc["result"]
 assert doc["exit_code"] == 0, doc["exit_code"]
-assert doc["protocol_version"] == "1.12.0", doc["protocol_version"]
+assert doc["protocol_version"] == "1.12.1", doc["protocol_version"]
 assert [m["id"] for m in doc["invoked_skills"]] == ["verification-triage"], doc["invoked_skills"]
 assert doc["diagnostics"] == [], doc["diagnostics"]
 '

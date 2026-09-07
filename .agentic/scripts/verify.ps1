@@ -97,7 +97,7 @@ function Output-VerificationJson {
 
     $resultObject = [ordered]@{
         schema_version   = 1
-        protocol_version = "1.12.0"
+        protocol_version = "1.12.1"
         kind             = "verification_result"
         result           = $ResultStr
         exit_code        = $ExitCode
