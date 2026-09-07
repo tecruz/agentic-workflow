@@ -29,6 +29,9 @@
 | i18n | 1 | standard | New/modified user strings, locale files, date/number formatting, pluralization |
 | mobile-adaptive | 1 | standard | Responsive breakpoints, touch targets, safe area, orientation, PWA installability |
 | testing-infrastructure | 1 | standard | Test framework/CI config, fixtures, coverage, flaky tests, test types |
+| data-integrity | 1 | high-assurance | Data validation, schema constraints, transactions, backup/recovery, audit logging, data repair |
+| api-design-patterns | 1 | standard | API changes, request/response contracts, versioning, pagination, rate limiting, API docs |
+| error-handling | 1 | standard | Error classification, retry/fallback, circuit breakers, error reporting, graceful degradation |
 
 ## Rules
 

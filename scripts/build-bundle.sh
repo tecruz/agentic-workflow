@@ -85,6 +85,9 @@ mkdir -p "$BUNDLE/.agentic/rules" \
          "$BUNDLE/.agentic/context/i18n" \
          "$BUNDLE/.agentic/context/mobile-adaptive" \
          "$BUNDLE/.agentic/context/testing-infrastructure" \
+         "$BUNDLE/.agentic/context/data-integrity" \
+         "$BUNDLE/.agentic/context/api-design-patterns" \
+         "$BUNDLE/.agentic/context/error-handling" \
          "$BUNDLE/.agentic/skills" \
          "$BUNDLE/.agentic/skills/task-decomposition" \
          "$BUNDLE/.agentic/skills/verification-triage" \
@@ -112,13 +115,13 @@ cp "$ROOT/.agentic/VERSION" \
    "$BUNDLE/.agentic/"
 cp "$ROOT"/.agentic/rules/*.md "$BUNDLE/.agentic/rules/"
 cp "$ROOT"/.agentic/profiles/*.md "$BUNDLE/.agentic/profiles/"
-cp "$ROOT/.agentic/scripts/verify.sh" "$ROOT/.agentic/scripts/verify.ps1" "$ROOT/.agentic/scripts/validate-task.sh" "$ROOT/.agentic/scripts/validate-task.ps1" "$ROOT/.agentic/scripts/validate-context.sh" "$ROOT/.agentic/scripts/validate-context.ps1" "$ROOT/.agentic/scripts/validate-skills.sh" "$ROOT/.agentic/scripts/validate-skills.ps1" "$ROOT/.agentic/scripts/validate-handoff.sh" "$ROOT/.agentic/scripts/validate-handoff.ps1" "$BUNDLE/.agentic/scripts/"
+cp "$ROOT/.agentic/scripts/verify.sh" "$ROOT/.agentic/scripts/verify.ps1" "$ROOT/.agentic/scripts/validate-task.sh" "$ROOT/.agentic/scripts/validate-task.ps1" "$ROOT/.agentic/scripts/validate-context.sh" "$ROOT/.agentic/scripts/validate-context.ps1" "$ROOT/.agentic/scripts/validate-skills.sh" "$ROOT/.agentic/scripts/validate-skills.ps1" "$ROOT/.agentic/scripts/validate-handoff.sh" "$ROOT/.agentic/scripts/validate-handoff.ps1" "$ROOT/.agentic/scripts/health-report.sh" "$ROOT/.agentic/scripts/health-report.ps1" "$BUNDLE/.agentic/scripts/"
 cp "$ROOT"/.agentic/templates/*.md "$ROOT"/.agentic/templates/checks.tsv "$BUNDLE/.agentic/templates/"
 cp "$ROOT/.agentic/tasks/README.md" "$BUNDLE/.agentic/tasks/"
 cp "$ROOT/.agentic/decisions/README.md" "$BUNDLE/.agentic/decisions/"
 cp "$ROOT"/.agentic/schemas/*.json "$BUNDLE/.agentic/schemas/"
 cp "$ROOT/.agentic/context/INDEX.md" "$BUNDLE/.agentic/context/"
-for _mod in security-review database-migrations dependency-changes infrastructure-change public-api-change performance accessibility i18n mobile-adaptive testing-infrastructure; do
+for _mod in security-review database-migrations dependency-changes infrastructure-change public-api-change performance accessibility i18n mobile-adaptive testing-infrastructure data-integrity api-design-patterns error-handling; do
     cp "$ROOT/.agentic/context/$_mod/MODULE.md" "$BUNDLE/.agentic/context/$_mod/"
 done
 cp "$ROOT/.agentic/skills/INDEX.md" "$BUNDLE/.agentic/skills/"

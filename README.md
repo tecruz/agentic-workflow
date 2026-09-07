@@ -284,6 +284,9 @@ Specialist knowledge lives in portable, on-demand modules under
 | `i18n` | `standard` | new/modified user-facing strings, locale data, date/number formatting, pluralization |
 | `mobile-adaptive` | `standard` | responsive breakpoints, touch targets, safe areas, orientation, PWA installability |
 | `testing-infrastructure` | `standard` | test framework/CI config, fixtures, coverage, flaky tests, test types |
+| `data-integrity` | `high-assurance` | schema constraints, transactions, backup/recovery, audit logging, data repair |
+| `api-design-patterns` | `standard` | API contracts, versioning, pagination, rate limiting, API docs |
+| `error-handling` | `standard` | error classification, retry/fallback, circuit breakers, graceful degradation |
 
 - During **DISCOVER** agents inspect `.agentic/context/INDEX.md`, select every
   module whose *Load when* triggers match the task, and record each selection
@@ -440,7 +443,7 @@ CI on any mismatch. Both the Bats and Pester suites run on all three platforms;
     ├── skills/                    # Portable, on-demand procedure skills + INDEX
     ├── tasks/                     # One file per task
     ├── decisions/                 # Immutable Architecture Decision Records
-    ├── templates/                 # Feature spec, bug report, refactor plan, task file
+    ├── templates/                 # Feature spec, bug report, refactor plan, chore, spike, verdict, task file
     └── scripts/
         ├── verify.sh              # Verifier (Linux/macOS)
         ├── verify.ps1             # Verifier (Windows)
@@ -451,7 +454,9 @@ CI on any mismatch. Both the Bats and Pester suites run on all three platforms;
         ├── validate-skills.sh     # Skill-invocation validator (Linux/macOS)
         ├── validate-skills.ps1    # Skill-invocation validator (Windows)
         ├── validate-handoff.sh    # Composite handoff gate (Linux/macOS)
-        └── validate-handoff.ps1   # Composite handoff gate (Windows)
+        ├── validate-handoff.ps1   # Composite handoff gate (Windows)
+        ├── health-report.sh       # Project health summary (Linux/macOS)
+        └── health-report.ps1      # Project health summary (Windows)
 ```
 
 ---
