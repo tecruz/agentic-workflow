@@ -60,3 +60,27 @@ safety-critical behavior. Escalation signals reviewed; none apply.
 - .agentic/STATUS.md — v1.12.1 release note; v1.12.0 marked superseded
 - .agentic/VERSION — bumped to 1.12.1
 - All protocol_version sites swept 1.12.0 → 1.12.1 (32 files: scripts, schemas, orchestration, evals, tests)
+
+## Verification
+
+### Baseline
+
+- Clean tree at v1.12.0 (`88ec62b`); Nx scoped-key mismatch, missing turbo
+  fixture, CRLF golden quirk, and harness stderr gap identified in the
+  post-v1.12.0 audit.
+
+### Final
+
+- Nx parity fix, turbo-workspace fixture + golden, `.gitattributes` CRLF fix,
+  `expect_detect` stderr parity, and the CI protocol_version sweep gate all
+  landed (commit `fdd6c2f`, PR #25).
+- Release run 34129764990 green 7/7; assets published as Latest; tag
+  `v1.12.1` verified; handoff VALID on this file (three legs) at release
+  time.
+- Sweep gate: CI `protocol_version` consistency step passes on master.
+
+## Remaining risks
+
+- None identified at release time. Later template drift: this file predates
+  the `## Verification` section requirement and was retrofitted on
+  2026-09-08 to stay validator-compliant (see TASK-026).

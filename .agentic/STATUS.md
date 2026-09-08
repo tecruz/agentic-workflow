@@ -35,6 +35,7 @@
 - [x] TASK-022 — v1.12.0 release bookkeeping: skills expansion (3 new skills), .NET lint-check gating parity, Nx/Turborepo/Bazel workspace detection (ADR-0015), annotated tag (see `.agentic/tasks/TASK-022-v1120-release-bookkeeping.md`)
 - [x] TASK-023 — v1.12.1 release bookkeeping: post-v1.12.0 audit fixes — Nx scoped-key parity, turbo-workspace fixture, CRLF golden fix, fixture harness stderr parity, CI protocol_version sweep gate (see `.agentic/tasks/TASK-023-v1121-release-bookkeeping.md`)
 - [x] TASK-024 — Context-module and eval coverage for the three v1.13 modules: 12 per-module validate-context fixtures with golden outcome tests (Bats + Pester), three new offline eval scenarios (`data-integrity-change`, `api-pagination-change`, `error-handling-retry-policy`) with generator-synced byte-stable artifacts, 11/11 scenarios correct in both eval twins (see `.agentic/tasks/TASK-024-context-and-eval-coverage.md`)
+- [x] TASK-026 — Task-file validator drift + health-report cross-language parity: TASK-015 rewritten into the current task template, TASK-023 retrofitted with `## Verification`/`## Remaining risks`, all 25 task files pass `validate-task`, and the health-report twins gained a normalized-output parity test in both suites (Pester leg skips on Windows) (see `.agentic/tasks/TASK-026-task-drift-and-health-parity.md`)
 
 ## Recent Decisions
 

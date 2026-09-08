@@ -49,3 +49,35 @@ REPORT="$REPO_ROOT/.agentic/scripts/health-report.sh"
     expected="$(cat "$REPO_ROOT/.agentic/VERSION" | tr -d '[:space:]')"
     grep -q "\.agentic/VERSION: $expected" <<<"$output"
 }
+
+@test "health-report twins emit identical normalized output (cross-language parity)" {
+    if ! command -v pwsh >/dev/null 2>&1; then
+        skip "pwsh not available"
+    fi
+    # Normalize: drop blank lines, the timestamp line (format differs between
+    # `date +%Z` and Get-Date K), and the VERSION Consistency block (the twins
+    # sort emitters by full path vs short name). Everything else — tasks,
+    # module/skill usage, profiles, recent changes — must match byte-for-byte.
+    normalize() {
+        printf '%s' "$1" | sed '/^[[:space:]]*$/d; /^  [0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\} /d' \
+            | sed '/VERSION Consistency/,/Recent Task Changes/{ /Recent Task Changes/!d }'
+    }
+    emitters() {  # sorted emitter names from the VERSION block
+        printf '%s' "$1" | sed -n '/VERSION Consistency/,/Recent Task Changes/p' \
+            | grep '^    .*: [0-9]' | sed 's/^ *//; s/:.*//' | sort
+    }
+    sh_out="$(bash "$REPORT" 2>&1)"
+    ps_out="$(pwsh -NoProfile -File "$REPO_ROOT/.agentic/scripts/health-report.ps1" 2>&1)"
+    sh_norm="$(normalize "$sh_out")"
+    ps_norm="$(normalize "$ps_out")"
+    if [ "$sh_norm" != "$ps_norm" ]; then
+        echo "normalized parity mismatch:"
+        diff -u <(printf '%s\n' "$sh_norm") <(printf '%s\n' "$ps_norm") || true
+        return 1
+    fi
+    if [ "$(emitters "$sh_out")" != "$(emitters "$ps_out")" ]; then
+        echo "emitter-set mismatch: bash=[$(emitters "$sh_out")] ps1=[$(emitters "$ps_out")]"
+        return 1
+    fi
+    grep -q "Status: CONSISTENT" <<<"$ps_out"
+}
