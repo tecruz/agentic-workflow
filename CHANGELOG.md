@@ -5,6 +5,54 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.0] - 2026-09-08
+
+### Added
+- **Health report scripts.** New managed `health-report.sh` / `health-report.ps1`
+  twins print a plain-text project-health summary (task status and profile
+  distribution, context-module and skill usage, VERSION/protocol_version
+  consistency across all eleven emitters, recent git-modified tasks). Exit 0
+  always (informational). The Bash twin is array-free and `set -u`-safe for
+  the macOS default bash 3.2; both are registered in the installers,
+  `build-bundle.sh`, `checks.tsv` (`sh-syntax-health-report`), and the PS
+  syntax/analyzer checks.
+- **Three new context modules.** `data-integrity` (high-assurance; data
+  validation, schema constraints, transactions, backup/recovery, audit
+  logging, data repair), `api-design-patterns` (standard; API/contract
+  changes, versioning, pagination, rate limiting, API docs), and
+  `error-handling` (standard; error classification, retry/fallback, circuit
+  breakers, error reporting, graceful degradation). Registry is now 13
+  modules; each ships its own `validate-context` fixtures (valid / none /
+  fenced variants — 12 new fixtures) with golden outcome tests in Bats and
+  Pester.
+- **Three new task templates.** `VERDICT.md` (handoff verdict record),
+  `CHORE_MAINTENANCE.md` (low-risk operational work), and `SPIKE.md`
+  (time-boxed experiments). Registered in both installers and
+  `build-bundle.sh`.
+- **Orchestration README expansion.** `.agentic/orchestration/README.md`
+  grew from 86 to 152 lines: How It Works, Common Patterns, Failure Modes,
+  and Troubleshooting sections, with corrected event names
+  (`orchestration_started` / `worker_started` / `worker_completed` /
+  `orchestration_completed`).
+- **Three new offline eval scenarios.** `data-integrity-change`
+  (high-assurance), `api-pagination-change`, and `error-handling-retry-policy`
+  (standard) exercise the three new modules against the real production
+  contracts; the deterministic generator (`generate-scenarios.ps1`) produces
+  byte-stable artifacts, and both eval twins now classify 11/11 scenarios
+  correctly with the negative control unchanged.
+
+### Fixed
+- **Bash 3.2 compatibility of health-report.sh.** The Bash health report
+  initially required bash 4+ features (`declare -A`) and used `read -a` /
+  `head` pipes that abort under macOS's default bash 3.2 with `set -u`.
+  Rewritten array-free (newline-joined strings + `sort`/`uniq`/`while-read`
+  aggregation) so it runs on macOS without Homebrew bash.
+
+### Changed
+- **CI (Full) macOS budget.** `full-macos` timeout raised from 35 to 60
+  minutes: the bats suite (now 437 tests) fills the original budget and was
+  cutting off the trailing `evals-sh` check.
+
 ## [1.12.1] - 2026-09-07
 
 ### Fixed

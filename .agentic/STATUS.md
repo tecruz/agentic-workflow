@@ -51,7 +51,19 @@
 
 ## Notes
 
-- **v1.12.1 — post-v1.12.0 audit fixes** (released 2026-09-07 as annotated tag `v1.12.1`): Nx scoped-key parsing parity (Bash key regex expanded to match `@org/pkg`), turborepo-workspace fixture with golden contract, `.gitattributes` CRLF golden fix, fixture harness stderr parity (Bash `expect_detect` now captures stderr matching PS1), CI protocol_version sweep gate. `protocol_version` sweep to `1.12.1`; published 3 assets as Latest. The v1.12.0 release is marked as superseded. See `TASK-023`, `CHANGELOG.md` `[1.12.1]`.
+- **v1.13.0 — health report, task templates, and three new context modules**
+  (released 2026-09-08 as annotated tag `v1.13.0`): health-report.sh/ps1
+  project-health twins (bash 3.2-safe, registered in installers + checks);
+  three new task templates (`VERDICT.md`, `CHORE_MAINTENANCE.md`, `SPIKE.md`);
+  three new context modules (`data-integrity` high-assurance,
+  `api-design-patterns`, `error-handling` standard) bringing the registry to
+  13 modules with 12 new validate-context fixtures + golden tests; expanded
+  orchestration README; three new offline eval scenarios (11/11 in both eval
+  twins, byte-stable generator artifacts); CI Full macOS budget raised to 60m.
+  `protocol_version` sweep to `1.13.0` (19 emitter/schema files + tests).
+  See `TASK-025`, `TASK-024`, `CHANGELOG.md` `[1.13.0]`. Supersedes v1.12.1.
+
+- **v1.12.1 — post-v1.12.0 audit fixes** (released 2026-09-07 as annotated tag `v1.12.1`): Nx scoped-key parsing parity (Bash key regex expanded to match `@org/pkg`), turborepo-workspace fixture with golden contract, `.gitattributes` CRLF golden fix, fixture harness stderr parity (Bash `expect_detect` now captures stderr matching PS1), CI protocol_version sweep gate. `protocol_version` sweep to `1.12.1`; published 3 assets as Latest. The v1.12.0 release is marked as superseded. See `TASK-023`, `CHANGELOG.md` `[1.12.1]`. Superseded by v1.13.0.
 
 - **v1.12.0 — skills expansion + Nx/Turborepo/Bazel workspace detection** (released 2026-09-07 as annotated tag `v1.12.0` on `88ec62b`): three new skills (`dependency-audit`, `migration-rollback`, `perf-investigation`) expanding the skills registry under ADR-0014; `.editorconfig`-gated `dotnet-lint` emission closing the lint-check gating parity gap; Nx (`nx.json` `projects` field), Turborepo (`turbo.json` signal), and Bazel (`WORKSPACE`/`WORKSPACE.bazel` emitting `bazel test //...` and `bazel build //...`) workspace detection (ADR-0015); two new fixtures (`nx-workspace`, `bazel-workspace`) with golden contracts; `protocol_version` sweep to `1.12.0`; published 3 assets as Latest (`agentic-workflow-1.12.0.tar.gz`, `.zip`, `SHA256SUMS`). The v1.11.0 release is marked as superseded. See `TASK-022`, `ADR-0015`, `CHANGELOG.md` `[1.12.0]`, and `ROADMAP.md` (all items done). Superseded by v1.12.1.
 

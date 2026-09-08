@@ -124,7 +124,7 @@ function Output-SkillJson {
 
     $resultObject = [ordered]@{
         schema_version   = 1
-        protocol_version = "1.12.1"
+        protocol_version = "1.13.0"
         kind             = "skill_validation_result"
         mode             = if ($Handoff) { "handoff" } else { "standard" }
         result           = $Result

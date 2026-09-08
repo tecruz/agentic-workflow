@@ -7,7 +7,7 @@
 
 ## Current state
 
-- **Version**: `1.12.1` (workspace/monorepo detection landed; deeper Android/Kotlin detection landed; context-module expansion + orchestration maturity landed; skills as a first-class category landed; Cursor/Copilot bridges + verifier large-contract performance landed; Nx/Turborepo/Bazel workspace detection landed; .NET lint-check gating parity landed; skills expansion landed; post-v1.12.0 audit fixes landed)
+- **Version**: `1.13.0` (workspace/monorepo detection landed; deeper Android/Kotlin detection landed; context-module expansion + orchestration maturity landed; skills as a first-class category landed; Cursor/Copilot bridges + verifier large-contract performance landed; Nx/Turborepo/Bazel workspace detection landed; .NET lint-check gating parity landed; skills expansion landed; post-v1.12.0 audit fixes landed; health report + task templates + three new context modules + eval scenario expansion landed)
 - The core loop (`DISCOVER → CLASSIFY RISK → PLAN → IMPLEMENT → VERIFY →
   HANDOFF`), the honest verification model, the non-destructive installer, risk
   profiles + evidence contracts, context modules + behavioral evals, and the
