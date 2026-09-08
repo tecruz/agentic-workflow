@@ -37,7 +37,7 @@ safety-critical behavior. Escalation signals reviewed; none apply.
 | AC-1 | CHANGELOG [1.13.0] - 2026-09-08; VERSION=1.13.0; CHANGELOG date matches tag date | passed |
 | AC-2 | Annotated tag v1.13.0 created and pushed; VERSION/CHANGELOG/tag agreement confirmed | passed |
 | AC-3 | grep sweep: no residual `1.12.1` protocol_version in scripts/schemas/orchestration/evals/tests; `evals/generate-scenarios.ps1` regenerated all 11 verification artifacts at 1.13.0 | passed |
-| AC-4 | Release run completed: all jobs green; 3 assets published; gh api releases/latest → v1.13.0 | passed |
+| AC-4 | Release run 34256357752 completed: 7/7 jobs green (Validate metadata, Full Bats macOS+Ubuntu, Full Pester Windows, Validator parity, ci-required, Build & publish); 3 assets published; gh api releases/latest → v1.13.0, published 2026-09-08T17:55:57Z | passed |
 | AC-5 | STATUS.md diff: v1.13.0 release note added; v1.12.1 marked superseded; ROADMAP.md version line 1.13.0 | passed |
 | AC-6 | validate-handoff.sh/.ps1 on this file: VALID (three legs) | passed |
 
