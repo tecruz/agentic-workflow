@@ -34,6 +34,7 @@
 - [x] TASK-021 — README customization fix + optional-check policy resolution: restored dropped Customization intro/first bullet, resolved ROADMAP optional-check review as no-change (ADR-0002 invariant holds; no --strict-optional flag) (see `.agentic/tasks/TASK-021-readme-fix-and-optional-policy.md`)
 - [x] TASK-022 — v1.12.0 release bookkeeping: skills expansion (3 new skills), .NET lint-check gating parity, Nx/Turborepo/Bazel workspace detection (ADR-0015), annotated tag (see `.agentic/tasks/TASK-022-v1120-release-bookkeeping.md`)
 - [x] TASK-023 — v1.12.1 release bookkeeping: post-v1.12.0 audit fixes — Nx scoped-key parity, turbo-workspace fixture, CRLF golden fix, fixture harness stderr parity, CI protocol_version sweep gate (see `.agentic/tasks/TASK-023-v1121-release-bookkeeping.md`)
+- [x] TASK-024 — Context-module and eval coverage for the three v1.13 modules: 12 per-module validate-context fixtures with golden outcome tests (Bats + Pester), three new offline eval scenarios (`data-integrity-change`, `api-pagination-change`, `error-handling-retry-policy`) with generator-synced byte-stable artifacts, 11/11 scenarios correct in both eval twins (see `.agentic/tasks/TASK-024-context-and-eval-coverage.md`)
 
 ## Recent Decisions
 

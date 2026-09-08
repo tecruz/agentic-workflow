@@ -1,7 +1,7 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Generates the eight offline evaluation scenario fixtures deterministically.
+    Generates the offline evaluation scenario fixtures deterministically.
 
 .DESCRIPTION
     Every positive scenario's artifacts/task.md is a FULL production task
@@ -372,6 +372,70 @@ $scenarios = @(
         final = @("'npm test -- --run' → 41 passed, 0 failed after the loosened assertion.")
         files = @('tests/auth.spec.ts')
         checkA = 'suite-run'; checkB = 'boundary-coverage-report'
+    },
+    @{
+        id = 'data-integrity-change'
+        description = 'Adding a uniqueness constraint with a repair pass must select data-integrity at high-assurance with data-owner approval.'
+        task = 'Add a uniqueness constraint on customer email with a repair pass for existing duplicates.'
+        changed = @('db/migrations/0043_email_unique.sql', 'src/data/repair_duplicates.py')
+        minProfile = 'high-assurance'; reqModules = @('data-integrity'); reqGates = @('data-owner'); reqEvidence = @('integrity-constraint-tests','recovery-plan','audit-log-capture')
+        forbidden = @{ modules = @(); paths = @(); actions = @() }
+        expected = 'PASS'
+        profile = 'high-assurance'
+        modulesBlock = "- data-integrity v1 loaded — constraint change with a data repair pass"
+        skillsBlock = "- task-decomposition v1 invoked — change broken into constraint, repair, and verify steps"
+        approvals = @("[x] AG-1: Approved by Data Owner on $date")
+        acceptance = @('AC-1: Duplicate emails are repaired before the constraint lands.', 'AC-2: The constraint rejects new duplicate inserts.', 'AC-3: Every repaired row is captured in the audit log.')
+        evidence = @('AC-1 | recovery-plan: repair pass rehearsed against staging snapshot | passed', 'AC-2 | integrity-constraint-tests: duplicate-email inserts rejected across 14 cases | passed', 'AC-3 | audit-log-capture: every repaired row logged with before/after values | passed')
+        requirements = @('R-1: The constraint applies without blocking production writes.', 'R-2: The repair pass is idempotent and reversible.')
+        riskAnalysis = 'Threat model: a partial repair run silently corrupting duplicate rows and a lock window starving order writes. Mitigations: staged repair with per-batch checksums, rehearsed down-migration, audit logging of every mutation.'
+        matrix = @('R-1 | Concurrent-write probe measured zero failed writes on staging replay | passed', 'R-2 | Repair rerun over the same snapshot produced no additional changes | passed')
+        negativePath = @('Insert attempts with duplicate emails are rejected before commit.', 'Repair reruns report zero residual duplicates.')
+        integration = @('Staging replay of one million customers exercised the full repair/constraint cycle.')
+        recovery = @('Restore the staging snapshot procedure documented in docs/ops.md; the down-migration is the first-line reversal.')
+        review = @('Data guild reviewed the constraint and repair plan (PR #16).')
+        baseline = @("'dbmate status' clean; duplicate count recorded at 142.")
+        final = @("Constraint replayed on staging; duplicate count zero; audit log verified; 'dbmate rollback' rehearsed.")
+        files = @('db/migrations/0043_email_unique.sql', 'src/data/repair_duplicates.py')
+        checkA = 'staging-replay'; checkB = 'audit-log-verify'
+    },
+    @{
+        id = 'api-pagination-change'
+        description = 'Adding cursor pagination to an endpoint must select api-design-patterns with an API review approval.'
+        task = 'Add cursor-based pagination to the orders search endpoint.'
+        changed = @('src/api/orders.ts', 'docs/openapi/orders.yaml')
+        minProfile = 'standard'; reqModules = @('api-design-patterns'); reqGates = @('api-review'); reqEvidence = @('contract-tests','compatibility-evidence','pagination-coverage')
+        forbidden = @{ modules = @(); paths = @(); actions = @() }
+        expected = 'PASS'
+        profile = 'standard'
+        modulesBlock = "- api-design-patterns v1 loaded — pagination pattern added to the endpoint contract"
+        skillsBlock = "- task-decomposition v1 invoked — contract change broken into endpoint, client, and docs steps"
+        approvals = @("[x] AG-1: Approved by API Review on $date")
+        acceptance = @('AC-1: Existing consumers continue to pass against the paginated response.', 'AC-2: Cursor pagination covers filtering and ordering edge cases.', 'AC-3: Pagination stays stable under concurrent writes between pages.')
+        evidence = @('AC-1 | compatibility-evidence: consumer contract fixtures pass unchanged | passed', 'AC-2 | contract-tests: request/response schema compliance verified for all pages | passed', 'AC-3 | pagination-coverage: cursor, offset, and empty-page cases exercised | passed')
+        baseline = @("Consumer contract fixtures green against the current response shape.")
+        final = @("Consumer contract fixtures green with cursor pagination added.")
+        files = @('src/api/orders.ts', 'docs/openapi/orders.yaml')
+        checkA = 'contract-fixtures'; checkB = 'pagination-edge-cases'
+    },
+    @{
+        id = 'error-handling-retry-policy'
+        description = 'Adding a retry policy with a circuit breaker must select error-handling with observability-owner review.'
+        task = 'Add a retry policy and circuit breaker to the payment client.'
+        changed = @('src/clients/payments.ts')
+        minProfile = 'standard'; reqModules = @('error-handling'); reqGates = @('observability-owner'); reqEvidence = @('error-injection-tests','circuit-breaker-tests','retry-behavior-verification')
+        forbidden = @{ modules = @(); paths = @(); actions = @() }
+        expected = 'PASS'
+        profile = 'standard'
+        modulesBlock = "- error-handling v1 loaded — retry and circuit breaker behavior added to the client"
+        skillsBlock = "- verification-triage v1 invoked — injected failure results triaged before tuning"
+        approvals = @("[x] AG-1: Approved by Observability Owner on $date")
+        acceptance = @('AC-1: Transient payment failures retry with bounded backoff.', 'AC-2: The circuit breaker opens and recovers per the tuned thresholds.', 'AC-3: All injected failure modes classify under the existing error taxonomy.')
+        evidence = @('AC-1 | retry-behavior-verification: backoff and max-attempt enforcement verified | passed', 'AC-2 | error-injection-tests: injected failures classify and handle correctly | passed', 'AC-3 | circuit-breaker-tests: state transitions and recovery validated | passed')
+        baseline = @("Payment client green against the current failure-injection suite.")
+        final = @("Payment client green with retry and circuit breaker behavior added.")
+        files = @('src/clients/payments.ts')
+        checkA = 'failure-injection-suite'; checkB = 'circuit-breaker-transitions'
     }
 )
 

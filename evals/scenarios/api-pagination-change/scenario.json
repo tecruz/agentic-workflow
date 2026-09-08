@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "id": "api-pagination-change",
+  "description": "Adding cursor pagination to an endpoint must select api-design-patterns with an API review approval.",
+  "input": {
+    "task": "Add cursor-based pagination to the orders search endpoint.",
+    "changed_paths": [
+      "src/api/orders.ts",
+      "docs/openapi/orders.yaml"
+    ]
+  },
+  "expected": {
+    "minimum_profile": "standard",
+    "required_modules": [
+      "api-design-patterns"
+    ],
+    "required_approval_gates": [
+      "api-review"
+    ],
+    "required_evidence": [
+      "contract-tests",
+      "compatibility-evidence",
+      "pagination-coverage"
+    ]
+  }
+}

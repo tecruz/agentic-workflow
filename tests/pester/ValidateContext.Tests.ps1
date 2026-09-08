@@ -451,4 +451,20 @@ Describe 'validate-context golden expected outcomes for new fixtures' {
     It 'VALID (0) for a double-space sentinel separator' {
         Invoke-Validator 'context-sentinel-double-space.md' | Select-Object -ExpandProperty Code | Should -Be 0
     }
+
+    It 'VALID (0) for valid and none variants of the three v1.13 module fixtures' {
+        foreach ($m in @('data-integrity', 'api-design-patterns', 'error-handling')) {
+            foreach ($v in @('valid', 'none')) {
+                Invoke-Validator "context-$m-$v.md" | Select-Object -ExpandProperty Code | Should -Be 0
+            }
+        }
+    }
+
+    It 'INVALID (1) for fenced variants of the three v1.13 module fixtures' {
+        foreach ($m in @('data-integrity', 'api-design-patterns', 'error-handling')) {
+            foreach ($v in @('fenced-valid', 'fenced-none')) {
+                Invoke-Validator "context-$m-$v.md" | Select-Object -ExpandProperty Code | Should -Be 1
+            }
+        }
+    }
 }

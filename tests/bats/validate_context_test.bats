@@ -481,3 +481,23 @@ assert doc["exit_code"] == 0, doc
     classify context-sentinel-double-space.md
     [ "$status" -eq 0 ]
 }
+
+# --- Golden outcomes for the three v1.13 module fixtures ----------------------
+
+@test "VALID (0) for valid and none variants of the three v1.13 module fixtures" {
+    for m in data-integrity api-design-patterns error-handling; do
+        classify "context-$m-valid.md"
+        [ "$status" -eq 0 ] || { echo "context-$m-valid.md → $status (want 0)"; return 1; }
+        classify "context-$m-none.md"
+        [ "$status" -eq 0 ] || { echo "context-$m-none.md → $status (want 0)"; return 1; }
+    done
+}
+
+@test "INVALID (1) for fenced variants of the three v1.13 module fixtures" {
+    for m in data-integrity api-design-patterns error-handling; do
+        classify "context-$m-fenced-valid.md"
+        [ "$status" -eq 1 ] || { echo "context-$m-fenced-valid.md → $status (want 1)"; return 1; }
+        classify "context-$m-fenced-none.md"
+        [ "$status" -eq 1 ] || { echo "context-$m-fenced-none.md → $status (want 1)"; return 1; }
+    done
+}

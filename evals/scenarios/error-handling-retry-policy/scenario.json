@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "id": "error-handling-retry-policy",
+  "description": "Adding a retry policy with a circuit breaker must select error-handling with observability-owner review.",
+  "input": {
+    "task": "Add a retry policy and circuit breaker to the payment client.",
+    "changed_paths": [
+      "src/clients/payments.ts"
+    ]
+  },
+  "expected": {
+    "minimum_profile": "standard",
+    "required_modules": [
+      "error-handling"
+    ],
+    "required_approval_gates": [
+      "observability-owner"
+    ],
+    "required_evidence": [
+      "error-injection-tests",
+      "circuit-breaker-tests",
+      "retry-behavior-verification"
+    ]
+  }
+}

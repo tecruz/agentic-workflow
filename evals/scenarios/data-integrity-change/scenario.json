@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "id": "data-integrity-change",
+  "description": "Adding a uniqueness constraint with a repair pass must select data-integrity at high-assurance with data-owner approval.",
+  "input": {
+    "task": "Add a uniqueness constraint on customer email with a repair pass for existing duplicates.",
+    "changed_paths": [
+      "db/migrations/0043_email_unique.sql",
+      "src/data/repair_duplicates.py"
+    ]
+  },
+  "expected": {
+    "minimum_profile": "high-assurance",
+    "required_modules": [
+      "data-integrity"
+    ],
+    "required_approval_gates": [
+      "data-owner"
+    ],
+    "required_evidence": [
+      "integrity-constraint-tests",
+      "recovery-plan",
+      "audit-log-capture"
+    ]
+  }
+}
