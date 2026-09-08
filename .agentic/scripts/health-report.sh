@@ -6,8 +6,9 @@ set -euo pipefail
 # usage, skill invocation usage, profile distribution, VERSION/protocol_version
 # consistency, and recent task changes.  Exit 0 always (informational only).
 # Requires: bash 3.2+ (macOS default), standard coreutils, grep, sed, find.
-# Uses only indexed arrays (no declare -A, no read -a, no namerefs) so it runs
-# on the bash 3.2 that macOS ships.
+# Deliberately array-free: bash 3.2 treats zero-element arrays as unset under
+# `set -u`, so `"${arr[@]}"` on an empty array aborts the script.  Aggregation
+# is done with newline-joined strings + sort/uniq/while-read pipelines.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENTIC_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -17,100 +18,32 @@ TASKS_DIR="$AGENTIC_DIR/tasks"
 
 trim() { local v="$1"; v="${v#"${v%%[![:space:]]*}"}"; v="${v%"${v##*[![:space:]]}"}"; echo "$v"; }
 
-# Parallel key/value pair helpers over the globals _map_keys/_map_vals
-# (indexed arrays — every map in this script is small).  Values may contain
-# spaces; keys and values are never flattened into a delimited string, so no
-# word-splitting hazards under bash 3.2 + set -u.
-_map_keys=()
-_map_vals=()
+# ── 1. Collect task state ──────────────────────────────────────────────────────
 
-# kv_find <key> → index or -1
-kv_find() {
-    local k="$1" i
-    for ((i = 0; i < ${#_map_keys[@]}; i++)); do
-        if [ "${_map_keys[$i]}" = "$k" ]; then
-            echo "$i"
-            return 0
-        fi
-    done
-    echo -1
-}
+total=0
+statuses=""      # one Status value per task, trailing-newline separated
+profiles=""      # one Profile value per task, trailing-newline separated
+modules=""       # "<module-id><TAB><basename>" per selection
+skills=""        # "<skill-id><TAB><basename>" per invocation
+module_total=0
+skill_total=0
 
-# kv_set <key> <value> — replaces an existing key, otherwise appends
-kv_set() {
-    local k="$1" v="$2" i
-    i="$(kv_find "$k")"
-    if [ "$i" -ge 0 ]; then
-        _map_vals[$i]="$v"
-    else
-        _map_keys+=("$k")
-        _map_vals+=("$v")
-    fi
-}
-
-# kv_get <key> → value (empty if absent)
-kv_get() {
-    local k="$1" i
-    i="$(kv_find "$k")"
-    if [ "$i" -ge 0 ]; then
-        echo "${_map_vals[$i]}"
-    fi
-}
-
-# kv_bump <key> — integer counter semantics (0 if absent)
-kv_bump() {
-    local k="$1" i
-    i="$(kv_find "$k")"
-    if [ "$i" -ge 0 ]; then
-        _map_vals[$i]=$(( _map_vals[$i] + 1 ))
-    else
-        _map_keys+=("$k")
-        _map_vals+=(1)
-    fi
-}
-
-# kv_count → number of stored pairs
-kv_count() { echo "${#_map_keys[@]}"; }
-
-# kv_sorted_keys → one key per line, sorted (only for space-free key domains)
-kv_sorted_keys() {
-    printf '%s\n' "${_map_keys[@]}" | sort
-}
-
-# Count non-README .md files in tasks/
-task_files=()
 for f in "$TASKS_DIR"/*.md; do
   [ -f "$f" ] || continue
   base="$(basename "$f")"
   [ "$base" = "README.md" ] && continue
-  task_files+=("$f")
-done
+  total=$(( total + 1 ))
 
-total=${#task_files[@]}
-
-# ── 1. Task status breakdown ──────────────────────────────────────────────────
-
-status_keys=()
-status_vals=()
-for tf in "${task_files[@]}"; do
-  s="$(sed -n 's/^Status:[[:space:]]*\(.*\)$/\1/p' "$tf" 2>/dev/null || true)"
+  s="$(sed -n 's/^Status:[[:space:]]*\(.*\)$/\1/p' "$f" 2>/dev/null || true)"
   s="$(trim "$s")"
   [ -z "$s" ] && s="unknown"
-  _map_keys=("${status_keys[@]}")
-  _map_vals=("${status_vals[@]}")
-  kv_bump "$s"
-  status_keys=("${_map_keys[@]}")
-  status_vals=("${_map_vals[@]}")
-done
+  statuses="${statuses}${s}"$'\n'
 
-# ── 2. Context module usage ───────────────────────────────────────────────────
+  p="$(sed -n 's/^Profile:[[:space:]]*\(.*\)$/\1/p' "$f" 2>/dev/null || true)"
+  p="$(trim "$p")"
+  [ -z "$p" ] && p="unknown"
+  profiles="${profiles}${p}"$'\n'
 
-module_keys=()
-module_vals=()
-module_total=0
-
-for tf in "${task_files[@]}"; do
-  base="$(basename "$tf")"
   in_section=false
   while IFS= read -r line; do
     if [[ "$line" =~ ^##\ Context\ modules ]]; then
@@ -118,33 +51,17 @@ for tf in "${task_files[@]}"; do
       continue
     fi
     if $in_section && [[ "$line" =~ ^##\  ]]; then
-      break
+      in_section=false
+      continue
     fi
     if $in_section && [[ "$line" =~ ^-\ (.+)\ v[0-9]+\ loaded\  ]]; then
       mod_id="$(echo "$line" | sed -E 's/^- ([^ ]+) v[0-9]+ loaded.*/\1/' || true)"
-      _map_keys=("${module_keys[@]}")
-      _map_vals=("${module_vals[@]}")
-      old="$(kv_get "$mod_id")"
-      if [ -n "$old" ]; then
-        kv_set "$mod_id" "${old},${base}"
-      else
-        kv_set "$mod_id" "$base"
-      fi
-      module_keys=("${_map_keys[@]}")
-      module_vals=("${_map_vals[@]}")
+      [ -n "$mod_id" ] || continue
+      modules="${modules}${mod_id}"$'\t'"${base}"$'\n'
       module_total=$(( module_total + 1 ))
     fi
-  done < "$tf"
-done
+  done < "$f"
 
-# ── 3. Skill invocation usage ─────────────────────────────────────────────────
-
-skill_keys=()
-skill_vals=()
-skill_total=0
-
-for tf in "${task_files[@]}"; do
-  base="$(basename "$tf")"
   in_section=false
   while IFS= read -r line; do
     if [[ "$line" =~ ^##\ Skills ]]; then
@@ -152,41 +69,19 @@ for tf in "${task_files[@]}"; do
       continue
     fi
     if $in_section && [[ "$line" =~ ^##\  ]]; then
-      break
+      in_section=false
+      continue
     fi
     if $in_section && [[ "$line" =~ ^-\ (.+)\ v[0-9]+\ invoked\  ]]; then
       sk_id="$(echo "$line" | sed -E 's/^- ([^ ]+) v[0-9]+ invoked.*/\1/' || true)"
-      _map_keys=("${skill_keys[@]}")
-      _map_vals=("${skill_vals[@]}")
-      old="$(kv_get "$sk_id")"
-      if [ -n "$old" ]; then
-        kv_set "$sk_id" "${old},${base}"
-      else
-        kv_set "$sk_id" "$base"
-      fi
-      skill_keys=("${_map_keys[@]}")
-      skill_vals=("${_map_vals[@]}")
+      [ -n "$sk_id" ] || continue
+      skills="${skills}${sk_id}"$'\t'"${base}"$'\n'
       skill_total=$(( skill_total + 1 ))
     fi
-  done < "$tf"
+  done < "$f"
 done
 
-# ── 4. Profile distribution ──────────────────────────────────────────────────
-
-profile_keys=()
-profile_vals=()
-for tf in "${task_files[@]}"; do
-  p="$(sed -n 's/^Profile:[[:space:]]*\(.*\)$/\1/p' "$tf" 2>/dev/null || true)"
-  p="$(trim "$p")"
-  [ -z "$p" ] && p="unknown"
-  _map_keys=("${profile_keys[@]}")
-  _map_vals=("${profile_vals[@]}")
-  kv_bump "$p"
-  profile_keys=("${_map_keys[@]}")
-  profile_vals=("${_map_vals[@]}")
-done
-
-# ── 5. VERSION and protocol_version consistency ───────────────────────────────
+# ── 2. VERSION and protocol_version consistency ────────────────────────────────
 
 version_file="$AGENTIC_DIR/VERSION"
 if [ -f "$version_file" ]; then
@@ -218,8 +113,6 @@ extract_proto_version() {  # extract_proto_version <file> → version or empty
     printf '%s' "$v"
 }
 
-proto_keys=()
-proto_vals=()
 proto_files=(
   "$AGENTIC_DIR/scripts/verify.sh"
   "$AGENTIC_DIR/scripts/verify.ps1"
@@ -233,25 +126,20 @@ proto_files=(
   "$AGENTIC_DIR/orchestration/coordinator.ps1"
 )
 
+proto_entries=""
 for pf in "${proto_files[@]}"; do
   pv="$(extract_proto_version "$pf")"
-  if [ -n "$pv" ]; then
-    proto_keys+=("$pf")
-    proto_vals+=("$pv")
-  fi
+  [ -n "$pv" ] && proto_entries="${proto_entries}${pf}"$'\t'"${pv}"$'\n'
 done
 
 # Also check evals/run-evals.sh (dev-repo only; absent in adopter installs).
 evals_sh="$AGENTIC_DIR/../evals/run-evals.sh"
 if [ -f "$evals_sh" ]; then
   pv="$(extract_proto_version "$evals_sh")"
-  if [ -n "$pv" ]; then
-    proto_keys+=("$evals_sh")
-    proto_vals+=("$pv")
-  fi
+  [ -n "$pv" ] && proto_entries="${proto_entries}${evals_sh}"$'\t'"${pv}"$'\n'
 fi
 
-# ── 6. Recent changes (last 5 modified task files) ────────────────────────────
+# ── 3. Recent changes (last 5 modified task files) ─────────────────────────────
 
 recent_list=""
 if command -v git &>/dev/null && git -C "$AGENTIC_DIR/.." rev-parse --is-inside-work-tree &>/dev/null 2>&1; then
@@ -268,26 +156,21 @@ echo ""
 
 echo "── Tasks ─────────────────────────────────────────────────────────────"
 echo "  Total: $total"
-_map_keys=("${status_keys[@]}")
-_map_vals=("${status_vals[@]}")
-for s in $(kv_sorted_keys); do
-  echo "    $s: $(kv_get "$s")"
+printf '%s' "$statuses" | sort | uniq -c | while read -r cnt s; do
+  echo "    $s: $cnt"
 done
 echo ""
 
 echo "── Context Module Usage ──────────────────────────────────────────────"
 echo "  Total selections: $module_total"
-_map_keys=("${module_keys[@]}")
-_map_vals=("${module_vals[@]}")
-if [ "$(kv_count)" -gt 0 ]; then
-  for mod in $(kv_sorted_keys); do
-    echo "    $mod:"
-    mv="$(kv_get "$mod")"
-    if [ -n "$mv" ]; then
-      echo "$mv" | tr ',' '\n' | while IFS= read -r t; do
-        [ -n "$t" ] && echo "      - $(trim "$t")"
-      done
+if [ -n "$modules" ]; then
+  prev=""
+  printf '%s' "$modules" | sort | while IFS=$'\t' read -r mid tsk; do
+    if [ "$mid" != "$prev" ]; then
+      echo "    $mid:"
+      prev="$mid"
     fi
+    echo "      - $tsk"
   done
 else
   echo "    (none)"
@@ -296,17 +179,14 @@ echo ""
 
 echo "── Skill Invocation Usage ────────────────────────────────────────────"
 echo "  Total invocations: $skill_total"
-_map_keys=("${skill_keys[@]}")
-_map_vals=("${skill_vals[@]}")
-if [ "$(kv_count)" -gt 0 ]; then
-  for sk in $(kv_sorted_keys); do
-    echo "    $sk:"
-    sv="$(kv_get "$sk")"
-    if [ -n "$sv" ]; then
-      echo "$sv" | tr ',' '\n' | while IFS= read -r t; do
-        [ -n "$t" ] && echo "      - $(trim "$t")"
-      done
+if [ -n "$skills" ]; then
+  prev=""
+  printf '%s' "$skills" | sort | while IFS=$'\t' read -r sk_id tsk; do
+    if [ "$sk_id" != "$prev" ]; then
+      echo "    $sk_id:"
+      prev="$sk_id"
     fi
+    echo "      - $tsk"
   done
 else
   echo "    (none)"
@@ -314,10 +194,8 @@ fi
 echo ""
 
 echo "── Profile Distribution ─────────────────────────────────────────────"
-_map_keys=("${profile_keys[@]}")
-_map_vals=("${profile_vals[@]}")
-for p in $(kv_sorted_keys); do
-  echo "    $p: $(kv_get "$p")"
+printf '%s' "$profiles" | sort | uniq -c | while read -r cnt p; do
+  echo "    $p: $cnt"
 done
 echo ""
 
@@ -325,17 +203,19 @@ echo "── VERSION Consistency ───────────────�
 echo "  .agentic/VERSION: $file_version"
 
 all_match=true
-if [ "${#proto_keys[@]}" -gt 0 ]; then
-  for ((i = 0; i < ${#proto_keys[@]}; i++)); do
-    pv="${proto_vals[$i]}"
-    short="$(basename "${proto_keys[$i]}")"
+if [ -n "$proto_entries" ]; then
+  proto_report="$(printf '%s' "$proto_entries" | while IFS=$'\t' read -r pf pv; do
+    short="$(basename "$pf")"
     if [ "$pv" = "$file_version" ]; then
       echo "    $short: $pv  ✓"
     else
       echo "    $short: $pv  ✗ (expected $file_version)"
-      all_match=false
     fi
-  done
+  done)"
+  printf '%s\n' "$proto_report"
+  if printf '%s' "$proto_report" | grep -q '✗'; then
+    all_match=false
+  fi
 else
   echo "    (no protocol_version found in scripts)"
 fi
