@@ -152,7 +152,11 @@ jobs:
   full-macos:
     name: Full Bats (macOS)
     runs-on: macos-latest
-    timeout-minutes: 35
+    # The macOS image is the slowest runner for the bats suite (hundreds of
+    # small subprocess spawns per validator test), and the suite has grown to
+    # fill the original 35-minute budget, cutting off the trailing evals-sh
+    # check. Sized with headroom for image drift, like the Windows job.
+    timeout-minutes: 60
     steps:
       # actions/checkout@v5
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
