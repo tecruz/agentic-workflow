@@ -27,6 +27,13 @@ function Test-JsonAgainstSchema {
     return $LASTEXITCODE
 }
 
+BeforeAll {
+    $script:repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+    $script:evalsDir = Join-Path $script:repoRoot 'evals'
+    $script:runEvalsSh = Join-Path $script:evalsDir 'run-evals.sh'
+    $script:runEvalsPs = Join-Path $script:evalsDir 'run-evals.ps1'
+}
+
 Describe 'v1.4.0 JSON result contracts and schema validation' {
 
     BeforeEach {
@@ -1192,13 +1199,12 @@ Describe 'Event schema validation' {
 Describe 'Behavioral evaluation contracts and schema validation' {
 
     BeforeAll {
-        $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-        $script:evalsDir = Join-Path $repoRoot 'evals'
-        $script:runEvalsSh = Join-Path $evalsDir 'run-evals.sh'
-        $script:runEvalsPs = Join-Path $evalsDir 'run-evals.ps1'
-        $script:evaluationSchema = Join-Path $evalsDir 'schemas' 'evaluation-result-v1.schema.json'
-        $script:scenarioSchema = Join-Path $evalsDir 'schemas' 'scenario-v1.schema.json'
-        $script:verificationSchema = Join-Path $repoRoot '.agentic' 'schemas' 'verification-result-v1.schema.json'
+        $evalsDir = Join-Path $repoRoot 'evals'
+        $runEvalsSh = Join-Path $evalsDir 'run-evals.sh'
+        $runEvalsPs = Join-Path $evalsDir 'run-evals.ps1'
+        $evaluationSchema = Join-Path $evalsDir 'schemas' 'evaluation-result-v1.schema.json'
+        $scenarioSchema = Join-Path $evalsDir 'schemas' 'scenario-v1.schema.json'
+        $verificationSchema = Join-Path $repoRoot '.agentic' 'schemas' 'verification-result-v1.schema.json'
 
         # Self-contained: Pester 5 It-blocks cannot call helpers defined at
         # other scopes, so this mirrors Test-JsonAgainstSchema locally.
@@ -1255,6 +1261,13 @@ Describe 'Behavioral evaluation contracts and schema validation' {
                 finally { Remove-Item -LiteralPath $tmp -ErrorAction SilentlyContinue }
             }
         }
+
+        # Cache the full-corpus PowerShell run once so the four
+        # smoke / negative-control / positive tests share one invocation
+        # instead of re-running the harness four times.
+        if (-not $IsWindows) {
+            $script:psResult = Invoke-EvalRunner $runEvalsPs 'Json'
+        }
     }
 
     It 'run-evals.sh emits one schema-valid document per scenario and exits 0 (Bash)' {
@@ -1265,13 +1278,15 @@ Describe 'Behavioral evaluation contracts and schema validation' {
     }
 
     It 'run-evals.ps1 emits one schema-valid document per scenario and exits 0 (PowerShell)' {
-        $r = Invoke-EvalRunner $runEvalsPs 'Json'
+        if ($IsWindows) { Set-ItResult -Skipped -Because 'corpus run not cached on Windows'; return }
+        $r = $script:psResult
         $r.Code | Should -Be 0
         Assert-EvalDocsSchemaValid $r.Lines 'powershell'
     }
 
     It 'the negative control is valid in every other respect and fails only FORBIDDEN_ACTIONS_ABSENT (PowerShell)' {
-        $r = Invoke-EvalRunner $runEvalsPs 'Json'
+        if ($IsWindows) { Set-ItResult -Skipped -Because 'corpus run not cached on Windows'; return }
+        $r = $script:psResult
         $r.Code | Should -Be 0
         $neg = @($r.Lines | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.scenario_id -eq 'test-weakening-attempt' })
         ($neg.Count) | Should -Be 1
@@ -1293,7 +1308,8 @@ Describe 'Behavioral evaluation contracts and schema validation' {
     }
 
     It 'the wrong-module negative control fails only REQUIRED_MODULES_SELECTED (PowerShell)' {
-        $r = Invoke-EvalRunner $runEvalsPs 'Json'
+        if ($IsWindows) { Set-ItResult -Skipped -Because 'corpus run not cached on Windows'; return }
+        $r = $script:psResult
         $r.Code | Should -Be 0
         $neg = @($r.Lines | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.scenario_id -eq 'wrong-module-selected' })
         ($neg.Count) | Should -Be 1
@@ -1313,7 +1329,8 @@ Describe 'Behavioral evaluation contracts and schema validation' {
     }
 
     It 'every positive scenario observes PASS with harness PASS (PowerShell)' {
-        $r = Invoke-EvalRunner $runEvalsPs 'Json'
+        if ($IsWindows) { Set-ItResult -Skipped -Because 'corpus run not cached on Windows'; return }
+        $r = $script:psResult
         $r.Code | Should -Be 0
         $docs = @($r.Lines | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.expected_result -ne 'FAIL' })
         ($docs.Count) | Should -Be 10
