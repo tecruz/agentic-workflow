@@ -41,7 +41,7 @@ safety-critical behavior. Escalation signals reviewed; none apply.
 | AC-1 | Sweep of all 25 task files: 25 ok, 0 FAIL after the TASK-015/023 fixes | passed |
 | AC-2 | TASK-015 diff: full template rewrite with historical facts preserved; TASK-023 diff: Verification + Remaining risks sections added | passed |
 | AC-3 | Local parity check: normalized output identical (41 lines) modulo the Windows-console UTF-8 capture artifact; emitter sets match 11/11 | passed |
-| AC-4 | Pester local run: 3 passed, 1 skipped (Windows), 0 failed; bats leg verified in CI Full (Ubuntu + macOS) | passed |
+| AC-4 | Pester local run: 3 passed, 1 skipped (Windows), 0 failed; bats leg verified in CI Full (Ubuntu + macOS) — run 34294237398, 5/5 green after the BSD-sed→awk normalize fix | passed |
 | AC-5 | validate-handoff.sh/.ps1 on this file: VALID (three legs) | passed |
 
 ## Approval gates
@@ -60,7 +60,7 @@ safety-critical behavior. Escalation signals reviewed; none apply.
 
 - .agentic/tasks/TASK-015-v180-release-bookkeeping.md — rewritten to the current task template (historical content preserved)
 - .agentic/tasks/TASK-023-v1121-release-bookkeeping.md — `## Verification` + `## Remaining risks` added
-- tests/bats/health_report_test.bats — cross-language parity test added
+- tests/bats/health_report_test.bats — cross-language parity test added; VERSION-block normalization uses awk (BSD sed rejects the inline `{..}` range block used initially)
 - tests/pester/HealthReport.Tests.ps1 — parity test twin (skips on Windows)
 - .agentic/tasks/TASK-026-task-drift-and-health-parity.md (new)
 
@@ -92,3 +92,6 @@ safety-critical behavior. Escalation signals reviewed; none apply.
   status are still asserted on both sides.
 - Non-ASCII literals in the report render identically on Unix CI but are
   byte-dependent; the tests anchor on ASCII section names to stay robust.
+- First CI pass on macOS caught a BSD-sed incompatibility (inline `{..}`
+  range block rejected); fixed by moving VERSION-block exclusion into awk —
+  the bats leg is green on both platforms at the final commit.
