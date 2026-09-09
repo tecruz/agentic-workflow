@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "id": "wrong-module-selected",
+  "description": "Negative control: an authorization lookup migration must select security-review; this fixture selects database-migrations instead, so the runner must detect the missing required module.",
+  "input": {
+    "task": "Add an authorization lookup table with row-level access checks.",
+    "changed_paths": [
+      "db/migrations/0050_session_auth_index.sql"
+    ]
+  },
+  "expected": {
+    "minimum_profile": "high-assurance",
+    "required_modules": [
+      "security-review"
+    ],
+    "required_approval_gates": [
+      "security"
+    ],
+    "required_evidence": [
+      "authorization-boundary-tests"
+    ]
+  },
+  "fixture_expected_result": "FAIL",
+  "expected_failed_checks": [
+    "REQUIRED_MODULES_SELECTED"
+  ]
+}

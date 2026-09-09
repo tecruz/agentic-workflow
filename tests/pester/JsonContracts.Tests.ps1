@@ -1243,7 +1243,7 @@ Describe 'Behavioral evaluation contracts and schema validation' {
         }
 
         function Assert-EvalDocsSchemaValid([object[]]$Lines, [string]$Label) {
-            ($Lines.Count) | Should -Be 11 -Because "one document per scenario ($Label)"
+            ($Lines.Count) | Should -Be 12 -Because "one document per scenario ($Label)"
             foreach ($line in $Lines) {
                 $tmp = [System.IO.Path]::GetTempFileName()
                 try {
@@ -1292,10 +1292,30 @@ Describe 'Behavioral evaluation contracts and schema validation' {
         $doc.summary.passed | Should -Be ($doc.summary.total - 1)
     }
 
+    It 'the wrong-module negative control fails only REQUIRED_MODULES_SELECTED (PowerShell)' {
+        $r = Invoke-EvalRunner $runEvalsPs 'Json'
+        $r.Code | Should -Be 0
+        $neg = @($r.Lines | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.scenario_id -eq 'wrong-module-selected' })
+        ($neg.Count) | Should -Be 1
+        $doc = $neg[0]
+        # Second negative control: the runner must detect a missing required
+        # module even though every other contract leg is satisfied.
+        $doc.observed_result | Should -Be 'FAIL'
+        $doc.expected_result | Should -Be 'FAIL'
+        $doc.expectation_matched | Should -BeTrue
+        $doc.result | Should -Be 'PASS'
+        $doc.exit_code | Should -Be 0
+        @($doc.diagnostics).Count | Should -Be 0
+        $failedChecks = @($doc.checks | Where-Object { -not $_.passed } | ForEach-Object { $_.id })
+        $failedChecks | Should -Be 'REQUIRED_MODULES_SELECTED'
+        $doc.summary.failed | Should -Be 1
+        $doc.summary.passed | Should -Be ($doc.summary.total - 1)
+    }
+
     It 'every positive scenario observes PASS with harness PASS (PowerShell)' {
         $r = Invoke-EvalRunner $runEvalsPs 'Json'
         $r.Code | Should -Be 0
-        $docs = @($r.Lines | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.scenario_id -ne 'test-weakening-attempt' })
+        $docs = @($r.Lines | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.expected_result -ne 'FAIL' })
         ($docs.Count) | Should -Be 10
         foreach ($d in $docs) {
             $d.observed_result | Should -Be 'PASS' -Because "scenario $($d.scenario_id)"
@@ -1307,7 +1327,7 @@ Describe 'Behavioral evaluation contracts and schema validation' {
 
     It 'scenario fixtures validate against scenario-v1 and verification artifacts against verification-result-v1' {
         $scenarioDirs = @(Get-ChildItem -LiteralPath (Join-Path $evalsDir 'scenarios') -Directory | Sort-Object Name)
-        ($scenarioDirs.Count) | Should -Be 11
+        ($scenarioDirs.Count) | Should -Be 12
         foreach ($dir in $scenarioDirs) {
             $tmpS = [System.IO.Path]::GetTempFileName()
             $tmpV = [System.IO.Path]::GetTempFileName()

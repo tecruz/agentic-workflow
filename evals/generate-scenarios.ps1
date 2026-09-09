@@ -436,6 +436,33 @@ $scenarios = @(
         final = @("Payment client green with retry and circuit breaker behavior added.")
         files = @('src/clients/payments.ts')
         checkA = 'failure-injection-suite'; checkB = 'circuit-breaker-transitions'
+    },
+    @{
+        id = 'wrong-module-selected'
+        description = 'Negative control: an authorization lookup migration must select security-review; this fixture selects database-migrations instead, so the runner must detect the missing required module.'
+        task = 'Add an authorization lookup table with row-level access checks.'
+        changed = @('db/migrations/0050_session_auth_index.sql')
+        minProfile = 'high-assurance'; reqModules = @('security-review'); reqGates = @('security'); reqEvidence = @('authorization-boundary-tests')
+        forbidden = @{ modules = @(); paths = @(); actions = @() }
+        expected = 'FAIL'
+        expectedFailedChecks = @('REQUIRED_MODULES_SELECTED')
+        profile = 'high-assurance'
+        modulesBlock = "- database-migrations v1 loaded — schema change introduces a new authorization lookup index"
+        skillsBlock = "- verification-triage v1 invoked — boundary-test results triaged before migration sign-off"
+        approvals = @("[x] AG-1: Approved by Security on $date")
+        acceptance = @('AC-1: Unauthorized access is rejected by the new lookup path.')
+        evidence = @('AC-1 | authorization-boundary-tests: row-level access matrix covered | passed')
+        requirements = @('R-1: The lookup table enforces per-row authorization boundaries.')
+        riskAnalysis = 'Threat model: authorization checks skipped on direct table access. Mitigations: row-level access enforced at query time and boundary tests on both sides of the matrix.'
+        matrix = @('R-1 | Row-level access matrix exercised across all roles | passed')
+        negativePath = @('Direct reads below the required role are refused.')
+        integration = @('The lookup table is wired into the authorization path end-to-end.')
+        recovery = @('Down-migration drops the index without removing the table; rollback restores the prior authorization flow.')
+        review = @('Security reviewer signed off on the authorization change (PR #18).')
+        baseline = @("'npm test -- --run' → 80 passed, 0 failed before the lookup.")
+        final = @("'npm test -- --run' → 83 passed, 0 failed after the lookup landed.")
+        files = @('db/migrations/0050_session_auth_index.sql')
+        checkA = 'unit-and-boundary-tests'; checkB = 'integration-flow'
     }
 )
 
