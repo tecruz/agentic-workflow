@@ -60,7 +60,7 @@ REPORT="$REPO_ROOT/.agentic/scripts/health-report.sh"
     # module/skill usage, profiles, recent changes — must match byte-for-byte.
     normalize() {
         printf '%s' "$1" | sed '/^[[:space:]]*$/d; /^  [0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\} /d' \
-            | sed '/VERSION Consistency/,/Recent Task Changes/{ /Recent Task Changes/!d }'
+            | awk '/VERSION Consistency/ { skip = 1; next } /Recent Task Changes/ { skip = 0 } !skip'
     }
     emitters() {  # sorted emitter names from the VERSION block
         printf '%s' "$1" | sed -n '/VERSION Consistency/,/Recent Task Changes/p' \
