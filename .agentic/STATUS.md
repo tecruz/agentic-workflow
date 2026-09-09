@@ -38,6 +38,7 @@
 - [x] TASK-026 — Task-file validator drift + health-report cross-language parity: TASK-015 rewritten into the current task template, TASK-023 retrofitted with `## Verification`/`## Remaining risks`, all 25 task files pass `validate-task`, and the health-report twins gained a normalized-output parity test in both suites (Pester leg skips on Windows) (see `.agentic/tasks/TASK-026-task-drift-and-health-parity.md`)
 - [x] TASK-027 — Negative-control eval scenario for `REQUIRED_MODULES_SELECTED`: `wrong-module-selected` scenario (selects `database-migrations` where `security-review` is required) pins the exactly-one-failing-check detection; both eval twins 12/12; JsonContracts counts updated (see `.agentic/tasks/TASK-027-wrong-module-negative-control.md`)
 - [x] TASK-028 — Eval-suite caching: single corpus run in Describe `BeforeAll` shared by 4 PS tests; Windows skip guards; file-level `BeforeAll` for Pester 5 discovery; local 9.4 min → 2.0 min (4.8× faster) (see `.agentic/tasks/TASK-028-eval-suite-caching.md`)
+- [x] TASK-029 — Changelog hygiene + stale-branch pruning: `## [Unreleased]` section documents TASK-026/027/028; nine merged remote branches + three local branches pruned (see `.agentic/tasks/TASK-029-changelog-hygiene.md`)
 
 ## Recent Decisions
 

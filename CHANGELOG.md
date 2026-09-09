@@ -5,6 +5,39 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Second offline negative-control eval scenario.** `wrong-module-selected`
+  selects `database-migrations` where `security-review` is required, pinning
+  the `REQUIRED_MODULES_SELECTED` contract leg: the harness now catches a
+  runner regression that would silently accept a missing required module.
+  Corpus is 12 scenarios; both eval twins classify 12/12; JsonContracts
+  Pester counts and positive filter updated. (TASK-027)
+
+### Fixed
+
+- **Task-file validator drift.** TASK-015 rewritten into the current task
+  template and TASK-023 retrofitted with `## Verification` / `## Remaining
+  risks`; all 25 task files pass `validate-task`. (TASK-026)
+- **Health-report cross-language parity tests.** Both suites (Bats +
+  Pester) now compare normalized `health-report.sh` / `health-report.ps1`
+  output — emitter-set equality plus the `CONSISTENT` assertion. The bats
+  leg uses `awk` for VERSION-block normalization (BSD sed rejects inline
+  `{..}` range blocks on macOS). (TASK-026)
+
+### Changed
+
+- **Eval-suite runtime.** The JsonContracts Pester suite caches the full
+  12-scenario corpus run once in `BeforeAll` (shared by the four
+  PowerShell corpus tests) instead of re-running the harness four times;
+  local Behavioral Describe runtime drops from ~9.4 min to ~2.0 min
+  (4.8× faster) with zero assertion changes. File-level `BeforeAll`
+  scopes runner paths for Pester 5 discovery; the four corpus tests skip
+  on Windows where the cache is not populated (bash legs already CI-only).
+  (TASK-028)
+
 ## [1.13.0] - 2026-09-08
 
 ### Added
