@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.14.0] - 2026-09-10
 
 ### Added
 
@@ -37,6 +37,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scopes runner paths for Pester 5 discovery; the four corpus tests skip
   on Windows where the cache is not populated (bash legs already CI-only).
   (TASK-028)
+- **README adoption rework.** New Contents table, a Quick Start that leads
+  with install → post-install setup → first-task expectations (installer
+  lifecycle detail moved to a reference subsection), a version placeholder
+  in the bundle example, a six-question FAQ, and anchor fixes — all 24
+  internal links verified. (TASK-031)
+- **CONTRIBUTING.md check-list sync.** The Local verification section now
+  mirrors `.agentic/checks.tsv` (all 14 required checks), drops the stale
+  node requirement, and points at checks.tsv as the authoritative contract.
+  (TASK-032)
 
 ## [1.13.0] - 2026-09-08
 

@@ -1484,7 +1484,7 @@ SH
     awk -F '\t' '$1 == ".cursor/rules/agentic-protocol.mdc" && $2 == "managed" { found = 1 } END { exit found ? 0 : 1 }' .agentic/install-manifest.tsv
     awk -F '\t' '$1 == ".github/instructions/agentic-protocol.instructions.md" && $2 == "managed" { found = 1 } END { exit found ? 0 : 1 }' .agentic/install-manifest.tsv
 
-    # v1.13.0-era payload: verdict/chore/spike templates, health-report twins,
+    # v1.14.0-era payload: verdict/chore/spike templates, health-report twins,
     # and the three new context modules land as managed.
     [ -f .agentic/templates/VERDICT.md ]
     [ -f .agentic/templates/SPIKE.md ]

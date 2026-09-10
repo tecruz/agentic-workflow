@@ -42,6 +42,7 @@
 - [x] TASK-030 — Orphaned-file cleanup: removed the zero-reference `node-fail` fixture (superseded by `node-npm-fail`), the untracked `bazel-workspace/pkg/bin/BUILD.bazel` leftover, and the local `dist/` release-bundle folder (see `.agentic/tasks/TASK-030-orphaned-file-cleanup.md`)
 - [x] TASK-031 — README adoption improvements: table of contents, reworked Quick Start (install → post-install → first task → lifecycle reference), bundle-version placeholder, FAQ, anchor fixes (see `.agentic/tasks/TASK-031-readme-adoption-improvements.md`)
 - [x] TASK-032 — CONTRIBUTING.md check-list drift fix: Local verification section now mirrors `.agentic/checks.tsv` (14 required checks), drops the stale node requirement, points to checks.tsv as authoritative (see `.agentic/tasks/TASK-032-contributing-checklist-drift.md`)
+- [x] TASK-033 — v1.14.0 release bookkeeping: VERSION→1.14.0, protocol_version sweep (28 files), 12 eval artifacts regenerated, CHANGELOG `[1.14.0] - 2026-09-10`, ROADMAP refresh; tag/release pending approval (see `.agentic/tasks/TASK-033-v1140-release-bookkeeping.md`)
 
 ## Recent Decisions
 
