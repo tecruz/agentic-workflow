@@ -41,6 +41,7 @@
 - [x] TASK-029 — Changelog hygiene + stale-branch pruning: `## [Unreleased]` section documents TASK-026/027/028; nine merged remote branches + three local branches pruned (see `.agentic/tasks/TASK-029-changelog-hygiene.md`)
 - [x] TASK-030 — Orphaned-file cleanup: removed the zero-reference `node-fail` fixture (superseded by `node-npm-fail`), the untracked `bazel-workspace/pkg/bin/BUILD.bazel` leftover, and the local `dist/` release-bundle folder (see `.agentic/tasks/TASK-030-orphaned-file-cleanup.md`)
 - [x] TASK-031 — README adoption improvements: table of contents, reworked Quick Start (install → post-install → first task → lifecycle reference), bundle-version placeholder, FAQ, anchor fixes (see `.agentic/tasks/TASK-031-readme-adoption-improvements.md`)
+- [x] TASK-032 — CONTRIBUTING.md check-list drift fix: Local verification section now mirrors `.agentic/checks.tsv` (14 required checks), drops the stale node requirement, points to checks.tsv as authoritative (see `.agentic/tasks/TASK-032-contributing-checklist-drift.md`)
 
 ## Recent Decisions
 

@@ -13,10 +13,11 @@ Thanks for helping improve the Universal Agentic Development Protocol.
 
 ## Local verification
 
-The repository is self-verifying via `.agentic/checks.tsv`:
+The repository is self-verifying via `.agentic/checks.tsv` — that file is the
+authoritative contract; keep it in sync with this section when checks change:
 
 ```bash
-# Linux / macOS (requires bash, pwsh, bats, node)
+# Linux / macOS (requires bash, pwsh, bats)
 ./.agentic/scripts/verify.sh
 
 # Windows (PowerShell 7+)
@@ -25,10 +26,16 @@ pwsh -NoProfile -File .agentic/scripts/verify.ps1
 
 Required checks run:
 
-- `bash -n` on `install.sh` and `.agentic/scripts/verify.sh`
-- a PowerShell parser check on `install.ps1` and `.agentic/scripts/verify.ps1`
+- `bash -n` syntax checks on `install.sh`, `verify.sh`, the task/context/skills
+  validators, `validate-handoff.sh`, `health-report.sh`, and the orchestration
+  coordinator
+- a PowerShell parser check over `install.ps1` and every `.ps1` twin
+  (`tests/ps-syntax.ps1`)
+- the handoff-gate self-check: `validate-handoff.sh` must accept a known-good
+  task record
 - the Bats suites in `tests/bats`
 - the Pester suites in `tests/pester`
+- both offline evaluation twins (`evals/run-evals.sh`, `evals/run-evals.ps1`)
 
 Optional checks (warnings only) run when their tooling is installed:
 - `shellcheck` on the shell scripts
