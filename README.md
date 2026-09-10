@@ -17,6 +17,27 @@ language, framework, or which agent tool you use.
 - **Honest verification**: the verifier can never report success when a
   required check did not actually run.
 
+## Contents
+
+- [Requirements](#requirements)
+- [Quick Start](#quick-start)
+- [How It Works](#how-it-works)
+- [Risk Profiles](#risk-profiles)
+- [Context Modules](#context-modules)
+- [Skills](#skills)
+- [Verification State Model](#verification-state-model)
+- [Supported Stacks](#supported-stacks)
+- [What's Included](#whats-included)
+- [Supported Agent Tools](#supported-agent-tools)
+- [Orchestration](#orchestration)
+- [Customization](#customization)
+- [FAQ](#faq)
+- [Contributing](#contributing)
+- [Security](#security)
+- [Roadmap](#roadmap)
+- [Changelog](#changelog)
+- [License](#license)
+
 ---
 
 ## Requirements
@@ -50,7 +71,7 @@ cd agentic-workflow
 ```
 
 The installer distinguishes three kinds of files and never silently destroys
-project content (see [File ownership](#file-ownership)):
+project content:
 
 - **managed** — framework files. Updated only when unchanged since the last
   install; if you modified one, a `.new` conflict candidate is written instead.
@@ -62,6 +83,41 @@ project content (see [File ownership](#file-ownership)):
 Update an existing install by re-running the installer; use `--replace-managed`
 (`-ReplaceManaged`) to force-replace modified framework files. See
 `./install.sh --help` for all options.
+
+### What happens after install
+
+1. **Commit the installed files.**
+2. **Fill in `.agentic/ARCHITECTURE.md`** with your project's real architecture
+   — or skip this and let your agent do it during its first session.
+3. **Define your checks contract.** Run the verifier once, review the detected
+   candidate, and accept it (`--detect-checks` → `--accept-detected-checks`, see
+   [The checks candidate lifecycle](#the-checks-candidate-lifecycle)) — or
+   write `.agentic/checks.tsv` by hand. This file is the authoritative
+   definition of done; everything else is scaffolding around it.
+4. **Run the verifier locally and, optionally, in CI** (see
+   [Verify a project](#verify-a-project)).
+
+### Your first task
+
+Ask your agent to do anything. Following `AGENTS.md`, it will:
+
+- **DISCOVER** your repo — manifests, conventions, `.agentic/STATUS.md`.
+- **CLASSIFY RISK** — `standard` by default, escalating automatically to
+  `high-assurance` for authentication, payments, migrations, and the like.
+- **PLAN** and record the work in `.agentic/tasks/TASK-001-...md` using
+  `.agentic/templates/task.md`.
+- **IMPLEMENT** minimal, style-matching changes.
+- **VERIFY** by running the checks from `.agentic/checks.tsv` — and never by
+  weakening a failing test to go green.
+- **HANDOFF** by marking the task `done` and passing
+  `.agentic/scripts/validate-handoff.sh` / `validate-handoff.ps1`.
+
+You don't have to adopt everything at once. `AGENTS.md` alone upgrades any
+agent's operating discipline; the verifier alone gives you honest check gating;
+risk profiles, context modules, skills, and orchestration are progressive
+layers you can add as your team settles into the workflow.
+
+### Installer lifecycle reference
 
 The installer also manages the lifecycle of what it installed:
 
@@ -94,9 +150,6 @@ The installer also manages the lifecycle of what it installed:
 - The previous install manifest is validated before anything runs, in every
   mode including `--plan`: a malformed, tampered, or path-escaping manifest
   aborts the run before any file is created, modified, or removed.
-
-Then commit the installed files and fill in `.agentic/ARCHITECTURE.md` with
-your project's real architecture (or let your agent do it in its first session).
 
 ### Verify a project
 
@@ -197,8 +250,11 @@ the framework's own checks, tests, CI, and docs so adopters start clean:
 
 ```bash
 bash scripts/build-bundle.sh                    # assemble + archive
-bash dist/agentic-workflow-1.4.0/install.sh /path/to/your-project
+bash dist/agentic-workflow-<version>/install.sh /path/to/your-project
 ```
+
+The version is stamped from `.agentic/VERSION`; replace `<version>` with the
+directory `build-bundle.sh` produced (e.g. `1.13.0`).
 
 ---
 
@@ -550,6 +606,49 @@ Enable JSONL event stream with `--events .agentic/runs/run.jsonl`. Events:
   reference it from `AGENTS.md`.
 - **Extend verification**: edit `.agentic/checks.tsv` in the adopting project;
   each line is `requirement<TAB>check-id<TAB>working-dir<TAB>executable<TAB>args...`.
+
+---
+
+## FAQ
+
+**Do I have to adopt everything at once?**
+
+No. Each layer works independently: `AGENTS.md` alone upgrades an agent's
+operating discipline; the verifier alone gives honest check gating; risk
+profiles, context modules, skills, and orchestration are progressive layers
+with no interdependencies (other than validation, which only applies to the
+layer you actually use).
+
+**My stack isn't in the [Supported Stacks](#supported-stacks) table.**
+
+Detection emits `UNSUPPORTED`, which is honest rather than misleading. Write
+`.agentic/checks.tsv` yourself — it is the authoritative contract, and
+auto-detection is only a bootstrap for it. Each line is
+`requirement<TAB>check-id<TAB>working-dir<TAB>executable<TAB>args...`.
+
+**Do I have to change my CI?**
+
+No. But calling `verify.sh` / `verify.ps1` from CI turns the honest-PASS
+invariant into a gate: `PASS` is impossible unless at least one required check
+actually ran, and `--format json` output is designed for CI consumption.
+
+**Does this work with my agent tool?**
+
+See [Supported Agent Tools](#supported-agent-tools). Anything that reads
+`AGENTS.md` works out of the box; dedicated bridges exist for Claude Code,
+Gemini CLI, Aider, Cursor, and GitHub Copilot.
+
+**Why not just write my own AGENTS.md?**
+
+You can. This protocol adds what a hand-written file can't: a versioned
+distribution, three structural contract validators, cross-language parity,
+non-destructive installers with upgrade/prune/uninstall semantics, and offline
+behavioral evaluations that pin the tools' behavior — so the documentation and
+the tooling cannot silently drift apart.
+
+**Can I use it in a private or commercial project?**
+
+Yes — it's MIT licensed ([License](#license)).
 
 ---
 
