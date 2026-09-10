@@ -151,17 +151,29 @@ jobs:
           # and verify the exact version landed before continuing.
           function Install-CiModule([string]$Name, [string]$Version) {
             if (Get-Module -ListAvailable $Name | Where-Object { $_.Version -eq $Version }) { return }
-            if (Get-Command Install-PSResource -ErrorAction SilentlyContinue) {
-              Install-PSResource -Name $Name -Version $Version -Scope CurrentUser -TrustRepository -Reinstall
+            # Bounded retry: PSGallery occasionally answers transient
+            # 403/429/5xx; three attempts absorb these without masking real
+            # failures (final attempt throws).
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              try {
+                if (Get-Command Install-PSResource -ErrorAction SilentlyContinue) {
+                  Install-PSResource -Name $Name -Version $Version -Scope CurrentUser -TrustRepository -Reinstall -ErrorAction Stop
+                }
+                else {
+                  if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) { Register-PSRepository -Default }
+                  Set-PSRepository PSGallery -InstallationPolicy Trusted
+                  Install-Module $Name -RequiredVersion $Version -Scope CurrentUser -Force -SkipPublisherCheck -AllowClobber -ErrorAction Stop
+                }
+                if (Get-Module -ListAvailable $Name | Where-Object { $_.Version -eq $Version }) { return }
+                throw "module not present after install attempt $attempt"
+              }
+              catch {
+                if ($attempt -eq 3) { throw }
+                Write-Warning "Install attempt $attempt for $Name $Version failed: $($_.Exception.Message)"
+                Start-Sleep -Seconds (5 * $attempt)
+              }
             }
-            else {
-              if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) { Register-PSRepository -Default }
-              Set-PSRepository PSGallery -InstallationPolicy Trusted
-              Install-Module $Name -RequiredVersion $Version -Scope CurrentUser -Force -SkipPublisherCheck -AllowClobber
-            }
-            if (-not (Get-Module -ListAvailable $Name | Where-Object { $_.Version -eq $Version })) {
-              throw "Failed to install $Name $Version"
-            }
+            throw "Failed to install $Name $Version"
           }
           Install-CiModule Pester 5.6.0
           Install-CiModule PSScriptAnalyzer 1.25.0
@@ -283,17 +295,29 @@ jobs:
           # powershell-fast job for the rationale.
           function Install-CiModule([string]$Name, [string]$Version) {
             if (Get-Module -ListAvailable $Name | Where-Object { $_.Version -eq $Version }) { return }
-            if (Get-Command Install-PSResource -ErrorAction SilentlyContinue) {
-              Install-PSResource -Name $Name -Version $Version -Scope CurrentUser -TrustRepository -Reinstall
+            # Bounded retry: PSGallery occasionally answers transient
+            # 403/429/5xx; three attempts absorb these without masking real
+            # failures (final attempt throws).
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              try {
+                if (Get-Command Install-PSResource -ErrorAction SilentlyContinue) {
+                  Install-PSResource -Name $Name -Version $Version -Scope CurrentUser -TrustRepository -Reinstall -ErrorAction Stop
+                }
+                else {
+                  if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) { Register-PSRepository -Default }
+                  Set-PSRepository PSGallery -InstallationPolicy Trusted
+                  Install-Module $Name -RequiredVersion $Version -Scope CurrentUser -Force -SkipPublisherCheck -AllowClobber -ErrorAction Stop
+                }
+                if (Get-Module -ListAvailable $Name | Where-Object { $_.Version -eq $Version }) { return }
+                throw "module not present after install attempt $attempt"
+              }
+              catch {
+                if ($attempt -eq 3) { throw }
+                Write-Warning "Install attempt $attempt for $Name $Version failed: $($_.Exception.Message)"
+                Start-Sleep -Seconds (5 * $attempt)
+              }
             }
-            else {
-              if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) { Register-PSRepository -Default }
-              Set-PSRepository PSGallery -InstallationPolicy Trusted
-              Install-Module $Name -RequiredVersion $Version -Scope CurrentUser -Force -SkipPublisherCheck -AllowClobber
-            }
-            if (-not (Get-Module -ListAvailable $Name | Where-Object { $_.Version -eq $Version })) {
-              throw "Failed to install $Name $Version"
-            }
+            throw "Failed to install $Name $Version"
           }
           Install-CiModule Pester 5.6.0
           sudo apt-get update -o Acquire::Retries=5 && sudo apt-get install -y python3-pip python-is-python3
