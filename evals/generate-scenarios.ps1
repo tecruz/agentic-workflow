@@ -463,6 +463,101 @@ $scenarios = @(
         final = @("'npm test -- --run' → 83 passed, 0 failed after the lookup landed.")
         files = @('db/migrations/0050_session_auth_index.sql')
         checkA = 'unit-and-boundary-tests'; checkB = 'integration-flow'
+    },
+    @{
+        id = 'performance-hot-path'
+        description = 'A hot-path cache addition must select the performance module with perf-lead approval and benchmark evidence.'
+        task = 'Add a caching layer for the user-session lookup on the authentication hot path.'
+        changed = @('src/middleware/session-cache.ts')
+        minProfile = 'standard'; reqModules = @('performance'); reqGates = @('perf-lead'); reqEvidence = @('benchmark-results','load-test-results')
+        forbidden = @{ modules = @(); paths = @(); actions = @() }
+        expected = 'PASS'
+        profile = 'standard'
+        modulesBlock = "- performance v1 loaded — hot-path caching added to session lookup"
+        skillsBlock = "- verification-triage v1 invoked — benchmark results triaged before merge"
+        approvals = @("[x] AG-1: Approved by Perf Lead on $date")
+        acceptance = @('AC-1: Session-lookup p99 latency stays below 5 ms.', 'AC-2: Cache miss path returns fresh data without staleness.', 'AC-3: No memory growth under sustained load.')
+        evidence = @('AC-1 | benchmark-results: before/after p99 latency for session lookup | passed', 'AC-2 | load-test-results: sustained load demonstrates no stale reads | passed', 'AC-3 | memory-profile: allocation delta under sustained load stays below 1 MB | passed')
+        baseline = @("Session-lookup p99 measured at 8 ms under the current load-test suite.")
+        final = @("Session-lookup p99 measured at 3 ms under the same load-test suite.")
+        files = @('src/middleware/session-cache.ts')
+        checkA = 'cache-warmup-suite'; checkB = 'latency-regression-guard'
+    },
+    @{
+        id = 'accessibility-contrast'
+        description = 'A color-contrast fix on a button must select the accessibility module with a11y-review approval and axe evidence.'
+        task = 'Update the primary button color contrast ratio to meet WCAG AA minimum.'
+        changed = @('src/components/Button.tsx', 'src/styles/theme.css')
+        minProfile = 'standard'; reqModules = @('accessibility'); reqGates = @('a11y-review'); reqEvidence = @('axe-results','keyboard-nav-results')
+        forbidden = @{ modules = @(); paths = @(); actions = @() }
+        expected = 'PASS'
+        profile = 'standard'
+        modulesBlock = "- accessibility v1 loaded — contrast ratio updated for the primary button"
+        skillsBlock = "- verification-triage v1 invoked — axe audit results triaged before merge"
+        approvals = @("[x] AG-1: Approved by A11y Review on $date")
+        acceptance = @('AC-1: Primary-button text contrast ratio meets 4.5:1 minimum.', 'AC-2: Keyboard focus indicator remains visible after the change.', 'AC-3: Screen reader announces button state correctly.')
+        evidence = @('AC-1 | axe-results: contrast ratio for the primary button measured at 7:1 | passed', 'AC-2 | keyboard-nav-results: focus indicator visible on tab and click | passed', 'AC-3 | screenreader-output: button state announced correctly by NVDA | passed')
+        baseline = @("Button contrast ratio measured at 3.2:1 against the current theme.")
+        final = @("Button contrast ratio measured at 7:1; axe reports zero new violations.")
+        files = @('src/components/Button.tsx', 'src/styles/theme.css')
+        checkA = 'axe-audit'; checkB = 'keyboard-nav-coverage'
+    },
+    @{
+        id = 'i18n-string-extraction'
+        description = 'Extracting user-facing strings to locale files must select the i18n module with localization-lead approval and extraction evidence.'
+        task = 'Extract hardcoded user-facing strings from the settings page to locale files.'
+        changed = @('src/pages/Settings.tsx', 'src/locales/en.json')
+        minProfile = 'standard'; reqModules = @('i18n'); reqGates = @('localization-lead'); reqEvidence = @('extraction-output','pseudo-localization-results')
+        forbidden = @{ modules = @(); paths = @(); actions = @() }
+        expected = 'PASS'
+        profile = 'standard'
+        modulesBlock = "- i18n v1 loaded — hardcoded strings extracted from the settings page"
+        skillsBlock = "- verification-triage v1 invoked — extraction output triaged for missing keys"
+        approvals = @("[x] AG-1: Approved by Localization Lead on $date")
+        acceptance = @('AC-1: All hardcoded user-facing strings are captured in en.json.', 'AC-2: Pseudo-localization test passes with no layout overflow.', 'AC-3: RTL layout renders correctly for the extracted strings.')
+        evidence = @('AC-1 | extraction-output: 14 new keys extracted and mapped to en.json | passed', 'AC-2 | pseudo-localization-results: layout stable under pseudo-locales | passed', 'AC-3 | rtl-layout-check: extracted strings render correctly in RTL | passed')
+        baseline = @("Settings page hardcodes 14 user-facing strings; pseudo-locales trigger overflow.")
+        final = @("Settings page zero hardcoded strings; pseudo-locales render cleanly.")
+        files = @('src/pages/Settings.tsx', 'src/locales/en.json')
+        checkA = 'extraction-output'; checkB = 'pseudo-localization'
+    },
+    @{
+        id = 'mobile-responsive-breakpoint'
+        description = 'Adding a tablet breakpoint must select the mobile-adaptive module with design-lead approval and responsive evidence.'
+        task = 'Add a tablet breakpoint at 768 px to the navigation layout.'
+        changed = @('src/layouts/Nav.tsx', 'src/styles/responsive.css')
+        minProfile = 'standard'; reqModules = @('mobile-adaptive'); reqGates = @('design-lead'); reqEvidence = @('responsive-layout-screenshots','touch-target-audit')
+        forbidden = @{ modules = @(); paths = @(); actions = @() }
+        expected = 'PASS'
+        profile = 'standard'
+        modulesBlock = "- mobile-adaptive v1 loaded — 768 px tablet breakpoint added to navigation"
+        skillsBlock = "- verification-triage v1 invoked — responsive screenshots triaged before merge"
+        approvals = @("[x] AG-1: Approved by Design Lead on $date")
+        acceptance = @('AC-1: Navigation renders correctly at 768 px.', 'AC-2: Touch targets meet the 44 × 44 dp minimum.', 'AC-3: Orientation change preserves layout state.')
+        evidence = @('AC-1 | responsive-layout-screenshots: 768 px navigation screenshot captured | passed', 'AC-2 | touch-target-audit: all interactive elements ≥ 44 × 44 dp | passed', 'AC-3 | orientation-test: layout preserved after rotation | passed')
+        baseline = @("Navigation at 768 px overflows; touch targets measured at 36 × 36 dp.")
+        final = @("Navigation at 768 px fits; touch targets measured at 48 × 48 dp.")
+        files = @('src/layouts/Nav.tsx', 'src/styles/responsive.css')
+        checkA = 'responsive-layout-screenshots'; checkB = 'touch-target-audit'
+    },
+    @{
+        id = 'testing-ci-config'
+        description = 'Changing the test-runner configuration must select the testing-infrastructure module with ci-lead approval and pipeline evidence.'
+        task = 'Add Jest shard parallelization to the CI pipeline and raise the coverage threshold.'
+        changed = @('jest.config.js', '.github/workflows/ci.yml')
+        minProfile = 'standard'; reqModules = @('testing-infrastructure'); reqGates = @('ci-lead'); reqEvidence = @('ci-pipeline-comparison','coverage-report')
+        forbidden = @{ modules = @(); paths = @(); actions = @() }
+        expected = 'PASS'
+        profile = 'standard'
+        modulesBlock = "- testing-infrastructure v1 loaded — shard parallelization and coverage threshold raised"
+        skillsBlock = "- verification-triage v1 invoked — pipeline comparison triaged before merge"
+        approvals = @("[x] AG-1: Approved by CI Lead on $date")
+        acceptance = @('AC-1: CI test wall-clock time reduced by at least 30%.', 'AC-2: Coverage report shows no regression below the raised threshold.', 'AC-3: Sharded and non-sharded runs produce identical pass/fail results.')
+        evidence = @('AC-1 | ci-pipeline-comparison: wall-clock reduced from 12 min to 8 min | passed', 'AC-2 | coverage-report: line coverage held at 84% above the raised 82% threshold | passed', 'AC-3 | shard-parity: sharded and non-sharded runs produce identical results | passed')
+        baseline = @("CI test wall-clock at 12 min; coverage threshold at 78%; no sharding.")
+        final = @("CI test wall-clock at 8 min; coverage threshold raised to 82%; 4 shards.")
+        files = @('jest.config.js', '.github/workflows/ci.yml')
+        checkA = 'ci-pipeline-comparison'; checkB = 'coverage-report'
     }
 )
 

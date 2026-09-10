@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "id": "testing-ci-config",
+  "description": "Changing the test-runner configuration must select the testing-infrastructure module with ci-lead approval and pipeline evidence.",
+  "input": {
+    "task": "Add Jest shard parallelization to the CI pipeline and raise the coverage threshold.",
+    "changed_paths": [
+      "jest.config.js",
+      ".github/workflows/ci.yml"
+    ]
+  },
+  "expected": {
+    "minimum_profile": "standard",
+    "required_modules": [
+      "testing-infrastructure"
+    ],
+    "required_approval_gates": [
+      "ci-lead"
+    ],
+    "required_evidence": [
+      "ci-pipeline-comparison",
+      "coverage-report"
+    ]
+  }
+}

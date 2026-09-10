@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runner regression that would silently accept a missing required module.
   Corpus is 12 scenarios; both eval twins classify 12/12; JsonContracts
   Pester counts and positive filter updated. (TASK-027)
+- **Module eval scenarios for uncovered context modules.** 5 new standard eval
+  scenarios cover performance, accessibility, i18n, mobile-adaptive, and
+  testing-infrastructure — the 5 standard modules that had no eval coverage.
+  Corpus is 17 scenarios; both eval twins classify 17/17; JsonContracts Pester
+  counts updated (12→17 docs, 10→15 positive, 12→17 dirs). All 13 context
+  modules now have behavioral eval coverage. (TASK-035)
 
 ### Fixed
 
@@ -28,6 +34,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `{..}` range blocks on macOS). (TASK-026)
 
 ### Changed
+
+- **CI retry hardening for PSGallery installs.** All 5 `Install-CiModule`
+  call sites in ci.yml and ci-full.yml now include bounded retry (3 attempts,
+  2 s exponential backoff) to catch transient 403 errors from PSGallery.
+  Prevents flaky CI failures on workflow steps that install Pester or other
+  PowerShell modules. (TASK-034)
 
 - **Eval-suite runtime.** The JsonContracts Pester suite caches the full
   12-scenario corpus run once in `BeforeAll` (shared by the four

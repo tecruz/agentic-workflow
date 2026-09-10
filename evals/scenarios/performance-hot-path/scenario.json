@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "id": "performance-hot-path",
+  "description": "A hot-path cache addition must select the performance module with perf-lead approval and benchmark evidence.",
+  "input": {
+    "task": "Add a caching layer for the user-session lookup on the authentication hot path.",
+    "changed_paths": [
+      "src/middleware/session-cache.ts"
+    ]
+  },
+  "expected": {
+    "minimum_profile": "standard",
+    "required_modules": [
+      "performance"
+    ],
+    "required_approval_gates": [
+      "perf-lead"
+    ],
+    "required_evidence": [
+      "benchmark-results",
+      "load-test-results"
+    ]
+  }
+}

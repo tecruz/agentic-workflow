@@ -117,6 +117,8 @@
   passed / 0 failed / 2 platform skips.
 - **TASK-003 (PR #9 review blockers) completed 2026-08-24**: all 4 merge blockers fixed (optional-failure PASS schema validity, nested cwd labels, task-path redaction, format validation), schema updated to 1.4.0 with `optional_failed` and PASS invariant, tests added (Bats + Pester), docs updated (README, CHANGELOG, ADR-0009). Ready for CI gate.
 - **TASK-004 (PR #9 second-review blocker) completed 2026-08-24**: Bash `--events-force` now rejects existing non-regular event destinations before promotion, verifies a regular destination file after forced promotion, and clears `EVENTS_SCRATCH`; Bats regression test added (55/55 local). Fast CI + CI (Full) required on the resulting SHA.
+- **TASK-034 (CI retry hardening) completed 2026-09-10**: bounded retry (3 attempts, 2s exponential backoff) added to all 5 `Install-CiModule` call sites in ci.yml and ci-full.yml. Prevents transient 403 PSGallery errors from failing CI. YAML valid, smoke passed. CI green.
+- **TASK-035 (module eval scenarios) completed 2026-09-10**: 5 new eval scenarios added covering the previously uncovered standard context modules (performance, accessibility, i18n, mobile-adaptive, testing-infrastructure). JsonContracts counts updated (12→17 docs, 10→15 positive, 12→17 dirs). 17/17 passing in both bash and pwsh. All 13 context modules now have eval coverage.
 - Adopters: replace the placeholders above with links to real task and decision
   files as they are created. Keep this file brief; the per-task and per-decision
   files hold the detail.

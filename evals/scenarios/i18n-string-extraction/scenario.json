@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "id": "i18n-string-extraction",
+  "description": "Extracting user-facing strings to locale files must select the i18n module with localization-lead approval and extraction evidence.",
+  "input": {
+    "task": "Extract hardcoded user-facing strings from the settings page to locale files.",
+    "changed_paths": [
+      "src/pages/Settings.tsx",
+      "src/locales/en.json"
+    ]
+  },
+  "expected": {
+    "minimum_profile": "standard",
+    "required_modules": [
+      "i18n"
+    ],
+    "required_approval_gates": [
+      "localization-lead"
+    ],
+    "required_evidence": [
+      "extraction-output",
+      "pseudo-localization-results"
+    ]
+  }
+}

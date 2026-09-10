@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "id": "mobile-responsive-breakpoint",
+  "description": "Adding a tablet breakpoint must select the mobile-adaptive module with design-lead approval and responsive evidence.",
+  "input": {
+    "task": "Add a tablet breakpoint at 768 px to the navigation layout.",
+    "changed_paths": [
+      "src/layouts/Nav.tsx",
+      "src/styles/responsive.css"
+    ]
+  },
+  "expected": {
+    "minimum_profile": "standard",
+    "required_modules": [
+      "mobile-adaptive"
+    ],
+    "required_approval_gates": [
+      "design-lead"
+    ],
+    "required_evidence": [
+      "responsive-layout-screenshots",
+      "touch-target-audit"
+    ]
+  }
+}
