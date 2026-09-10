@@ -39,6 +39,7 @@
 - [x] TASK-027 — Negative-control eval scenario for `REQUIRED_MODULES_SELECTED`: `wrong-module-selected` scenario (selects `database-migrations` where `security-review` is required) pins the exactly-one-failing-check detection; both eval twins 12/12; JsonContracts counts updated (see `.agentic/tasks/TASK-027-wrong-module-negative-control.md`)
 - [x] TASK-028 — Eval-suite caching: single corpus run in Describe `BeforeAll` shared by 4 PS tests; Windows skip guards; file-level `BeforeAll` for Pester 5 discovery; local 9.4 min → 2.0 min (4.8× faster) (see `.agentic/tasks/TASK-028-eval-suite-caching.md`)
 - [x] TASK-029 — Changelog hygiene + stale-branch pruning: `## [Unreleased]` section documents TASK-026/027/028; nine merged remote branches + three local branches pruned (see `.agentic/tasks/TASK-029-changelog-hygiene.md`)
+- [x] TASK-030 — Orphaned-file cleanup: removed the zero-reference `node-fail` fixture (superseded by `node-npm-fail`), the untracked `bazel-workspace/pkg/bin/BUILD.bazel` leftover, and the local `dist/` release-bundle folder (see `.agentic/tasks/TASK-030-orphaned-file-cleanup.md`)
 
 ## Recent Decisions
 
