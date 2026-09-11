@@ -131,7 +131,7 @@ Each task gets its own worktree and lock file. The lock prevents the same task f
 | **Lock contention (concurrent tasks)** | If two coordinator processes attempt the same task ID, the second sees an existing lock file and exits with code 2 (BLOCKED). | Wait for the first process to finish. The lock is per-task-ID, not global — different tasks do not contend. |
 | **Stale worktree (PID gone)** | On startup, the coordinator detects a lock file whose PID no longer exists, removes the stale lock, and proceeds. | No action needed; the coordinator self-heals. If the worktree itself is orphaned, run `git worktree prune`. |
 | **Approval gate blocking** | A task file has unchecked or missing gates. The coordinator refuses to spawn and exits with code 2. | Edit the task file, check the required `AG-N` gate, and re-run. |
-| **Sandbox unavailable** | `--sandbox docker|podman` is set but the runtime is not installed. The coordinator falls back to direct execution with a warning. | Install the container runtime, or remove `--sandbox` to use worktree-only isolation. |
+| **Sandbox unavailable** | `--sandbox docker|podman` is set but the runtime is not installed. The coordinator exits BLOCKED (code 2) with `reason_code: TOOLING_UNAVAILABLE`; no worker is started. | Install the container runtime, or remove `--sandbox` to use worktree-only isolation. |
 
 ## Troubleshooting
 
@@ -156,7 +156,7 @@ Worktrees and branches created by the coordinator can accumulate over time. This
 
 ### Automatic Cleanup
 
-- **`--cleanup` flag**: When supplied, the coordinator removes the worktree and its branch after successful completion (exit 0). Use this for CI pipelines.
+- **`--cleanup` flag**: When supplied, the coordinator removes the worktree and deletes its `orchestration/<task-id>` branch after successful completion (exit 0). Failed or blocked runs preserve the worktree for inspection even with `--cleanup`. Use this for CI pipelines.
 - **Lock file expiry**: Lock files (`.agentic/orchestration/worktrees/<id>.lock`) contain the owning PID. On startup, the coordinator removes stale locks where the PID no longer exists.
 
 ### Manual Cleanup

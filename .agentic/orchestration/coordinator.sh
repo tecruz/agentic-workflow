@@ -967,6 +967,7 @@ if [ -n "$HOOKS_DIR" ] && [ -d "$HOOKS_DIR" ] && [ -x "$HOOKS_DIR/pre-spawn" ]; 
         echo "ERROR: pre-spawn hook failed; aborting." >&2
         workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"BLOCKED\",\"exit_code\":null,\"duration_ms\":0,\"reason_code\":\"WORKER_BLOCKED\"}"
         summary_json="{\"workers_defined\":1,\"workers_run\":0,\"passed\":0,\"failed\":0,\"blocked\":1}"
+        rm -f "$LOCK_FILE" 2>/dev/null || true
         complete_orchestration "BLOCKED" 2 "$workers_json" "$summary_json"
     fi
 fi
@@ -993,9 +994,8 @@ case "$SANDBOX" in
         ;;
     none) ;;
     *)
-        echo "ERROR: --sandbox must be 'none', 'docker', or 'podman' (got '$SANDBOX')." >&2
         rm -f "$LOCK_FILE" 2>/dev/null || true
-        exit 1
+        fail_with_result "FAIL" 1 "--sandbox must be 'none', 'docker', or 'podman' (got '$SANDBOX')." "WORKER_FAILED"
         ;;
 esac
 
@@ -1066,6 +1066,41 @@ if [ "$check_ok" -eq 0 ]; then
     fi
 fi
 
+# --- Post-worker hook ---
+# A hook failure overrides the worker outcome below; worker_completed is
+# emitted once, after this hook, so the event and result always agree.
+if [ -n "$HOOKS_DIR" ] && [ -d "$HOOKS_DIR" ] && [ -x "$HOOKS_DIR/post-worker" ]; then
+    if ! "$HOOKS_DIR/post-worker" "$TASK_FILE" "$WORKTREE_ABS" 2>&1 | log; then
+        echo "ERROR: post-worker hook failed; aborting." >&2
+        status="FAIL"
+        reason_code="WORKER_FAILED"
+        worker_exit=1
+        exit_code_str="1"
+        result="FAIL"
+        exit_code=1
+        log "Post-worker hook failed; marking orchestration as FAIL."
+    fi
+fi
+
+# Build workers JSON and summary
+if [ "$status" = "PASS" ]; then
+    workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"PASS\",\"exit_code\":0,\"duration_ms\":$duration_ms,\"reason_code\":null}"
+    summary_json="{\"workers_defined\":1,\"workers_run\":1,\"passed\":1,\"failed\":0,\"blocked\":0}"
+    result="PASS"
+    exit_code=0
+elif [ "$status" = "FAIL" ]; then
+    workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"FAIL\",\"exit_code\":$worker_exit,\"duration_ms\":$duration_ms,\"reason_code\":\"WORKER_FAILED\"}"
+    summary_json="{\"workers_defined\":1,\"workers_run\":1,\"passed\":0,\"failed\":1,\"blocked\":0}"
+    result="FAIL"
+    exit_code=1
+else
+    workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"BLOCKED\",\"exit_code\":null,\"duration_ms\":$duration_ms,\"reason_code\":\"$reason_code\"}"
+    summary_json="{\"workers_defined\":1,\"workers_run\":1,\"passed\":0,\"failed\":0,\"blocked\":1}"
+    result="BLOCKED"
+    exit_code=2
+fi
+
+# Emit worker_completed once, after hooks, matching the result below.
 if [ -n "$EVENTS_FILE" ]; then
     if [ "$status" = "PASS" ]; then
         emit_worker_completed "$worker_id" "$status" "$exit_code_str" "$duration_ms" "$cwd_rel" "null" || {
@@ -1086,40 +1121,6 @@ if [ -n "$EVENTS_FILE" ]; then
             exit 1
         }
     fi
-fi
-
-# --- Post-worker hook ---
-if [ -n "$HOOKS_DIR" ] && [ -d "$HOOKS_DIR" ] && [ -x "$HOOKS_DIR/post-worker" ]; then
-    if ! "$HOOKS_DIR/post-worker" "$TASK_FILE" "$WORKTREE_ABS" 2>&1 | log; then
-        echo "ERROR: post-worker hook failed; aborting." >&2
-        if [ "$status" = "PASS" ]; then
-            workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"PASS\",\"exit_code\":0,\"duration_ms\":$duration_ms,\"reason_code\":null}"
-        elif [ "$status" = "BLOCKED" ]; then
-            workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"BLOCKED\",\"exit_code\":null,\"duration_ms\":$duration_ms,\"reason_code\":\"$reason_code\"}"
-        else
-            workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"FAIL\",\"exit_code\":$worker_exit,\"duration_ms\":$duration_ms,\"reason_code\":\"WORKER_FAILED\"}"
-        fi
-        summary_json="{\"workers_defined\":1,\"workers_run\":1,\"passed\":0,\"failed\":1,\"blocked\":0}"
-        complete_orchestration "FAIL" 1 "$workers_json" "$summary_json"
-    fi
-fi
-
-# Build workers JSON and summary
-if [ "$status" = "PASS" ]; then
-    workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"PASS\",\"exit_code\":0,\"duration_ms\":$duration_ms,\"reason_code\":null}"
-    summary_json="{\"workers_defined\":1,\"workers_run\":1,\"passed\":1,\"failed\":0,\"blocked\":0}"
-    result="PASS"
-    exit_code=0
-elif [ "$status" = "FAIL" ]; then
-    workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"FAIL\",\"exit_code\":$worker_exit,\"duration_ms\":$duration_ms,\"reason_code\":\"WORKER_FAILED\"}"
-    summary_json="{\"workers_defined\":1,\"workers_run\":1,\"passed\":0,\"failed\":1,\"blocked\":0}"
-    result="FAIL"
-    exit_code=1
-else
-    workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"BLOCKED\",\"exit_code\":null,\"duration_ms\":$duration_ms,\"reason_code\":\"$reason_code\"}"
-    summary_json="{\"workers_defined\":1,\"workers_run\":1,\"passed\":0,\"failed\":0,\"blocked\":1}"
-    result="BLOCKED"
-    exit_code=2
 fi
 
 # --- Review stage (runs only when --review is set and worker passed) ---
@@ -1215,8 +1216,10 @@ if [ "$PUSH" -eq 1 ] && [ "$result" = "PASS" ]; then
     fi
 fi
 
-if [ "$CLEANUP" -eq 1 ]; then
+# Cleanup only on success: failed/blocked worktrees are preserved for inspection.
+if [ "$CLEANUP" -eq 1 ] && [ "$result" = "PASS" ]; then
     git worktree remove --force "$WORKTREE_ABS" 2>/dev/null || rm -rf "$WORKTREE_ABS" 2>/dev/null || true
+    git branch -D "$worktree_branch" 2>/dev/null || true
     log "Cleaned up worktree $WORKTREE_REL"
 fi
 

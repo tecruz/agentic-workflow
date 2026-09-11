@@ -24,7 +24,7 @@
           "status": { "type": "string", "enum": ["PASS", "FAIL", "BLOCKED", "SKIPPED"] },
           "exit_code": { "type": ["integer", "null"] },
           "duration_ms": { "type": "integer", "minimum": 0 },
-          "reason_code": { "type": ["string", "null"], "enum": ["WORKER_FAILED", "WORKER_BLOCKED", "TOOLING_UNAVAILABLE", null] }
+          "reason_code": { "type": ["string", "null"], "enum": ["WORKER_FAILED", "WORKER_BLOCKED", "TOOLING_UNAVAILABLE", "REVIEW_FAILED", null] }
         }
       }
     },
