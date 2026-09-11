@@ -15,7 +15,7 @@ Standard profile for CI hardening. No secrets, auth, payments, or irreversible o
 
 ## Approval gates
 
-- [x] AG-1: Approved by maintainers
+- [x] AG-1: Approved by maintainers on 2026-09-10
 
 ## Acceptance criteria
 

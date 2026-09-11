@@ -78,8 +78,8 @@ TASK-032); VERSION and all `protocol_version` sites read `1.13.0`.
   `1.14.0`; zero strays.
 - Both eval twins: 12/12 with regenerated artifacts.
 - Handoff gate VALID on this task file (both legs).
-- Tag `v1.14.0` and the GitHub release are left for explicit approval;
-  the release workflow will validate VERSION/CHANGELOG/tag agreement.
+- Tag `v1.14.0` was created on the release head and the GitHub release was
+  published with 3 assets (tar.gz, zip, SHA256SUMS) — recorded in TASK-036.
 
 ## Remaining risks
 

@@ -15,7 +15,7 @@ Standard profile for test harness extension. No production code changes.
 
 ## Approval gates
 
-- [x] AG-1: Approved by maintainers
+- [x] AG-1: Approved by maintainers on 2026-09-10
 
 ## Acceptance criteria
 
