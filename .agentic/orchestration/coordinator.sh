@@ -110,6 +110,21 @@ log() {
     fi
 }
 
+now_ms() {
+    if [ -n "${EPOCHREALTIME:-}" ]; then
+        local _sec="${EPOCHREALTIME%%.*}" _frac="${EPOCHREALTIME#*.}000"
+        printf '%s%s' "$_sec" "${_frac:0:3}"
+        return
+    fi
+    local _d
+    _d="$(date +%s%3N 2>/dev/null)" || _d=""
+    if [[ "$_d" =~ ^[0-9]+$ ]]; then
+        printf '%s' "$_d"
+        return
+    fi
+    printf '%d' "$((SECONDS * 1000))"
+}
+
 json_escape() {
     local s="$1"
     s="${s//\\/\\\\}"
@@ -793,7 +808,11 @@ if [ -n "$EVENTS_FILE" ]; then
     mkdir -p "$(dirname "$EVENTS_FILE")"
     events_scratch="$(mktemp "$(dirname "$EVENTS_FILE")/.orchestration-events.XXXXXX")" || exit 1
     EVENTS_SCRATCH="$events_scratch"
-    if ! printf '{"event":"orchestration_started"}\n' > "$events_scratch"; then
+    _trace_json=""
+    if [ -n "$TRACE_ID" ]; then
+        _trace_json=",\"trace_id\":\"$(json_escape "$TRACE_ID")\",\"span_id\":\"$(json_escape "$SPAN_ID")\""
+    fi
+    if ! printf '{"event":"orchestration_started"%s}\n' "$_trace_json" > "$events_scratch"; then
         echo "ERROR: failed to initialize event stream." >&2
         rm -f "$events_scratch"
         exit 1
@@ -941,7 +960,11 @@ esac
 
 # --- Pre-spawn hook ---
 if [ -n "$HOOKS_DIR" ] && [ -d "$HOOKS_DIR" ] && [ -x "$HOOKS_DIR/pre-spawn" ]; then
-    "$HOOKS_DIR/pre-spawn" "$TASK_FILE" "$WORKTREE_ABS" 2>&1 | log || true
+    if ! "$HOOKS_DIR/pre-spawn" "$TASK_FILE" "$WORKTREE_ABS" 2>&1 | log; then
+        echo "ERROR: pre-spawn hook failed; aborting." >&2
+        rm -f "$LOCK_FILE" 2>/dev/null || true
+        exit 1
+    fi
 fi
 
 if [ -n "$EVENTS_FILE" ]; then
@@ -952,7 +975,7 @@ if [ -n "$EVENTS_FILE" ]; then
     fi
 fi
 
-start_ms="$(date +%s%3N 2>/dev/null || echo 0)"
+start_ms="$(now_ms)"
 check_ok=0
 worker_exit=0
 
@@ -961,8 +984,15 @@ case "$SANDBOX" in
     docker|podman)
         container_runtime="$SANDBOX"
         if ! command -v "$container_runtime" >/dev/null 2>&1; then
-            echo "WARNING: $container_runtime not available, falling back to direct execution." >&2
-            SANDBOX="none"
+            echo "ERROR: $container_runtime not available; requested --sandbox $container_runtime is BLOCKED." >&2
+            status="BLOCKED"
+            reason_code="TOOLING_UNAVAILABLE"
+            workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"BLOCKED\",\"exit_code\":null,\"duration_ms\":0,\"reason_code\":\"TOOLING_UNAVAILABLE\"}"
+            summary_json="{\"workers_defined\":1,\"workers_run\":0,\"passed\":0,\"failed\":0,\"blocked\":1}"
+            result="BLOCKED"
+            exit_code=2
+            rm -f "$LOCK_FILE" 2>/dev/null || true
+            complete_orchestration "$result" "$exit_code" "$workers_json" "$summary_json"
         fi
         ;;
     none) ;;
@@ -976,12 +1006,23 @@ esac
 if [ "$SANDBOX" != "none" ]; then
     # Container sandbox: mount the worktree, run worker inside
     _image="${SANDBOX_IMAGE:-ubuntu:24.04}"
-    _worker_escaped="$(printf '%s' "$WORKER_CMD" | sed "s/'/'\\\\''/g")"
+    _trace_arg=""
+    if [ -n "$TRACE_ID" ]; then
+        _trace_arg="TRACEPARENT=00-${TRACE_ID}-${SPAN_ID}-01"
+    fi
     if [ "$FORMAT" = "json" ]; then
-        (cd "$WORKTREE_ABS" && "$container_runtime" run --rm -v "$(pwd):/work" -w /work "$_image" bash -c "$_worker_escaped") >&2 && check_ok=1
+        if [ -n "$_trace_arg" ]; then
+            (cd "$WORKTREE_ABS" && "$container_runtime" run --rm -e "$_trace_arg" -v "$(pwd):/work" -w /work "$_image" bash -c "$WORKER_CMD") >&2 && check_ok=1
+        else
+            (cd "$WORKTREE_ABS" && "$container_runtime" run --rm -v "$(pwd):/work" -w /work "$_image" bash -c "$WORKER_CMD") >&2 && check_ok=1
+        fi
         worker_exit=$?
     else
-        (cd "$WORKTREE_ABS" && "$container_runtime" run --rm -v "$(pwd):/work" -w /work "$_image" bash -c "$_worker_escaped") && check_ok=1
+        if [ -n "$_trace_arg" ]; then
+            (cd "$WORKTREE_ABS" && "$container_runtime" run --rm -e "$_trace_arg" -v "$(pwd):/work" -w /work "$_image" bash -c "$WORKER_CMD") && check_ok=1
+        else
+            (cd "$WORKTREE_ABS" && "$container_runtime" run --rm -v "$(pwd):/work" -w /work "$_image" bash -c "$WORKER_CMD") && check_ok=1
+        fi
         worker_exit=$?
     fi
 else
@@ -1001,7 +1042,7 @@ else
     [ "$worker_exit" -eq 0 ] && worker_exit=1
 fi
 
-end_ms="$(date +%s%3N 2>/dev/null || echo 0)"
+end_ms="$(now_ms)"
 duration_ms=$(( end_ms - start_ms ))
 [ "$duration_ms" -ge 0 ] || duration_ms=0
 
@@ -1044,7 +1085,11 @@ fi
 
 # --- Post-worker hook ---
 if [ -n "$HOOKS_DIR" ] && [ -d "$HOOKS_DIR" ] && [ -x "$HOOKS_DIR/post-worker" ]; then
-    "$HOOKS_DIR/post-worker" "$TASK_FILE" "$WORKTREE_ABS" 2>&1 | log || true
+    if ! "$HOOKS_DIR/post-worker" "$TASK_FILE" "$WORKTREE_ABS" 2>&1 | log; then
+        echo "ERROR: post-worker hook failed; aborting." >&2
+        rm -f "$LOCK_FILE" 2>/dev/null || true
+        exit 1
+    fi
 fi
 
 # Build workers JSON and summary
@@ -1070,10 +1115,14 @@ review_failed=0
 if [ "$REVIEW" -eq 1 ] && [ "$result" = "PASS" ]; then
     log "Running review stage (validate-task, validate-context, validate-skills)..."
     _scripts_dir="$(cd "$(dirname "$0")" && pwd)"
+    # Resolve validator path relative to .agentic/scripts, not .agentic/orchestration
+    if [ ! -f "$_scripts_dir/validate-task.sh" ] && [ -f "$PROJECT_ROOT/.agentic/scripts/validate-task.sh" ]; then
+        _scripts_dir="$PROJECT_ROOT/.agentic/scripts"
+    fi
     _task_in_worktree="$WORKTREE_ABS/$TASK_ID.md"
-    # Fallback: use the original task file if not found in worktree
+    # Always review the worktree's task file, not the original
     if [ ! -f "$_task_in_worktree" ]; then
-        _task_in_worktree="$TASK_FILE"
+        _task_in_worktree="$WORKTREE_ABS/$(basename "$TASK_FILE")"
     fi
     # validate-task
     if [ -x "$_scripts_dir/validate-task.sh" ] || [ -f "$_scripts_dir/validate-task.sh" ]; then
@@ -1082,13 +1131,13 @@ if [ "$REVIEW" -eq 1 ] && [ "$result" = "PASS" ]; then
         fi
     fi
     # validate-context
-    if [ "$review_failed" -eq 0 ] && [ -x "$_scripts_dir/validate-context.sh" ] || [ -f "$_scripts_dir/validate-context.sh" ]; then
+    if [ "$review_failed" -eq 0 ] && { [ -x "$_scripts_dir/validate-context.sh" ] || [ -f "$_scripts_dir/validate-context.sh" ]; }; then
         if ! bash "$_scripts_dir/validate-context.sh" --handoff "$_task_in_worktree" 2>&1 | log; then
             review_failed=1
         fi
     fi
     # validate-skills
-    if [ "$review_failed" -eq 0 ] && [ -x "$_scripts_dir/validate-skills.sh" ] || [ -f "$_scripts_dir/validate-skills.sh" ]; then
+    if [ "$review_failed" -eq 0 ] && { [ -x "$_scripts_dir/validate-skills.sh" ] || [ -f "$_scripts_dir/validate-skills.sh" ]; }; then
         if ! bash "$_scripts_dir/validate-skills.sh" --handoff "$_task_in_worktree" 2>&1 | log; then
             review_failed=1
         fi
@@ -1108,7 +1157,10 @@ fi
 
 # --- Post-review hook ---
 if [ -n "$HOOKS_DIR" ] && [ -d "$HOOKS_DIR" ] && [ -x "$HOOKS_DIR/post-review" ]; then
-    "$HOOKS_DIR/post-review" "$TASK_FILE" "$WORKTREE_ABS" 2>&1 | log || true
+    if ! "$HOOKS_DIR/post-review" "$TASK_FILE" "$WORKTREE_ABS" 2>&1 | log; then
+        echo "ERROR: post-review hook failed." >&2
+        review_failed=1
+    fi
 fi
 
 # Handle remote write if requested and worker passed
