@@ -135,12 +135,14 @@ if ([string]::IsNullOrWhiteSpace($Traceparent) -and $env:TRACEPARENT) {
 # Parse W3C Trace Context into trace_id and span_id
 $TraceId = ""
 $SpanId = ""
+$TraceFlags = "01"
 if (-not [string]::IsNullOrWhiteSpace($Traceparent)) {
     # Format: 00-{trace_id}-{span_id}-{flags}
     $tpParts = $Traceparent -split '-'
-    if ($tpParts.Count -eq 4 -and $tpParts[0] -eq "00" -and $tpParts[1].Length -eq 32 -and $tpParts[2].Length -eq 16) {
+    if ($tpParts.Count -eq 4 -and $tpParts[0] -eq "00" -and $tpParts[1].Length -eq 32 -and $tpParts[2].Length -eq 16 -and $tpParts[1] -match '^[0-9a-fA-F]+$' -and $tpParts[2] -match '^[0-9a-fA-F]+$') {
         $TraceId = $tpParts[1]
         $SpanId = $tpParts[2]
+        $TraceFlags = $tpParts[3]
     }
 }
 
@@ -496,7 +498,12 @@ if (-not [string]::IsNullOrWhiteSpace($Events)) {
     if (-not [string]::IsNullOrWhiteSpace($dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     $eventsScratch = Join-Path (Split-Path -Parent $Events) (".orchestration-events." + [System.IO.Path]::GetRandomFileName())
     if (Test-Path -LiteralPath $eventsScratch) { Remove-Item -LiteralPath $eventsScratch -Force }
-    $initEvent = if (-not [string]::IsNullOrWhiteSpace($TraceId)) { '{"event":"orchestration_started","trace_id":"' + $TraceId + '","span_id":"' + $SpanId + '"}' } else { '{"event":"orchestration_started"}' }
+    if (-not [string]::IsNullOrWhiteSpace($TraceId)) {
+        $initObj = [ordered]@{ event = "orchestration_started"; trace_id = $TraceId; span_id = $SpanId }
+        $initEvent = $initObj | ConvertTo-Json -Compress
+    } else {
+        $initEvent = '{"event":"orchestration_started"}'
+    }
     $initEvent | Set-Content -LiteralPath $eventsScratch -Encoding utf8NoBOM
     if ($EventsForce) {
         try { Move-Item -LiteralPath $eventsScratch -Destination $Events -Force -ErrorAction Stop } catch { Write-Host "ERROR: failed to promote event stream (forced)." -ForegroundColor Red; Remove-Item -LiteralPath $eventsScratch -Force -ErrorAction SilentlyContinue; exit 1 }
@@ -602,11 +609,14 @@ if (-not [string]::IsNullOrWhiteSpace($Hooks) -and (Test-Path -LiteralPath $Hook
     $preSpawnHook = Join-Path $Hooks "pre-spawn"
     if (Test-Path -LiteralPath $preSpawnHook -PathType Leaf) {
         try { & $preSpawnHook $TaskFile $worktreeAbs 2>&1 | Write-Host; if ($LASTEXITCODE -ne 0) { throw "hook failed" } }
-        catch { Write-Host "ERROR: pre-spawn hook failed; aborting." -ForegroundColor Red; Remove-Item -LiteralPath $lockFile -Force -ErrorAction SilentlyContinue; exit 1 }
+        catch {
+            Write-Host "ERROR: pre-spawn hook failed; aborting." -ForegroundColor Red
+            if (-not [string]::IsNullOrWhiteSpace($Events)) { try { Emit-OrchestrationCompleted "FAIL" 1 } catch {} }
+            Remove-Item -LiteralPath $lockFile -Force -ErrorAction SilentlyContinue
+            exit 1
+        }
     }
 }
-
-if (-not [string]::IsNullOrWhiteSpace($Events)) { Emit-WorkerStarted $taskId $cwdRel }
 
 $startMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
 $workerExit = 0
@@ -617,6 +627,7 @@ switch ($Sandbox) {
     { $_ -in "docker", "podman" } {
         if (-not (Get-Command $Sandbox -ErrorAction SilentlyContinue)) {
             Write-Host "ERROR: $Sandbox not available; requested --sandbox $Sandbox is BLOCKED." -ForegroundColor Red
+            if (-not [string]::IsNullOrWhiteSpace($Events)) { Emit-WorkerCompleted $taskId "BLOCKED" $null 0 $cwdRel "TOOLING_UNAVAILABLE" }
             $status = "BLOCKED"; $reason = "TOOLING_UNAVAILABLE"; $result = "BLOCKED"; $exitCode = 2
             $workersJson = '{"worker_id":' + (ConvertTo-Json $taskId -Compress) + ',"status":"BLOCKED","exit_code":null,"duration_ms":0,"reason_code":"TOOLING_UNAVAILABLE"}'
             $summaryJson = '{"workers_defined":1,"workers_run":0,"passed":0,"failed":0,"blocked":1}'
@@ -633,10 +644,13 @@ switch ($Sandbox) {
     }
 }
 
+# Emit worker_started only after sandbox availability is confirmed
+if (-not [string]::IsNullOrWhiteSpace($Events)) { Emit-WorkerStarted $taskId $cwdRel }
+
 if ($Sandbox -ne "none") {
     # Container sandbox: mount the worktree, run worker inside
     $image = if ([string]::IsNullOrWhiteSpace($SandboxImage)) { "ubuntu:24.04" } else { $SandboxImage }
-    $traceArg = if (-not [string]::IsNullOrWhiteSpace($TraceId)) { "TRACEPARENT=00-$TraceId-$SpanId-01" } else { $null }
+    $traceArg = if (-not [string]::IsNullOrWhiteSpace($TraceId)) { "TRACEPARENT=00-$TraceId-$SpanId-$TraceFlags" } else { $null }
     try {
         Push-Location $worktreeAbs
         if ($traceArg) { & $Sandbox run --rm -e $traceArg -v "${PWD}:/work" -w /work $image bash -c $Worker 2>&1 | Out-Host }
@@ -683,7 +697,15 @@ if (-not [string]::IsNullOrWhiteSpace($Hooks) -and (Test-Path -LiteralPath $Hook
     $postWorkerHook = Join-Path $Hooks "post-worker"
     if (Test-Path -LiteralPath $postWorkerHook -PathType Leaf) {
         try { & $postWorkerHook $TaskFile $worktreeAbs 2>&1 | Write-Host; if ($LASTEXITCODE -ne 0) { throw "hook failed" } }
-        catch { Write-Host "ERROR: post-worker hook failed; aborting." -ForegroundColor Red; Remove-Item -LiteralPath $lockFile -Force -ErrorAction SilentlyContinue; exit 1 }
+        catch {
+            Write-Host "ERROR: post-worker hook failed; aborting." -ForegroundColor Red
+            if (-not [string]::IsNullOrWhiteSpace($Events)) {
+                Emit-WorkerCompleted $taskId "BLOCKED" $null 0 $cwdRel "WORKER_BLOCKED"
+                try { Emit-OrchestrationCompleted "FAIL" 1 } catch {}
+            }
+            Remove-Item -LiteralPath $lockFile -Force -ErrorAction SilentlyContinue
+            exit 1
+        }
     }
 }
 
@@ -707,13 +729,19 @@ if ($Review -and $result -eq "PASS") {
     if (-not (Test-Path -LiteralPath (Join-Path $scriptsDir "validate-task.ps1") -PathType Leaf) -and (Test-Path -LiteralPath (Join-Path $ProjectRootPhysical ".agentic/scripts/validate-task.ps1") -PathType Leaf)) {
         $scriptsDir = Join-Path $ProjectRootPhysical ".agentic/scripts"
     }
-    $taskInWorktree = Join-Path $worktreeAbs "$taskId.md"
-    # Always review the worktree's task file, not the original
+    $taskFilePortable = (ConvertTo-PortablePath $TaskFile)
+    if ($taskFilePortable.StartsWith("./")) { $taskFilePortable = $taskFilePortable.Substring(2) }
+    $rootPortable = ConvertTo-PortablePath $ProjectRootPhysical
+    if ($taskFilePortable.StartsWith("$rootPortable/", [StringComparison]::Ordinal)) { $taskFilePortable = $taskFilePortable.Substring($rootPortable.Length + 1) }
+    $taskInWorktree = Join-Path $worktreeAbs $taskFilePortable
+    # Fallback: use basename in case task was moved
     if (-not (Test-Path -LiteralPath $taskInWorktree -PathType Leaf)) { $taskInWorktree = Join-Path $worktreeAbs (Split-Path -Leaf $TaskFile) }
 
+    $validatorsFound = $false
     # validate-task
     $vtScript = Join-Path $scriptsDir "validate-task.ps1"
     if (Test-Path -LiteralPath $vtScript -PathType Leaf) {
+        $validatorsFound = $true
         try { & pwsh -NoProfile -File $vtScript -Handoff -TaskFile $taskInWorktree 2>&1 | Write-Host } catch { $reviewFailed = $true }
         if ($LASTEXITCODE -ne 0) { $reviewFailed = $true }
     }
@@ -721,6 +749,7 @@ if ($Review -and $result -eq "PASS") {
     if (-not $reviewFailed) {
         $vcScript = Join-Path $scriptsDir "validate-context.ps1"
         if (Test-Path -LiteralPath $vcScript -PathType Leaf) {
+            $validatorsFound = $true
             try { & pwsh -NoProfile -File $vcScript -Handoff -TaskFile $taskInWorktree 2>&1 | Write-Host } catch { $reviewFailed = $true }
             if ($LASTEXITCODE -ne 0) { $reviewFailed = $true }
         }
@@ -729,9 +758,14 @@ if ($Review -and $result -eq "PASS") {
     if (-not $reviewFailed) {
         $vsScript = Join-Path $scriptsDir "validate-skills.ps1"
         if (Test-Path -LiteralPath $vsScript -PathType Leaf) {
+            $validatorsFound = $true
             try { & pwsh -NoProfile -File $vsScript -Handoff -TaskFile $taskInWorktree 2>&1 | Write-Host } catch { $reviewFailed = $true }
             if ($LASTEXITCODE -ne 0) { $reviewFailed = $true }
         }
+    }
+    if (-not $validatorsFound) {
+        Write-Log "WARNING: no validator scripts found; review BLOCKED."
+        $reviewFailed = $true
     }
     if ($reviewFailed) {
         $status = "FAIL"; $reason = "REVIEW_FAILED"; $result = "FAIL"; $exitCode = 1
@@ -748,7 +782,13 @@ if (-not [string]::IsNullOrWhiteSpace($Hooks) -and (Test-Path -LiteralPath $Hook
     $postReviewHook = Join-Path $Hooks "post-review"
     if (Test-Path -LiteralPath $postReviewHook -PathType Leaf) {
         try { & $postReviewHook $TaskFile $worktreeAbs 2>&1 | Write-Host; if ($LASTEXITCODE -ne 0) { throw "hook failed" } }
-        catch { Write-Host "ERROR: post-review hook failed." -ForegroundColor Red; $reviewFailed = $true }
+        catch {
+            Write-Host "ERROR: post-review hook failed." -ForegroundColor Red
+            $reviewFailed = $true
+            $status = "FAIL"; $reason = "REVIEW_FAILED"; $result = "FAIL"; $exitCode = 1
+            $workersJson = '{"worker_id":' + (ConvertTo-Json $taskId -Compress) + ',"status":"FAIL","exit_code":1,"duration_ms":' + $durationMs + ',"reason_code":"REVIEW_FAILED"}'
+            $summaryJson = '{"workers_defined":1,"workers_run":1,"passed":0,"failed":1,"blocked":0}'
+        }
     }
 }
 

@@ -65,6 +65,7 @@ REVIEW=0
 HOOKS_DIR=""
 TRACE_ID=""
 SPAN_ID=""
+TRACE_FLAGS="01"
 
 # Event stream scratch (for atomic promotion)
 EVENTS_SCRATCH=""
@@ -579,11 +580,13 @@ if [ -n "$TRACE_ID" ]; then
         00-[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]-[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]-[0-9a-fA-F][0-9a-fA-F])
             TRACE_ID="${_tp:3:32}"
             SPAN_ID="${_tp:36:16}"
+            TRACE_FLAGS="${_tp:53:2}"
             ;;
         *)
             # Invalid format; clear to avoid bad data in events
             TRACE_ID=""
             SPAN_ID=""
+            TRACE_FLAGS="01"
             ;;
     esac
 fi
@@ -962,14 +965,9 @@ esac
 if [ -n "$HOOKS_DIR" ] && [ -d "$HOOKS_DIR" ] && [ -x "$HOOKS_DIR/pre-spawn" ]; then
     if ! "$HOOKS_DIR/pre-spawn" "$TASK_FILE" "$WORKTREE_ABS" 2>&1 | log; then
         echo "ERROR: pre-spawn hook failed; aborting." >&2
-        rm -f "$LOCK_FILE" 2>/dev/null || true
-        exit 1
-    fi
-fi
-
-if [ -n "$EVENTS_FILE" ]; then
-    if ! emit_worker_started "$worker_id" "$cwd_rel"; then
-        echo "ERROR: failed to write worker_started event." >&2
+        if [ -n "$EVENTS_FILE" ]; then
+            emit_orchestration_completed "FAIL" 1 2>/dev/null || true
+        fi
         rm -f "$LOCK_FILE" 2>/dev/null || true
         exit 1
     fi
@@ -985,6 +983,9 @@ case "$SANDBOX" in
         container_runtime="$SANDBOX"
         if ! command -v "$container_runtime" >/dev/null 2>&1; then
             echo "ERROR: $container_runtime not available; requested --sandbox $container_runtime is BLOCKED." >&2
+            if [ -n "$EVENTS_FILE" ]; then
+                emit_worker_completed "$worker_id" "BLOCKED" "null" "0" "$cwd_rel" "TOOLING_UNAVAILABLE" 2>/dev/null || true
+            fi
             status="BLOCKED"
             reason_code="TOOLING_UNAVAILABLE"
             workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"BLOCKED\",\"exit_code\":null,\"duration_ms\":0,\"reason_code\":\"TOOLING_UNAVAILABLE\"}"
@@ -1003,12 +1004,21 @@ case "$SANDBOX" in
         ;;
 esac
 
+# Emit worker_started only after sandbox availability is confirmed
+if [ -n "$EVENTS_FILE" ]; then
+    if ! emit_worker_started "$worker_id" "$cwd_rel"; then
+        echo "ERROR: failed to write worker_started event." >&2
+        rm -f "$LOCK_FILE" 2>/dev/null || true
+        exit 1
+    fi
+fi
+
 if [ "$SANDBOX" != "none" ]; then
     # Container sandbox: mount the worktree, run worker inside
     _image="${SANDBOX_IMAGE:-ubuntu:24.04}"
     _trace_arg=""
     if [ -n "$TRACE_ID" ]; then
-        _trace_arg="TRACEPARENT=00-${TRACE_ID}-${SPAN_ID}-01"
+        _trace_arg="TRACEPARENT=00-${TRACE_ID}-${SPAN_ID}-${TRACE_FLAGS}"
     fi
     if [ "$FORMAT" = "json" ]; then
         if [ -n "$_trace_arg" ]; then
@@ -1087,6 +1097,10 @@ fi
 if [ -n "$HOOKS_DIR" ] && [ -d "$HOOKS_DIR" ] && [ -x "$HOOKS_DIR/post-worker" ]; then
     if ! "$HOOKS_DIR/post-worker" "$TASK_FILE" "$WORKTREE_ABS" 2>&1 | log; then
         echo "ERROR: post-worker hook failed; aborting." >&2
+        if [ -n "$EVENTS_FILE" ]; then
+            emit_worker_completed "$worker_id" "BLOCKED" "null" "0" "$cwd_rel" "WORKER_BLOCKED" 2>/dev/null || true
+            emit_orchestration_completed "FAIL" 1 2>/dev/null || true
+        fi
         rm -f "$LOCK_FILE" 2>/dev/null || true
         exit 1
     fi
@@ -1119,28 +1133,37 @@ if [ "$REVIEW" -eq 1 ] && [ "$result" = "PASS" ]; then
     if [ ! -f "$_scripts_dir/validate-task.sh" ] && [ -f "$PROJECT_ROOT/.agentic/scripts/validate-task.sh" ]; then
         _scripts_dir="$PROJECT_ROOT/.agentic/scripts"
     fi
-    _task_in_worktree="$WORKTREE_ABS/$TASK_ID.md"
-    # Always review the worktree's task file, not the original
+    _task_rel="${TASK_FILE#./}"
+    _task_in_worktree="$WORKTREE_ABS/$_task_rel"
+    # Fallback: use basename in case task was moved
     if [ ! -f "$_task_in_worktree" ]; then
         _task_in_worktree="$WORKTREE_ABS/$(basename "$TASK_FILE")"
     fi
+    _validators_found=0
     # validate-task
     if [ -x "$_scripts_dir/validate-task.sh" ] || [ -f "$_scripts_dir/validate-task.sh" ]; then
+        _validators_found=1
         if ! bash "$_scripts_dir/validate-task.sh" --handoff "$_task_in_worktree" 2>&1 | log; then
             review_failed=1
         fi
     fi
     # validate-context
     if [ "$review_failed" -eq 0 ] && { [ -x "$_scripts_dir/validate-context.sh" ] || [ -f "$_scripts_dir/validate-context.sh" ]; }; then
+        _validators_found=1
         if ! bash "$_scripts_dir/validate-context.sh" --handoff "$_task_in_worktree" 2>&1 | log; then
             review_failed=1
         fi
     fi
     # validate-skills
     if [ "$review_failed" -eq 0 ] && { [ -x "$_scripts_dir/validate-skills.sh" ] || [ -f "$_scripts_dir/validate-skills.sh" ]; }; then
+        _validators_found=1
         if ! bash "$_scripts_dir/validate-skills.sh" --handoff "$_task_in_worktree" 2>&1 | log; then
             review_failed=1
         fi
+    fi
+    if [ "$_validators_found" -eq 0 ]; then
+        log "WARNING: no validator scripts found; review BLOCKED."
+        review_failed=1
     fi
     if [ "$review_failed" -eq 1 ]; then
         status="FAIL"
@@ -1160,6 +1183,12 @@ if [ -n "$HOOKS_DIR" ] && [ -d "$HOOKS_DIR" ] && [ -x "$HOOKS_DIR/post-review" ]
     if ! "$HOOKS_DIR/post-review" "$TASK_FILE" "$WORKTREE_ABS" 2>&1 | log; then
         echo "ERROR: post-review hook failed." >&2
         review_failed=1
+        status="FAIL"
+        reason_code="REVIEW_FAILED"
+        result="FAIL"
+        exit_code=1
+        workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"FAIL\",\"exit_code\":1,\"duration_ms\":$duration_ms,\"reason_code\":\"REVIEW_FAILED\"}"
+        summary_json="{\"workers_defined\":1,\"workers_run\":1,\"passed\":0,\"failed\":1,\"blocked\":0}"
     fi
 fi
 
