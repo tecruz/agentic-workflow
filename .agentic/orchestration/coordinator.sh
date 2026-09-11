@@ -1100,29 +1100,6 @@ else
     exit_code=2
 fi
 
-# Emit worker_completed once, after hooks, matching the result below.
-if [ -n "$EVENTS_FILE" ]; then
-    if [ "$status" = "PASS" ]; then
-        emit_worker_completed "$worker_id" "$status" "$exit_code_str" "$duration_ms" "$cwd_rel" "null" || {
-            echo "ERROR: failed to write worker_completed event." >&2
-            rm -f "$LOCK_FILE" 2>/dev/null || true
-            exit 1
-        }
-    elif [ "$status" = "BLOCKED" ]; then
-        emit_worker_completed "$worker_id" "$status" "null" "$duration_ms" "$cwd_rel" "$reason_code" || {
-            echo "ERROR: failed to write worker_completed event." >&2
-            rm -f "$LOCK_FILE" 2>/dev/null || true
-            exit 1
-        }
-    else
-        emit_worker_completed "$worker_id" "$status" "$exit_code_str" "$duration_ms" "$cwd_rel" "$reason_code" || {
-            echo "ERROR: failed to write worker_completed event." >&2
-            rm -f "$LOCK_FILE" 2>/dev/null || true
-            exit 1
-        }
-    fi
-fi
-
 # --- Review stage (runs only when --review is set and worker passed) ---
 review_failed=0
 if [ "$REVIEW" -eq 1 ] && [ "$result" = "PASS" ]; then
@@ -1178,6 +1155,8 @@ if [ "$REVIEW" -eq 1 ] && [ "$result" = "PASS" ]; then
     if [ "$review_failed" -eq 1 ]; then
         status="FAIL"
         reason_code="REVIEW_FAILED"
+        worker_exit=1
+        exit_code_str="1"
         result="FAIL"
         exit_code=1
         workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"FAIL\",\"exit_code\":1,\"duration_ms\":$duration_ms,\"reason_code\":\"REVIEW_FAILED\"}"
@@ -1195,6 +1174,8 @@ if [ -n "$HOOKS_DIR" ] && [ -d "$HOOKS_DIR" ] && [ -x "$HOOKS_DIR/post-review" ]
         review_failed=1
         status="FAIL"
         reason_code="REVIEW_FAILED"
+        worker_exit=1
+        exit_code_str="1"
         result="FAIL"
         exit_code=1
         workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"FAIL\",\"exit_code\":1,\"duration_ms\":$duration_ms,\"reason_code\":\"REVIEW_FAILED\"}"
@@ -1206,6 +1187,10 @@ fi
 if [ "$PUSH" -eq 1 ] && [ "$result" = "PASS" ]; then
     log "Pushing branch $worktree_branch..."
     if ! git -C "$WORKTREE_ABS" push origin "$worktree_branch" 2>&1 | while IFS= read -r line; do log "$line"; done; then
+        status="FAIL"
+        reason_code="WORKER_FAILED"
+        worker_exit=1
+        exit_code_str="1"
         workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"FAIL\",\"exit_code\":1,\"duration_ms\":$duration_ms,\"reason_code\":\"WORKER_FAILED\"}"
         summary_json="{\"workers_defined\":1,\"workers_run\":1,\"passed\":0,\"failed\":1,\"blocked\":0}"
         result="FAIL"
@@ -1213,6 +1198,29 @@ if [ "$PUSH" -eq 1 ] && [ "$result" = "PASS" ]; then
         log "Push failed for $worktree_branch"
     else
         log "Pushed $worktree_branch"
+    fi
+fi
+
+# Emit worker_completed once, after all downstream stages, matching the result below.
+if [ -n "$EVENTS_FILE" ]; then
+    if [ "$status" = "PASS" ]; then
+        emit_worker_completed "$worker_id" "$status" "$exit_code_str" "$duration_ms" "$cwd_rel" "null" || {
+            echo "ERROR: failed to write worker_completed event." >&2
+            rm -f "$LOCK_FILE" 2>/dev/null || true
+            exit 1
+        }
+    elif [ "$status" = "BLOCKED" ]; then
+        emit_worker_completed "$worker_id" "$status" "null" "$duration_ms" "$cwd_rel" "$reason_code" || {
+            echo "ERROR: failed to write worker_completed event." >&2
+            rm -f "$LOCK_FILE" 2>/dev/null || true
+            exit 1
+        }
+    else
+        emit_worker_completed "$worker_id" "$status" "$exit_code_str" "$duration_ms" "$cwd_rel" "$reason_code" || {
+            echo "ERROR: failed to write worker_completed event." >&2
+            rm -f "$LOCK_FILE" 2>/dev/null || true
+            exit 1
+        }
     fi
 fi
 

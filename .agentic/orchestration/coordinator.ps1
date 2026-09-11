@@ -736,13 +736,6 @@ if ($status -eq "PASS") {
     $summaryJson = '{"workers_defined":1,"workers_run":1,"passed":0,"failed":0,"blocked":1}'
 }
 
-# Emit worker_completed once, after hooks, matching the result below.
-if (-not [string]::IsNullOrWhiteSpace($Events)) {
-    if ($status -eq "PASS") { Emit-WorkerCompleted $taskId $status 0 $durationMs $cwdRel $null }
-    elseif ($status -eq "BLOCKED") { Emit-WorkerCompleted $taskId $status $null $durationMs $cwdRel $reason }
-    else { Emit-WorkerCompleted $taskId $status $workerExit $durationMs $cwdRel $reason }
-}
-
 # --- Review stage (runs only when -Review is set and worker passed) ---
 $reviewFailed = $false
 if ($Review -and $result -eq "PASS") {
@@ -793,7 +786,7 @@ if ($Review -and $result -eq "PASS") {
         $reviewFailed = $true
     }
     if ($reviewFailed) {
-        $status = "FAIL"; $reason = "REVIEW_FAILED"; $result = "FAIL"; $exitCode = 1
+        $status = "FAIL"; $reason = "REVIEW_FAILED"; $workerExit = 1; $result = "FAIL"; $exitCode = 1
         $workersJson = '{"worker_id":' + (ConvertTo-Json $taskId -Compress) + ',"status":"FAIL","exit_code":1,"duration_ms":' + $durationMs + ',"reason_code":"REVIEW_FAILED"}'
         $summaryJson = '{"workers_defined":1,"workers_run":1,"passed":0,"failed":1,"blocked":0}'
         Write-Log "Review stage failed; marking orchestration as FAIL."
@@ -810,7 +803,7 @@ if (-not [string]::IsNullOrWhiteSpace($Hooks) -and (Test-Path -LiteralPath $Hook
         catch {
             Write-Diag "ERROR: post-review hook failed."
             $reviewFailed = $true
-            $status = "FAIL"; $reason = "REVIEW_FAILED"; $result = "FAIL"; $exitCode = 1
+            $status = "FAIL"; $reason = "REVIEW_FAILED"; $workerExit = 1; $result = "FAIL"; $exitCode = 1
             $workersJson = '{"worker_id":' + (ConvertTo-Json $taskId -Compress) + ',"status":"FAIL","exit_code":1,"duration_ms":' + $durationMs + ',"reason_code":"REVIEW_FAILED"}'
             $summaryJson = '{"workers_defined":1,"workers_run":1,"passed":0,"failed":1,"blocked":0}'
         }
@@ -821,11 +814,19 @@ if ($Push -and $result -eq "PASS") {
     Write-Log "Pushing branch $worktreeBranch..."
     git -C $worktreeAbs push origin $worktreeBranch 2>&1 | Write-WorkerOutput
     if ($LASTEXITCODE -ne 0) {
+        $status = "FAIL"; $reason = "WORKER_FAILED"; $workerExit = 1
         $workersJson = '{"worker_id":' + (ConvertTo-Json $taskId -Compress) + ',"status":"FAIL","exit_code":1,"duration_ms":' + $durationMs + ',"reason_code":"WORKER_FAILED"}'
         $summaryJson = '{"workers_defined":1,"workers_run":1,"passed":0,"failed":1,"blocked":0}'
         $result = "FAIL"; $exitCode = 1
         Write-Diag "Push failed for $worktreeBranch"
     } else { Write-Log "Pushed $worktreeBranch" }
+}
+
+# Emit worker_completed once, after all downstream stages, matching the result below.
+if (-not [string]::IsNullOrWhiteSpace($Events)) {
+    if ($status -eq "PASS") { Emit-WorkerCompleted $taskId $status 0 $durationMs $cwdRel $null }
+    elseif ($status -eq "BLOCKED") { Emit-WorkerCompleted $taskId $status $null $durationMs $cwdRel $reason }
+    else { Emit-WorkerCompleted $taskId $status $workerExit $durationMs $cwdRel $reason }
 }
 
 # Cleanup only on success: failed/blocked worktrees are preserved for inspection.
