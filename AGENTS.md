@@ -118,6 +118,18 @@ Reusable procedures live in the on-demand registry under `.agentic/skills/` — 
 
 Entry points contain only imports or pointers — never duplicated protocol content.
 
+### MCP and A2A
+
+- **MCP (Model Context Protocol)** is the agent-to-tool layer: agents discover
+  and invoke tools (databases, APIs, file systems) through MCP servers. Treat
+  MCP servers as production infrastructure (least privilege, approvals,
+  logging); load the `mcp-tool-governance` context module for MCP work and see
+  `.agentic/orchestration/README.md` for the coordinator relationship.
+- **A2A (Agent-to-Agent Protocol)** is the agent-to-agent layer: agents
+  delegate tasks to each other. The coordinator's isolated worktrees provide
+  the filesystem isolation parallel agents need; see
+  `.agentic/orchestration/README.md` for details.
+
 ---
 
 ## 7. Project Verification

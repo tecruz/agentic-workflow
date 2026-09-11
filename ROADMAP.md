@@ -7,7 +7,7 @@
 
 ## Current state
 
-- **Version**: `1.14.0` (workspace/monorepo detection landed; deeper Android/Kotlin detection landed; context-module expansion + orchestration maturity landed; skills as a first-class category landed; Cursor/Copilot bridges + verifier large-contract performance landed; Nx/Turborepo/Bazel workspace detection landed; .NET lint-check gating parity landed; skills expansion landed; post-v1.12.0 audit fixes landed; health report + task templates + three new context modules + eval scenario expansion landed; post-v1.13.0 hygiene landed — second negative control, validator-drift fixes, eval-suite caching, adoption-focused docs; CI retry hardening; eval-scenario coverage for all 13 context modules)
+- **Version**: `1.15.0` (post-v1.14 trend-driven backlog completed: worker sandboxing, review stage, trace context, hooks, MCP/A2A guidance + tool-governance module, spec pipeline + goal conditions, memory lifecycle; eval corpus 19 scenarios; all 14 context modules with fixture + eval coverage)
 - The core loop (`DISCOVER → CLASSIFY RISK → PLAN → IMPLEMENT → VERIFY →
   HANDOFF`), the honest verification model, the non-destructive installer, risk
   profiles + evidence contracts, context modules + behavioral evals, and the
@@ -134,12 +134,12 @@ registry now ships parallel to context modules (ADR-0014):
 
 All later-items have landed as of v1.12.0.
 
-## Post-v1.14 backlog (2026 trend-driven, uncommitted)
+## Post-v1.14 backlog (2026 trend-driven, completed in v1.15.0)
 
 > Candidates identified from 2026 industry research (Anthropic Agentic Coding
 > Trends Report, AI Engineer Q1-2026, LangChain State of Agent Engineering,
-> MCP 2026 Roadmap). None are committed; each needs its own task, an ADR when
-> architectural, and an adopter-demand signal before scheduling.
+> MCP 2026 Roadmap). All items below landed via PR #26 (TASK-037, ADR-0016);
+> remaining boxes were closed in v1.15.0.
 
 ### 7. Process-level worker sandboxing — *highest priority*
 Worktree isolation protects files, not execution. The 2026 baseline treats
@@ -169,15 +169,15 @@ custom event schemas risk fragmenting and losing interoperability.
 MCP (agent-to-tool, vertical) and A2A (agent-to-agent, horizontal) are
 the emerging connective layer. The protocol currently says nothing about either.
 - [x] Document how the protocol relates to MCP and A2A.
-- [ ] Optional adapter or context module for MCP-governed tool access.
-- [ ] Update README and AGENTS.md §6 tool table accordingly.
+- [x] Context module for MCP-governed tool access (`mcp-tool-governance`).
+- [x] Update README and AGENTS.md §6 tool table accordingly.
 
 ### 11. Spec-driven pipeline (spec → plan → tasks)
 Spec-first development (GitHub Spec Kit style) is becoming the default
 harness shape. Templates exist but no pipeline validation connects them.
 - [x] Extend `.agentic/templates/` into a spec → plan → tasks chain.
-- [ ] Verifiable goal-condition support (exit-0 definition of done).
-- [ ] Task template update; eval-scenario coverage for the pipeline.
+- [x] Verifiable goal-condition support (exit-0 definition of done via optional `## Goal conditions` in `task.md`).
+- [x] Task template update; eval-scenario coverage for the pipeline (`spec-pipeline-chain`).
 
 ### 12. Deterministic event hooks
 Guardrails that do not depend on model judgment (PostToolUse / Stop analogues)

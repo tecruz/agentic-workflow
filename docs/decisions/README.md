@@ -21,3 +21,5 @@ project-owned copy of this layout under `.agentic/decisions/`.
 | [ADR-0012](ADR-0012-workspace-monorepo-detection.md) | Workspace and monorepo detection | Accepted |
 | [ADR-0013](ADR-0013-deeper-android-kotlin-detection.md) | Deeper Android and Kotlin detection | Accepted |
 | [ADR-0014](ADR-0014-skills-as-first-class-category.md) | Skills as a first-class category | Accepted |
+| [ADR-0015](ADR-0015-nx-turborepo-bazel-detection.md) | Workspace detection: Nx, Turborepo, and Bazel | Accepted |
+| [ADR-0016](ADR-0016-post-v114-backlog-completion.md) | Post-v1.14 trend-driven backlog completion (v1.15.0) | Accepted |

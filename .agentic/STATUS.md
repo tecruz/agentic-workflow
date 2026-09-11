@@ -47,6 +47,7 @@
 - [x] TASK-034 — CI retry hardening: bounded retry (3 attempts, 2s exponential backoff) on all 5 `Install-CiModule` call sites in ci.yml / ci-full.yml to absorb transient PSGallery 403s (see `.agentic/tasks/034-ci-retry-hardening.md`)
 - [x] TASK-035 — Module eval scenarios for 5 uncovered context modules: `performance-hot-path`, `accessibility-contrast`, `i18n-string-extraction`, `mobile-responsive-breakpoint`, `testing-ci-config`; corpus 12→17, both eval twins 17/17 (see `.agentic/tasks/035-module-eval-scenarios.md`)
 - [x] TASK-036 — v1.14.0 publication + bookkeeping consistency: recorded the published tag/release, backfilled TASK-025/034/035 into the Active Tasks checklist, refreshed the ROADMAP current-state line (see `.agentic/tasks/TASK-036-v1140-publication-and-bookkeeping.md`)
+- [x] TASK-037 — Post-v1.14 backlog completion (v1.15.0): MCP tool-governance module, MCP/A2A doc tables, goal-condition template support, 2 eval scenarios (corpus 17→19), ADR-0016, CHANGELOG, version sweep (see `.agentic/tasks/TASK-037-post-v114-backlog-completion.md`)
 
 ## Recent Decisions
 

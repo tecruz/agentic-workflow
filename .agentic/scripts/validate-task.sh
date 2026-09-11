@@ -167,7 +167,7 @@ else:
 
 doc = {
     "schema_version": 1,
-    "protocol_version": "1.14.0",
+    "protocol_version": "1.15.0",
     "kind": "task_validation_result",
     "mode": mode,
     "result": res_str,

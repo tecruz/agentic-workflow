@@ -32,6 +32,7 @@
 | data-integrity | 1 | high-assurance | Data validation, schema constraints, transactions, backup/recovery, audit logging, data repair |
 | api-design-patterns | 1 | standard | API changes, request/response contracts, versioning, pagination, rate limiting, API docs |
 | error-handling | 1 | standard | Error classification, retry/fallback, circuit breakers, error reporting, graceful degradation |
+| mcp-tool-governance | 1 | standard | MCP server changes, MCP-governed tool access, least-privilege tool scoping, trace propagation, A2A delegation |
 
 ## Rules
 

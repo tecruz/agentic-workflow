@@ -238,6 +238,7 @@ $ManagedFiles = @(
     ".agentic/context/data-integrity/MODULE.md",
     ".agentic/context/api-design-patterns/MODULE.md",
     ".agentic/context/error-handling/MODULE.md",
+    ".agentic/context/mcp-tool-governance/MODULE.md",
     ".agentic/skills/INDEX.md",
     ".agentic/skills/task-decomposition/SKILL.md",
     ".agentic/skills/verification-triage/SKILL.md",

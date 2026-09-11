@@ -1249,7 +1249,7 @@ Describe 'Behavioral evaluation contracts and schema validation' {
         }
 
         function Assert-EvalDocsSchemaValid([object[]]$Lines, [string]$Label) {
-            ($Lines.Count) | Should -Be 17 -Because "one document per scenario ($Label)"
+            ($Lines.Count) | Should -Be 19 -Because "one document per scenario ($Label)"
             foreach ($line in $Lines) {
                 $tmp = [System.IO.Path]::GetTempFileName()
                 try {
@@ -1333,7 +1333,7 @@ Describe 'Behavioral evaluation contracts and schema validation' {
         $r = $script:psResult
         $r.Code | Should -Be 0
         $docs = @($r.Lines | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.expected_result -ne 'FAIL' })
-        ($docs.Count) | Should -Be 15
+        ($docs.Count) | Should -Be 17
         foreach ($d in $docs) {
             $d.observed_result | Should -Be 'PASS' -Because "scenario $($d.scenario_id)"
             $d.result | Should -Be 'PASS'
@@ -1344,7 +1344,7 @@ Describe 'Behavioral evaluation contracts and schema validation' {
 
     It 'scenario fixtures validate against scenario-v1 and verification artifacts against verification-result-v1' {
         $scenarioDirs = @(Get-ChildItem -LiteralPath (Join-Path $evalsDir 'scenarios') -Directory | Sort-Object Name)
-            ($scenarioDirs.Count) | Should -Be 17
+            ($scenarioDirs.Count) | Should -Be 19
         foreach ($dir in $scenarioDirs) {
             $tmpS = [System.IO.Path]::GetTempFileName()
             $tmpV = [System.IO.Path]::GetTempFileName()

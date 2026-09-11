@@ -5,6 +5,37 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.15.0] - 2026-09-11
+
+### Added
+
+- **MCP tool-governance context module.** `mcp-tool-governance` (v1,
+  standard) covers MCP server changes, least-privilege tool scoping,
+  per-tool approval and logging, trace propagation, and A2A delegation.
+  Registered in both installers and the bundle with install-test
+  assertions, four validate-context fixtures with golden outcome tests,
+  and a dedicated eval scenario. All 14 context modules now have
+  registry, installer, fixture, and eval coverage. (TASK-037)
+- **Goal-condition support in the task template.** `.agentic/templates/task.md`
+  gains an optional `## Goal conditions` section: one bullet per
+  machine-checkable end state phrased as "Exit 0 when: ...". Validators
+  ignore unknown sections by contract, so existing task files validate
+  unchanged and no validator change ships. (TASK-037)
+- **Spec-pipeline eval coverage.** New `spec-pipeline-chain` scenario
+  carries a `## Goal conditions` section through all three production
+  validators end to end. Corpus is 19 scenarios; both eval twins
+  classify 19/19; JsonContracts Pester counts updated (17→19 docs,
+  15→17 positive, 17→19 dirs). (TASK-037)
+- **MCP/A2A tool-table documentation.** README tool tables and AGENTS.md
+  §6 record the MCP (agent-to-tool) and A2A (agent-to-agent) relationship
+  with pointers to the orchestration README and the new module. (TASK-037)
+
+### Changed
+
+- **Post-v1.14 backlog completed.** ROADMAP items 7–13 fully checked off:
+  worker sandboxing, review stage, trace context, hooks, MCP/A2A
+  guidance, spec pipeline, and memory lifecycle (PR #26). (TASK-037)
+
 ## [1.14.0] - 2026-09-10
 
 ### Added

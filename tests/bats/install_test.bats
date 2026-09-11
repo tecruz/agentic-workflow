@@ -77,7 +77,7 @@ configure_test_git_identity() {
 @test "fresh install creates the context registry and context validators" {
     bash "$INSTALL" . >/dev/null 2>&1
     [ -f .agentic/context/INDEX.md ]
-    for mod in security-review database-migrations dependency-changes infrastructure-change public-api-change performance accessibility i18n mobile-adaptive testing-infrastructure data-integrity api-design-patterns error-handling; do
+    for mod in security-review database-migrations dependency-changes infrastructure-change public-api-change performance accessibility i18n mobile-adaptive testing-infrastructure data-integrity api-design-patterns error-handling mcp-tool-governance; do
         [ -f ".agentic/context/$mod/MODULE.md" ]
     done
     [ -f .agentic/scripts/validate-context.sh ]
@@ -99,6 +99,7 @@ configure_test_git_identity() {
     grep -q $'\.agentic/context/data-integrity/MODULE\.md\tmanaged' .agentic/install-manifest.tsv
     grep -q $'\.agentic/context/api-design-patterns/MODULE\.md\tmanaged' .agentic/install-manifest.tsv
     grep -q $'\.agentic/context/error-handling/MODULE\.md\tmanaged' .agentic/install-manifest.tsv
+    grep -q $'\.agentic/context/mcp-tool-governance/MODULE\.md\tmanaged' .agentic/install-manifest.tsv
     grep -q $'\.agentic/scripts/validate-context\.sh\tmanaged' .agentic/install-manifest.tsv
     grep -q $'\.agentic/scripts/validate-handoff\.sh\tmanaged' .agentic/install-manifest.tsv
     grep -q $'\.agentic/scripts/validate-handoff\.ps1\tmanaged' .agentic/install-manifest.tsv

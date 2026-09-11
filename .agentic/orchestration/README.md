@@ -1,6 +1,6 @@
 # Multi-Agent Task Coordination
 
-Provides optional, isolated multi-agent task orchestration built on top of the observability (ADR-0009) and behavioral evaluation (ADR-0010) foundations, implemented in `coordinator.sh` / `coordinator.ps1` (Bash+PowerShell twins, `protocol_version` 1.14.0).
+Provides optional, isolated multi-agent task orchestration built on top of the observability (ADR-0009) and behavioral evaluation (ADR-0010) foundations, implemented in `coordinator.sh` / `coordinator.ps1` (Bash+PowerShell twins, `protocol_version` 1.15.0).
 
 ## Principles
 

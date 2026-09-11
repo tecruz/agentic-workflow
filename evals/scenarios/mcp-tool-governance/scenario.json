@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "id": "mcp-tool-governance",
+  "description": "Adding a read-only MCP database-inspection server must select mcp-tool-governance with MCP review approval and scope evidence.",
+  "input": {
+    "task": "Add a read-only MCP server for database inspection with least-privilege tool scoping.",
+    "changed_paths": [
+      "mcp/servers/db-inspector.json"
+    ]
+  },
+  "expected": {
+    "minimum_profile": "standard",
+    "required_modules": [
+      "mcp-tool-governance"
+    ],
+    "required_approval_gates": [
+      "mcp-review"
+    ],
+    "required_evidence": [
+      "tool-scope-manifest",
+      "least-privilege-audit"
+    ]
+  }
+}

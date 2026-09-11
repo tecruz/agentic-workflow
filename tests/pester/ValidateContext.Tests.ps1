@@ -93,7 +93,7 @@ Describe 'validate-context.ps1 context-selection validator' {
         $doc.kind | Should -Be 'context_validation_result'
         $doc.result | Should -Be 'VALID'
         $doc.exit_code | Should -Be 0
-        $doc.protocol_version | Should -Be '1.14.0'
+        $doc.protocol_version | Should -Be '1.15.0'
         @($doc.selected_modules).Count | Should -Be 1
         $doc.selected_modules[0].id | Should -Be 'security-review'
         $doc.selected_modules[0].version | Should -Be 1
@@ -465,6 +465,18 @@ Describe 'validate-context golden expected outcomes for new fixtures' {
             foreach ($v in @('fenced-valid', 'fenced-none')) {
                 Invoke-Validator "context-$m-$v.md" | Select-Object -ExpandProperty Code | Should -Be 1
             }
+        }
+    }
+
+    It 'VALID (0) for valid and none variants of the v1.15 mcp-tool-governance fixtures' {
+        foreach ($v in @('valid', 'none')) {
+            Invoke-Validator "context-mcp-tool-governance-$v.md" | Select-Object -ExpandProperty Code | Should -Be 0
+        }
+    }
+
+    It 'INVALID (1) for fenced variants of the v1.15 mcp-tool-governance fixtures' {
+        foreach ($v in @('fenced-valid', 'fenced-none')) {
+            Invoke-Validator "context-mcp-tool-governance-$v.md" | Select-Object -ExpandProperty Code | Should -Be 1
         }
     }
 }
