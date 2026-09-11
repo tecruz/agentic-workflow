@@ -907,49 +907,66 @@ fi
 
 # Determine worker to run
 if [ -z "$WORKER_CMD" ]; then
-    # No worker supplied: synthesize a PASS worker for worktree creation
+    # No worker supplied: synthesize a worker for worktree creation.
+    # Worker events are emitted after the optional push so the event
+    # stream always matches the final result.
     worker_id="$TASK_ID"
     cwd_rel="$WORKTREE_REL"
     case "$cwd_rel" in
         ./*) : ;;
         *) cwd_rel="./$cwd_rel" ;;
     esac
+    nw_status="PASS"
+    nw_reason="null"
+    nw_exit="0"
+    nw_result="PASS"
+    nw_code=0
+    log "No worker command supplied; worktree ready."
+    if [ "$PUSH" -eq 1 ]; then
+        # Remote write gate already checked
+        if ! git -C "$WORKTREE_ABS" push origin "$worktree_branch" 2>&1 | log; then
+            nw_status="FAIL"
+            nw_reason="WORKER_FAILED"
+            nw_exit="1"
+            nw_result="FAIL"
+            nw_code=1
+            log "Push failed for $worktree_branch"
+        else
+            log "Pushed branch $worktree_branch"
+        fi
+    fi
     if [ -n "$EVENTS_FILE" ]; then
         emit_worker_started "$worker_id" "$cwd_rel" || {
             echo "ERROR: failed to write worker_started event." >&2
             rm -f "$LOCK_FILE" 2>/dev/null || true
             exit 1
         }
-        emit_worker_completed "$worker_id" "PASS" "0" "0" "$cwd_rel" "null" || {
+        emit_worker_completed "$worker_id" "$nw_status" "$nw_exit" "0" "$cwd_rel" "$nw_reason" || {
             echo "ERROR: failed to write worker_completed event." >&2
             rm -f "$LOCK_FILE" 2>/dev/null || true
             exit 1
         }
     fi
-    workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"PASS\",\"exit_code\":0,\"duration_ms\":0,\"reason_code\":null}"
-    summary_json="{\"workers_defined\":1,\"workers_run\":1,\"passed\":1,\"failed\":0,\"blocked\":0}"
-    log "No worker command supplied; worktree ready."
-    if [ "$PUSH" -eq 1 ]; then
-        # Remote write gate already checked
-        if ! git -C "$WORKTREE_ABS" push origin "$worktree_branch" 2>&1 | log; then
-            rm -f "$LOCK_FILE" 2>/dev/null || true
-            workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"FAIL\",\"exit_code\":1,\"duration_ms\":0,\"reason_code\":\"WORKER_FAILED\"}"
-            summary_json="{\"workers_defined\":1,\"workers_run\":1,\"passed\":0,\"failed\":1,\"blocked\":0}"
-            complete_orchestration "FAIL" 1 "$workers_json" "$summary_json"
+    if [ "$nw_result" = "PASS" ]; then
+        workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"PASS\",\"exit_code\":0,\"duration_ms\":0,\"reason_code\":null}"
+        summary_json="{\"workers_defined\":1,\"workers_run\":1,\"passed\":1,\"failed\":0,\"blocked\":0}"
+        if [ "$CLEANUP" -eq 1 ]; then
+            git worktree remove --force "$WORKTREE_ABS" 2>/dev/null || rm -rf "$WORKTREE_ABS" 2>/dev/null || true
+            git branch -D "$worktree_branch" 2>/dev/null || true
+            log "Cleaned up worktree $WORKTREE_REL"
         fi
-        log "Pushed branch $worktree_branch"
-    fi
-    if [ "$CLEANUP" -eq 1 ]; then
-        git worktree remove --force "$WORKTREE_ABS" 2>/dev/null || rm -rf "$WORKTREE_ABS" 2>/dev/null || true
-        git branch -D "$worktree_branch" 2>/dev/null || true
-        log "Cleaned up worktree $WORKTREE_REL"
-    fi
-    rm -f "$LOCK_FILE" 2>/dev/null || true
-    if [ "$FORMAT" = "json" ]; then
-        complete_orchestration "PASS" 0 "$workers_json" "$summary_json"
+        rm -f "$LOCK_FILE" 2>/dev/null || true
+        if [ "$FORMAT" = "json" ]; then
+            complete_orchestration "PASS" 0 "$workers_json" "$summary_json"
+        else
+            log "Orchestration PASS: worktree ready at $WORKTREE_REL"
+            complete_orchestration "PASS" 0 "$workers_json" "$summary_json"
+        fi
     else
-        log "Orchestration PASS: worktree ready at $WORKTREE_REL"
-        complete_orchestration "PASS" 0 "$workers_json" "$summary_json"
+        rm -f "$LOCK_FILE" 2>/dev/null || true
+        workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"FAIL\",\"exit_code\":1,\"duration_ms\":0,\"reason_code\":\"WORKER_FAILED\"}"
+        summary_json="{\"workers_defined\":1,\"workers_run\":1,\"passed\":0,\"failed\":1,\"blocked\":0}"
+        complete_orchestration "FAIL" 1 "$workers_json" "$summary_json"
     fi
 fi
 

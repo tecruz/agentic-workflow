@@ -595,35 +595,43 @@ if (-not $worktreeExists) {
 $cwdRel = "./$worktreeRel"
 
 if ([string]::IsNullOrWhiteSpace($Worker)) {
-    if (-not [string]::IsNullOrWhiteSpace($Events)) {
-        Emit-WorkerStarted $taskId $cwdRel
-        Emit-WorkerCompleted $taskId "PASS" 0 0 $cwdRel $null
-    }
-    $workersJson = '{"worker_id":' + (ConvertTo-Json $taskId -Compress) + ',"status":"PASS","exit_code":0,"duration_ms":0,"reason_code":null}'
-    $summaryJson = '{"workers_defined":1,"workers_run":1,"passed":1,"failed":0,"blocked":0}'
+    # No worker supplied: synthesize a worker for worktree creation.
+    # Worker events are emitted after the optional push so the event
+    # stream always matches the final result.
+    $nwStatus = "PASS"; $nwReason = $null; $nwExit = 0; $nwResult = "PASS"; $nwCode = 0
     Write-Log "No worker command supplied; worktree ready."
     if ($Push) {
         Write-Log "Pushing branch $worktreeBranch..."
         git -C $worktreeAbs push origin $worktreeBranch 2>&1 | Write-WorkerOutput
         if ($LASTEXITCODE -ne 0) {
-            $workersJson = '{"worker_id":' + (ConvertTo-Json $taskId -Compress) + ',"status":"FAIL","exit_code":1,"duration_ms":0,"reason_code":"WORKER_FAILED"}'
-            $summaryJson = '{"workers_defined":1,"workers_run":1,"passed":0,"failed":1,"blocked":0}'
-            Remove-Item -LiteralPath $lockFile -Force -ErrorAction SilentlyContinue
-            # Failed push preserves the worktree for inspection; no cleanup here.
-            $disp = Get-DisplayPath $TaskFile
-            Complete-Orchestration "FAIL" 1 $workersJson $summaryJson $disp $cwdRel
+            $nwStatus = "FAIL"; $nwReason = "WORKER_FAILED"; $nwExit = 1; $nwResult = "FAIL"; $nwCode = 1
+            Write-Diag "Push failed for $worktreeBranch"
+        } else { Write-Log "Pushed $worktreeBranch" }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($Events)) {
+        Emit-WorkerStarted $taskId $cwdRel
+        Emit-WorkerCompleted $taskId $nwStatus $nwExit 0 $cwdRel $nwReason
+    }
+    if ($nwResult -eq "PASS") {
+        $workersJson = '{"worker_id":' + (ConvertTo-Json $taskId -Compress) + ',"status":"PASS","exit_code":0,"duration_ms":0,"reason_code":null}'
+        $summaryJson = '{"workers_defined":1,"workers_run":1,"passed":1,"failed":0,"blocked":0}'
+        if ($Cleanup) {
+            try { git worktree remove --force $worktreeAbs 2>$null | Out-Null } catch {}
+            try { Remove-Item -Recurse -Force $worktreeAbs -ErrorAction SilentlyContinue } catch {}
+            try { git branch -D $worktreeBranch 2>$null | Out-Null } catch {}
+            Write-Log "Cleaned up worktree $worktreeRel"
         }
-        Write-Log "Pushed $worktreeBranch"
+        Remove-Item -LiteralPath $lockFile -Force -ErrorAction SilentlyContinue
+        $disp = Get-DisplayPath $TaskFile
+        Complete-Orchestration "PASS" 0 $workersJson $summaryJson $disp $cwdRel
+    } else {
+        $workersJson = '{"worker_id":' + (ConvertTo-Json $taskId -Compress) + ',"status":"FAIL","exit_code":1,"duration_ms":0,"reason_code":"WORKER_FAILED"}'
+        $summaryJson = '{"workers_defined":1,"workers_run":1,"passed":0,"failed":1,"blocked":0}'
+        Remove-Item -LiteralPath $lockFile -Force -ErrorAction SilentlyContinue
+        # Failed push preserves the worktree for inspection; no cleanup here.
+        $disp = Get-DisplayPath $TaskFile
+        Complete-Orchestration "FAIL" 1 $workersJson $summaryJson $disp $cwdRel
     }
-    if ($Cleanup) {
-        try { git worktree remove --force $worktreeAbs 2>$null | Out-Null } catch {}
-        try { Remove-Item -Recurse -Force $worktreeAbs -ErrorAction SilentlyContinue } catch {}
-        try { git branch -D $worktreeBranch 2>$null | Out-Null } catch {}
-        Write-Log "Cleaned up worktree $worktreeRel"
-    }
-    Remove-Item -LiteralPath $lockFile -Force -ErrorAction SilentlyContinue
-    $disp = Get-DisplayPath $TaskFile
-    Complete-Orchestration "PASS" 0 $workersJson $summaryJson $disp $cwdRel
 }
 
 # Run worker
