@@ -126,3 +126,47 @@
 - Adopters: replace the placeholders above with links to real task and decision
   files as they are created. Keep this file brief; the per-task and per-decision
   files hold the detail.
+
+## Memory Lifecycle
+
+This file (`.agentic/STATUS.md`) serves as the project's durable memory index.
+Memory is a first-class architectural primitive — it must not be static.
+
+### Update
+
+- **When**: At the end of every completed task (HANDOFF phase).
+- **What**: Add a bullet to `## Active Tasks` with the task ID, summary, and
+  file reference. Update `## Recent Decisions` if an ADR was created.
+- **How**: The agent appends entries; humans may edit for accuracy.
+
+### Retrieve
+
+- **When**: At the start of every session (DISCOVER phase).
+- **What**: Read `## Active Tasks` to understand current state; read
+  `## Recent Decisions` for architectural context.
+- **How**: Agents read this file as part of the DISCOVER loop per AGENTS.md.
+
+### Forget
+
+- **When**: When a task is superseded or a decision is superseded by a later ADR.
+- **What**: Mark the entry as superseded (append "Superseded by TASK-XXX") rather
+  than deleting it. Deletion loses history; supersession preserves it.
+- **How**: Agents append supersession notes; humans may archive old entries.
+
+### Staleness Detection
+
+- **Trigger**: If the most recent task entry is older than 30 days, or if the
+  file has not been modified in 30+ days.
+- **Action**: Flag the file as potentially stale. Agents should note this in
+  their DISCOVER output and ask the user to confirm current state before
+  planning new work.
+- **Rationale**: "Context rot" — stale instructions in memory files can cause
+  agents to re-propose rejected approaches or ignore current constraints.
+
+### Boundaries
+
+- This file is a **summary index**, not a detailed log. Per-task details live
+  in `.agentic/tasks/`; per-decision details live in `.agentic/decisions/`.
+- Do not store secrets, API keys, or credentials in this file (AGENTS.md §5).
+- Keep this file under 200 lines; archive older entries to a dated snapshot
+  file if it grows beyond that.

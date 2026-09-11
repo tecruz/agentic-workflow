@@ -17,6 +17,7 @@
   files in both installers, N-1 migration guarantee, secrets-exclusion policy)
   and by the project's **cross-language parity rule** (every `*.sh` change is
   mirrored in `*.ps1` with shared fixtures).
+- Post-v1.14 trend-driven backlog (items 7–13) recorded below.
 
 ## Guiding constraints
 
@@ -132,6 +133,66 @@ registry now ships parallel to context modules (ADR-0014):
   the check `required` in `checks.tsv` instead.
 
 All later-items have landed as of v1.12.0.
+
+## Post-v1.14 backlog (2026 trend-driven, uncommitted)
+
+> Candidates identified from 2026 industry research (Anthropic Agentic Coding
+> Trends Report, AI Engineer Q1-2026, LangChain State of Agent Engineering,
+> MCP 2026 Roadmap). None are committed; each needs its own task, an ADR when
+> architectural, and an adopter-demand signal before scheduling.
+
+### 7. Process-level worker sandboxing — *highest priority*
+Worktree isolation protects files, not execution. The 2026 baseline treats
+sandboxed, disposable execution of agent-run code as a requirement because
+untrusted input (issues, PRs, lockfiles) is attacker-reachable.
+- [x] Container/microVM sandbox option for coordinator workers (e.g.
+      `AGENTIC_WORKER_SANDBOX`), with current worktree mode as fallback.
+- [x] Cross-language parity (Bash + PowerShell).
+- [x] Documentation update for `orchestration/README.md`.
+
+### 8. Reviewer / verifier stage in orchestration
+Role-separated review in a fresh context (optionally a different model)
+reduces self-review bias before `orchestration_completed`.
+- [x] Built-in second-stage review step in `coordinator.sh` / `coordinator.ps1`.
+- [x] Reuse existing `validate-task`, `validate-context`, `validate-skills`
+      contracts as the review gate.
+- [x] Cross-language parity and eval-scenario coverage.
+
+### 9. OpenTelemetry / W3C Trace Context mapping
+MCP's 2026 spec embeds W3C Trace Context (`traceparent` / `tracestate`);
+custom event schemas risk fragmenting and losing interoperability.
+- [x] Map `orchestration-events-v1` to OTel spans; accept/propagate `traceparent`.
+- [x] Schema migration path preserving existing JSONL consumers.
+- [x] Cross-language parity (Bash + PowerShell event emission).
+
+### 10. MCP / A2A guidance and adapters
+MCP (agent-to-tool, vertical) and A2A (agent-to-agent, horizontal) are
+the emerging connective layer. The protocol currently says nothing about either.
+- [x] Document how the protocol relates to MCP and A2A.
+- [ ] Optional adapter or context module for MCP-governed tool access.
+- [ ] Update README and AGENTS.md §6 tool table accordingly.
+
+### 11. Spec-driven pipeline (spec → plan → tasks)
+Spec-first development (GitHub Spec Kit style) is becoming the default
+harness shape. Templates exist but no pipeline validation connects them.
+- [x] Extend `.agentic/templates/` into a spec → plan → tasks chain.
+- [ ] Verifiable goal-condition support (exit-0 definition of done).
+- [ ] Task template update; eval-scenario coverage for the pipeline.
+
+### 12. Deterministic event hooks
+Guardrails that do not depend on model judgment (PostToolUse / Stop analogues)
+are a 2026 requirement for long-running and autonomous work.
+- [x] Hook mechanism triggered by verifier/validator events.
+- [x] Pairs with §9 events for observability integration.
+- [x] Cross-language parity and documentation.
+
+### 13. Memory lifecycle for project state
+Memory is becoming a first-class architectural primitive. `STATUS.md` is
+currently static; there is no update / forget / retrieve lifecycle or
+staleness detection ("context rot").
+- [x] Define update / forget / retrieve lifecycle for `.agentic/STATUS.md`.
+- [x] Staleness detection to avoid outdated instructions poisoning agent context.
+- [x] Cross-language parity and documentation.
 
 ## How items land
 

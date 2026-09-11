@@ -19,6 +19,18 @@
 #   --events <path>       JSONL event stream destination (must be under
 #                         .agentic/runs/). Cannot be combined with --format json.
 #   --events-force        Overwrite existing event file.
+#   --sandbox <type>      Worker sandbox mode: none (default), docker, podman.
+#                         Falls back to AGENTIC_WORKER_SANDBOX env var.
+#   --sandbox-image <img> Custom container image for sandbox mode.
+#                         Falls back to AGENTIC_WORKER_SANDBOX_IMAGE env var.
+#   --review              Run task validators (validate-task/context/skills) after
+#                         the worker completes; fails the run on validation errors.
+#   --hooks <dir>         Directory of hook scripts invoked at lifecycle events:
+#                         pre-spawn, post-worker, post-review. Each hook receives
+#                         the task file path as $1 and the worktree as $2.
+#   --traceparent <tp>    W3C Trace Context parent (traceparent header value).
+#                         Falls back to TRACEPARENT env var. Propagated into all
+#                         JSONL events as trace_id / span_id fields.
 #   -h, --help            Show usage.
 #
 # Exit codes:
@@ -47,6 +59,12 @@ WORKTREE_REL=""
 WORKTREE_ABS=""
 LOCK_FILE=""
 PROJECT_ROOT=""
+SANDBOX="none"
+SANDBOX_IMAGE=""
+REVIEW=0
+HOOKS_DIR=""
+TRACE_ID=""
+SPAN_ID=""
 
 # Event stream scratch (for atomic promotion)
 EVENTS_SCRATCH=""
@@ -66,6 +84,13 @@ Options:
   --format <text|json>  Output format (default text)
   --events <path>       JSONL event stream (must be under .agentic/runs/)
   --events-force        Overwrite existing event file
+  --sandbox <type>      Worker sandbox mode: none (default), docker, podman
+                        (falls back to AGENTIC_WORKER_SANDBOX env var)
+  --sandbox-image <img> Custom container image for sandbox mode
+                        (falls back to AGENTIC_WORKER_SANDBOX_IMAGE env var)
+  --review              Run task validators after worker completes
+  --hooks <dir>         Hook scripts directory (pre-spawn, post-worker, post-review)
+  --traceparent <tp>    W3C Trace Context parent (falls back to TRACEPARENT env var)
   -h, --help            Show this help
 
 Exit codes:
@@ -251,7 +276,11 @@ write_event() {
 }
 
 emit_orchestration_started() {
-    write_event '{"event":"orchestration_started"}'
+    local trace_json=""
+    if [ -n "$TRACE_ID" ]; then
+        trace_json=",\"trace_id\":\"$(json_escape "$TRACE_ID")\",\"span_id\":\"$(json_escape "$SPAN_ID")\""
+    fi
+    write_event "{\"event\":\"orchestration_started\"${trace_json}}"
 }
 
 emit_worker_started() {
@@ -259,7 +288,11 @@ emit_worker_started() {
     local esc_id esc_cwd
     esc_id="$(json_escape "$worker_id")"
     esc_cwd="$(json_escape "$cwd_rel")"
-    local payload="{\"event\":\"worker_started\",\"worker_id\":\"$esc_id\",\"working_directory\":\"$esc_cwd\"}"
+    local trace_json=""
+    if [ -n "$TRACE_ID" ]; then
+        trace_json=",\"trace_id\":\"$(json_escape "$TRACE_ID")\",\"span_id\":\"$(json_escape "$SPAN_ID")\""
+    fi
+    local payload="{\"event\":\"worker_started\",\"worker_id\":\"$esc_id\",\"working_directory\":\"$esc_cwd\"${trace_json}}"
     write_event "$payload"
 }
 
@@ -278,13 +311,21 @@ emit_worker_completed() {
     else
         esc_ec="null"
     fi
-    local payload="{\"event\":\"worker_completed\",\"worker_id\":\"$esc_id\",\"status\":\"$status\",\"exit_code\":$esc_ec,\"duration_ms\":${duration_ms:-0},\"working_directory\":\"$esc_cwd\",\"reason_code\":$esc_rcode}"
+    local trace_json=""
+    if [ -n "$TRACE_ID" ]; then
+        trace_json=",\"trace_id\":\"$(json_escape "$TRACE_ID")\",\"span_id\":\"$(json_escape "$SPAN_ID")\""
+    fi
+    local payload="{\"event\":\"worker_completed\",\"worker_id\":\"$esc_id\",\"status\":\"$status\",\"exit_code\":$esc_ec,\"duration_ms\":${duration_ms:-0},\"working_directory\":\"$esc_cwd\",\"reason_code\":$esc_rcode${trace_json}}"
     write_event "$payload"
 }
 
 emit_orchestration_completed() {
     local result="$1" exit_code="$2"
-    local payload="{\"event\":\"orchestration_completed\",\"result\":\"$result\",\"exit_code\":$exit_code}"
+    local trace_json=""
+    if [ -n "$TRACE_ID" ]; then
+        trace_json=",\"trace_id\":\"$(json_escape "$TRACE_ID")\",\"span_id\":\"$(json_escape "$SPAN_ID")\""
+    fi
+    local payload="{\"event\":\"orchestration_completed\",\"result\":\"$result\",\"exit_code\":$exit_code${trace_json}}"
     write_event "$payload"
 }
 
@@ -397,6 +438,58 @@ while [ $# -gt 0 ]; do
             CLEANUP=1
             shift
             ;;
+        --sandbox)
+            if [ $# -lt 2 ]; then
+                echo "ERROR: --sandbox requires a value ('none', 'docker', or 'podman')." >&2
+                exit 1
+            fi
+            SANDBOX="$2"
+            shift 2
+            ;;
+        --sandbox=*)
+            SANDBOX="${1#*=}"
+            shift
+            ;;
+        --sandbox-image)
+            if [ $# -lt 2 ]; then
+                echo "ERROR: --sandbox-image requires an image name." >&2
+                exit 1
+            fi
+            SANDBOX_IMAGE="$2"
+            shift 2
+            ;;
+        --sandbox-image=*)
+            SANDBOX_IMAGE="${1#*=}"
+            shift
+            ;;
+        --review)
+            REVIEW=1
+            shift
+            ;;
+        --hooks)
+            if [ $# -lt 2 ]; then
+                echo "ERROR: --hooks requires a directory path." >&2
+                exit 1
+            fi
+            HOOKS_DIR="$2"
+            shift 2
+            ;;
+        --hooks=*)
+            HOOKS_DIR="${1#*=}"
+            shift
+            ;;
+        --traceparent)
+            if [ $# -lt 2 ]; then
+                echo "ERROR: --traceparent requires a W3C Trace Context value." >&2
+                exit 1
+            fi
+            TRACE_ID="$2"
+            shift 2
+            ;;
+        --traceparent=*)
+            TRACE_ID="${1#*=}"
+            shift
+            ;;
         --worker)
             if [ $# -lt 2 ]; then
                 echo "ERROR: --worker requires a command." >&2
@@ -448,6 +541,36 @@ done
 # Resolve worker from env if not supplied via flag
 if [ -z "$WORKER_CMD" ] && [ -n "${AGENTIC_WORKER_CMD:-}" ]; then
     WORKER_CMD="$AGENTIC_WORKER_CMD"
+fi
+
+# Resolve sandbox from env if not supplied via flag
+if [ "$SANDBOX" = "none" ] && [ -n "${AGENTIC_WORKER_SANDBOX:-}" ]; then
+    SANDBOX="$AGENTIC_WORKER_SANDBOX"
+fi
+if [ -z "$SANDBOX_IMAGE" ] && [ -n "${AGENTIC_WORKER_SANDBOX_IMAGE:-}" ]; then
+    SANDBOX_IMAGE="$AGENTIC_WORKER_SANDBOX_IMAGE"
+fi
+
+# Resolve traceparent from env if not supplied via flag
+if [ -z "$TRACE_ID" ] && [ -n "${TRACEPARENT:-}" ]; then
+    TRACE_ID="$TRACEPARENT"
+fi
+
+# Parse W3C Trace Context: extract trace_id (bytes 2-33) and span_id (bytes 35-50)
+if [ -n "$TRACE_ID" ]; then
+    # Format: 00-{trace_id}-{span_id}-{flags}
+    _tp="$TRACE_ID"
+    case "$_tp" in
+        00-[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]-[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]-[0-9a-fA-F][0-9a-fA-F])
+            TRACE_ID="${_tp:3:32}"
+            SPAN_ID="${_tp:36:16}"
+            ;;
+        *)
+            # Invalid format; clear to avoid bad data in events
+            TRACE_ID=""
+            SPAN_ID=""
+            ;;
+    esac
 fi
 
 case "$(printf '%s' "$FORMAT" | tr '[:upper:]' '[:lower:]')" in
@@ -816,6 +939,11 @@ case "$cwd_rel" in
     *) cwd_rel="./$cwd_rel" ;;
 esac
 
+# --- Pre-spawn hook ---
+if [ -n "$HOOKS_DIR" ] && [ -d "$HOOKS_DIR" ] && [ -x "$HOOKS_DIR/pre-spawn" ]; then
+    "$HOOKS_DIR/pre-spawn" "$TASK_FILE" "$WORKTREE_ABS" 2>&1 | log || true
+fi
+
 if [ -n "$EVENTS_FILE" ]; then
     if ! emit_worker_started "$worker_id" "$cwd_rel"; then
         echo "ERROR: failed to write worker_started event." >&2
@@ -824,25 +952,56 @@ if [ -n "$EVENTS_FILE" ]; then
     fi
 fi
 
-start_ms="$(python3 -c 'import time; print(int(time.time()*1000))' 2>/dev/null || python -c 'import time; print(int(time.time()*1000))' 2>/dev/null || echo 0)"
+start_ms="$(date +%s%3N 2>/dev/null || echo 0)"
 check_ok=0
 worker_exit=0
 
-# Execute worker with stdout/stderr handling: keep JSON stdout clean
-if [ "$FORMAT" = "json" ]; then
-    (cd "$WORKTREE_ABS" && bash -c "$WORKER_CMD") >&2 && check_ok=1
-    worker_exit=$?
+# Execute worker — sandbox or direct
+case "$SANDBOX" in
+    docker|podman)
+        container_runtime="$SANDBOX"
+        if ! command -v "$container_runtime" >/dev/null 2>&1; then
+            echo "WARNING: $container_runtime not available, falling back to direct execution." >&2
+            SANDBOX="none"
+        fi
+        ;;
+    none) ;;
+    *)
+        echo "ERROR: --sandbox must be 'none', 'docker', or 'podman' (got '$SANDBOX')." >&2
+        rm -f "$LOCK_FILE" 2>/dev/null || true
+        exit 1
+        ;;
+esac
+
+if [ "$SANDBOX" != "none" ]; then
+    # Container sandbox: mount the worktree, run worker inside
+    _image="${SANDBOX_IMAGE:-ubuntu:24.04}"
+    _worker_escaped="$(printf '%s' "$WORKER_CMD" | sed "s/'/'\\\\''/g")"
+    if [ "$FORMAT" = "json" ]; then
+        (cd "$WORKTREE_ABS" && "$container_runtime" run --rm -v "$(pwd):/work" -w /work "$_image" bash -c "$_worker_escaped") >&2 && check_ok=1
+        worker_exit=$?
+    else
+        (cd "$WORKTREE_ABS" && "$container_runtime" run --rm -v "$(pwd):/work" -w /work "$_image" bash -c "$_worker_escaped") && check_ok=1
+        worker_exit=$?
+    fi
 else
-    (cd "$WORKTREE_ABS" && bash -c "$WORKER_CMD") && check_ok=1
-    worker_exit=$?
+    # Direct execution in worktree (existing behavior)
+    if [ "$FORMAT" = "json" ]; then
+        (cd "$WORKTREE_ABS" && bash -c "$WORKER_CMD") >&2 && check_ok=1
+        worker_exit=$?
+    else
+        (cd "$WORKTREE_ABS" && bash -c "$WORKER_CMD") && check_ok=1
+        worker_exit=$?
+    fi
 fi
+
 if [ "$check_ok" -eq 1 ]; then
     worker_exit=0
 else
     [ "$worker_exit" -eq 0 ] && worker_exit=1
 fi
 
-end_ms="$(python3 -c 'import time; print(int(time.time()*1000))' 2>/dev/null || python -c 'import time; print(int(time.time()*1000))' 2>/dev/null || echo 0)"
+end_ms="$(date +%s%3N 2>/dev/null || echo 0)"
 duration_ms=$(( end_ms - start_ms ))
 [ "$duration_ms" -ge 0 ] || duration_ms=0
 
@@ -850,7 +1009,6 @@ status="PASS"
 reason_code="null"
 exit_code_str="0"
 if [ "$check_ok" -eq 0 ]; then
-    # Detect tooling unavailable (command not found 127, permission 126)
     if [ "$worker_exit" -eq 127 ] || [ "$worker_exit" -eq 126 ]; then
         status="BLOCKED"
         reason_code="TOOLING_UNAVAILABLE"
@@ -884,6 +1042,11 @@ if [ -n "$EVENTS_FILE" ]; then
     fi
 fi
 
+# --- Post-worker hook ---
+if [ -n "$HOOKS_DIR" ] && [ -d "$HOOKS_DIR" ] && [ -x "$HOOKS_DIR/post-worker" ]; then
+    "$HOOKS_DIR/post-worker" "$TASK_FILE" "$WORKTREE_ABS" 2>&1 | log || true
+fi
+
 # Build workers JSON and summary
 if [ "$status" = "PASS" ]; then
     workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"PASS\",\"exit_code\":0,\"duration_ms\":$duration_ms,\"reason_code\":null}"
@@ -902,11 +1065,56 @@ else
     exit_code=2
 fi
 
+# --- Review stage (runs only when --review is set and worker passed) ---
+review_failed=0
+if [ "$REVIEW" -eq 1 ] && [ "$result" = "PASS" ]; then
+    log "Running review stage (validate-task, validate-context, validate-skills)..."
+    _scripts_dir="$(cd "$(dirname "$0")" && pwd)"
+    _task_in_worktree="$WORKTREE_ABS/$TASK_ID.md"
+    # Fallback: use the original task file if not found in worktree
+    if [ ! -f "$_task_in_worktree" ]; then
+        _task_in_worktree="$TASK_FILE"
+    fi
+    # validate-task
+    if [ -x "$_scripts_dir/validate-task.sh" ] || [ -f "$_scripts_dir/validate-task.sh" ]; then
+        if ! bash "$_scripts_dir/validate-task.sh" --handoff "$_task_in_worktree" 2>&1 | log; then
+            review_failed=1
+        fi
+    fi
+    # validate-context
+    if [ "$review_failed" -eq 0 ] && [ -x "$_scripts_dir/validate-context.sh" ] || [ -f "$_scripts_dir/validate-context.sh" ]; then
+        if ! bash "$_scripts_dir/validate-context.sh" --handoff "$_task_in_worktree" 2>&1 | log; then
+            review_failed=1
+        fi
+    fi
+    # validate-skills
+    if [ "$review_failed" -eq 0 ] && [ -x "$_scripts_dir/validate-skills.sh" ] || [ -f "$_scripts_dir/validate-skills.sh" ]; then
+        if ! bash "$_scripts_dir/validate-skills.sh" --handoff "$_task_in_worktree" 2>&1 | log; then
+            review_failed=1
+        fi
+    fi
+    if [ "$review_failed" -eq 1 ]; then
+        status="FAIL"
+        reason_code="REVIEW_FAILED"
+        result="FAIL"
+        exit_code=1
+        workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"FAIL\",\"exit_code\":1,\"duration_ms\":$duration_ms,\"reason_code\":\"REVIEW_FAILED\"}"
+        summary_json="{\"workers_defined\":1,\"workers_run\":1,\"passed\":0,\"failed\":1,\"blocked\":0}"
+        log "Review stage failed; marking orchestration as FAIL."
+    else
+        log "Review stage passed."
+    fi
+fi
+
+# --- Post-review hook ---
+if [ -n "$HOOKS_DIR" ] && [ -d "$HOOKS_DIR" ] && [ -x "$HOOKS_DIR/post-review" ]; then
+    "$HOOKS_DIR/post-review" "$TASK_FILE" "$WORKTREE_ABS" 2>&1 | log || true
+fi
+
 # Handle remote write if requested and worker passed
 if [ "$PUSH" -eq 1 ] && [ "$result" = "PASS" ]; then
     log "Pushing branch $worktree_branch..."
     if ! git -C "$WORKTREE_ABS" push origin "$worktree_branch" 2>&1 | while IFS= read -r line; do log "$line"; done; then
-        # Push failed -> FAIL
         workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"FAIL\",\"exit_code\":1,\"duration_ms\":$duration_ms,\"reason_code\":\"WORKER_FAILED\"}"
         summary_json="{\"workers_defined\":1,\"workers_run\":1,\"passed\":0,\"failed\":1,\"blocked\":0}"
         result="FAIL"
@@ -919,7 +1127,6 @@ fi
 
 if [ "$CLEANUP" -eq 1 ]; then
     git worktree remove --force "$WORKTREE_ABS" 2>/dev/null || rm -rf "$WORKTREE_ABS" 2>/dev/null || true
-    # Do not delete branch on cleanup unless explicitly wanted; keep for inspection
     log "Cleaned up worktree $WORKTREE_REL"
 fi
 
