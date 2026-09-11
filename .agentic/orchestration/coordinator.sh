@@ -965,11 +965,9 @@ esac
 if [ -n "$HOOKS_DIR" ] && [ -d "$HOOKS_DIR" ] && [ -x "$HOOKS_DIR/pre-spawn" ]; then
     if ! "$HOOKS_DIR/pre-spawn" "$TASK_FILE" "$WORKTREE_ABS" 2>&1 | log; then
         echo "ERROR: pre-spawn hook failed; aborting." >&2
-        if [ -n "$EVENTS_FILE" ]; then
-            emit_orchestration_completed "FAIL" 1 2>/dev/null || true
-        fi
-        rm -f "$LOCK_FILE" 2>/dev/null || true
-        exit 1
+        workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"BLOCKED\",\"exit_code\":null,\"duration_ms\":0,\"reason_code\":\"WORKER_BLOCKED\"}"
+        summary_json="{\"workers_defined\":1,\"workers_run\":0,\"passed\":0,\"failed\":0,\"blocked\":1}"
+        complete_orchestration "BLOCKED" 2 "$workers_json" "$summary_json"
     fi
 fi
 
@@ -983,9 +981,6 @@ case "$SANDBOX" in
         container_runtime="$SANDBOX"
         if ! command -v "$container_runtime" >/dev/null 2>&1; then
             echo "ERROR: $container_runtime not available; requested --sandbox $container_runtime is BLOCKED." >&2
-            if [ -n "$EVENTS_FILE" ]; then
-                emit_worker_completed "$worker_id" "BLOCKED" "null" "0" "$cwd_rel" "TOOLING_UNAVAILABLE" 2>/dev/null || true
-            fi
             status="BLOCKED"
             reason_code="TOOLING_UNAVAILABLE"
             workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"BLOCKED\",\"exit_code\":null,\"duration_ms\":0,\"reason_code\":\"TOOLING_UNAVAILABLE\"}"
@@ -1097,12 +1092,15 @@ fi
 if [ -n "$HOOKS_DIR" ] && [ -d "$HOOKS_DIR" ] && [ -x "$HOOKS_DIR/post-worker" ]; then
     if ! "$HOOKS_DIR/post-worker" "$TASK_FILE" "$WORKTREE_ABS" 2>&1 | log; then
         echo "ERROR: post-worker hook failed; aborting." >&2
-        if [ -n "$EVENTS_FILE" ]; then
-            emit_worker_completed "$worker_id" "BLOCKED" "null" "0" "$cwd_rel" "WORKER_BLOCKED" 2>/dev/null || true
-            emit_orchestration_completed "FAIL" 1 2>/dev/null || true
+        if [ "$status" = "PASS" ]; then
+            workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"PASS\",\"exit_code\":0,\"duration_ms\":$duration_ms,\"reason_code\":null}"
+        elif [ "$status" = "BLOCKED" ]; then
+            workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"BLOCKED\",\"exit_code\":null,\"duration_ms\":$duration_ms,\"reason_code\":\"$reason_code\"}"
+        else
+            workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"FAIL\",\"exit_code\":$worker_exit,\"duration_ms\":$duration_ms,\"reason_code\":\"WORKER_FAILED\"}"
         fi
-        rm -f "$LOCK_FILE" 2>/dev/null || true
-        exit 1
+        summary_json="{\"workers_defined\":1,\"workers_run\":1,\"passed\":0,\"failed\":1,\"blocked\":0}"
+        complete_orchestration "FAIL" 1 "$workers_json" "$summary_json"
     fi
 fi
 
@@ -1134,35 +1132,46 @@ if [ "$REVIEW" -eq 1 ] && [ "$result" = "PASS" ]; then
         _scripts_dir="$PROJECT_ROOT/.agentic/scripts"
     fi
     _task_rel="${TASK_FILE#./}"
+    # Normalize absolute task paths relative to PROJECT_ROOT
+    case "$_task_rel" in
+        /*|/[A-Za-z]*)
+            case "$_task_rel" in
+                "$PROJECT_ROOT"/*) _task_rel="${_task_rel#"$PROJECT_ROOT"/}" ;;
+            esac
+            _task_rel="$_task_rel"
+            ;;
+    esac
     _task_in_worktree="$WORKTREE_ABS/$_task_rel"
     # Fallback: use basename in case task was moved
     if [ ! -f "$_task_in_worktree" ]; then
         _task_in_worktree="$WORKTREE_ABS/$(basename "$TASK_FILE")"
     fi
-    _validators_found=0
+    _vt_exists=0
+    _vc_exists=0
+    _vs_exists=0
     # validate-task
     if [ -x "$_scripts_dir/validate-task.sh" ] || [ -f "$_scripts_dir/validate-task.sh" ]; then
-        _validators_found=1
+        _vt_exists=1
         if ! bash "$_scripts_dir/validate-task.sh" --handoff "$_task_in_worktree" 2>&1 | log; then
             review_failed=1
         fi
     fi
     # validate-context
     if [ "$review_failed" -eq 0 ] && { [ -x "$_scripts_dir/validate-context.sh" ] || [ -f "$_scripts_dir/validate-context.sh" ]; }; then
-        _validators_found=1
+        _vc_exists=1
         if ! bash "$_scripts_dir/validate-context.sh" --handoff "$_task_in_worktree" 2>&1 | log; then
             review_failed=1
         fi
     fi
     # validate-skills
     if [ "$review_failed" -eq 0 ] && { [ -x "$_scripts_dir/validate-skills.sh" ] || [ -f "$_scripts_dir/validate-skills.sh" ]; }; then
-        _validators_found=1
+        _vs_exists=1
         if ! bash "$_scripts_dir/validate-skills.sh" --handoff "$_task_in_worktree" 2>&1 | log; then
             review_failed=1
         fi
     fi
-    if [ "$_validators_found" -eq 0 ]; then
-        log "WARNING: no validator scripts found; review BLOCKED."
+    if [ "$_vt_exists" -eq 0 ] || [ "$_vc_exists" -eq 0 ] || [ "$_vs_exists" -eq 0 ]; then
+        log "WARNING: missing validator scripts (validate-task=$_vt_exists validate-context=$_vc_exists validate-skills=$_vs_exists); review BLOCKED."
         review_failed=1
     fi
     if [ "$review_failed" -eq 1 ]; then

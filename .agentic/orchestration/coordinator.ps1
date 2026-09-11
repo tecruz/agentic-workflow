@@ -139,7 +139,7 @@ $TraceFlags = "01"
 if (-not [string]::IsNullOrWhiteSpace($Traceparent)) {
     # Format: 00-{trace_id}-{span_id}-{flags}
     $tpParts = $Traceparent -split '-'
-    if ($tpParts.Count -eq 4 -and $tpParts[0] -eq "00" -and $tpParts[1].Length -eq 32 -and $tpParts[2].Length -eq 16 -and $tpParts[1] -match '^[0-9a-fA-F]+$' -and $tpParts[2] -match '^[0-9a-fA-F]+$') {
+    if ($tpParts.Count -eq 4 -and $tpParts[0] -eq "00" -and $tpParts[1].Length -eq 32 -and $tpParts[2].Length -eq 16 -and $tpParts[1] -match '^[0-9a-fA-F]+$' -and $tpParts[2] -match '^[0-9a-fA-F]+$' -and $tpParts[3] -match '^[0-9a-fA-F]{2}$') {
         $TraceId = $tpParts[1]
         $SpanId = $tpParts[2]
         $TraceFlags = $tpParts[3]
@@ -611,9 +611,11 @@ if (-not [string]::IsNullOrWhiteSpace($Hooks) -and (Test-Path -LiteralPath $Hook
         try { & $preSpawnHook $TaskFile $worktreeAbs 2>&1 | Write-Host; if ($LASTEXITCODE -ne 0) { throw "hook failed" } }
         catch {
             Write-Host "ERROR: pre-spawn hook failed; aborting." -ForegroundColor Red
-            if (-not [string]::IsNullOrWhiteSpace($Events)) { try { Emit-OrchestrationCompleted "FAIL" 1 } catch {} }
-            Remove-Item -LiteralPath $lockFile -Force -ErrorAction SilentlyContinue
-            exit 1
+            $wJson = '{"worker_id":' + (ConvertTo-Json $taskId -Compress) + ',"status":"BLOCKED","exit_code":null,"duration_ms":0,"reason_code":"WORKER_BLOCKED"}'
+            $sJson = '{"workers_defined":1,"workers_run":0,"passed":0,"failed":0,"blocked":1}'
+            $disp = Get-DisplayPath $TaskFile
+            $wtDisp = "./$worktreeRel"
+            Complete-Orchestration "BLOCKED" 2 $wJson $sJson $disp $wtDisp
         }
     }
 }
@@ -627,7 +629,6 @@ switch ($Sandbox) {
     { $_ -in "docker", "podman" } {
         if (-not (Get-Command $Sandbox -ErrorAction SilentlyContinue)) {
             Write-Host "ERROR: $Sandbox not available; requested --sandbox $Sandbox is BLOCKED." -ForegroundColor Red
-            if (-not [string]::IsNullOrWhiteSpace($Events)) { Emit-WorkerCompleted $taskId "BLOCKED" $null 0 $cwdRel "TOOLING_UNAVAILABLE" }
             $status = "BLOCKED"; $reason = "TOOLING_UNAVAILABLE"; $result = "BLOCKED"; $exitCode = 2
             $workersJson = '{"worker_id":' + (ConvertTo-Json $taskId -Compress) + ',"status":"BLOCKED","exit_code":null,"duration_ms":0,"reason_code":"TOOLING_UNAVAILABLE"}'
             $summaryJson = '{"workers_defined":1,"workers_run":0,"passed":0,"failed":0,"blocked":1}'
@@ -699,12 +700,16 @@ if (-not [string]::IsNullOrWhiteSpace($Hooks) -and (Test-Path -LiteralPath $Hook
         try { & $postWorkerHook $TaskFile $worktreeAbs 2>&1 | Write-Host; if ($LASTEXITCODE -ne 0) { throw "hook failed" } }
         catch {
             Write-Host "ERROR: post-worker hook failed; aborting." -ForegroundColor Red
-            if (-not [string]::IsNullOrWhiteSpace($Events)) {
-                Emit-WorkerCompleted $taskId "BLOCKED" $null 0 $cwdRel "WORKER_BLOCKED"
-                try { Emit-OrchestrationCompleted "FAIL" 1 } catch {}
+            if ($status -eq "PASS") {
+                $workersJson = '{"worker_id":' + (ConvertTo-Json $taskId -Compress) + ',"status":"PASS","exit_code":0,"duration_ms":' + $durationMs + ',"reason_code":null}'
+            } elseif ($status -eq "BLOCKED") {
+                $workersJson = '{"worker_id":' + (ConvertTo-Json $taskId -Compress) + ',"status":"BLOCKED","exit_code":null,"duration_ms":' + $durationMs + ',"reason_code":' + (ConvertTo-Json $reason -Compress) + '}'
+            } else {
+                $workersJson = '{"worker_id":' + (ConvertTo-Json $taskId -Compress) + ',"status":"FAIL","exit_code":' + $workerExit + ',"duration_ms":' + $durationMs + ',"reason_code":"WORKER_FAILED"}'
             }
-            Remove-Item -LiteralPath $lockFile -Force -ErrorAction SilentlyContinue
-            exit 1
+            $summaryJson = '{"workers_defined":1,"workers_run":1,"passed":0,"failed":1,"blocked":0}'
+            $disp = Get-DisplayPath $TaskFile
+            Complete-Orchestration "FAIL" 1 $workersJson $summaryJson $disp $cwdRel
         }
     }
 }
@@ -737,11 +742,13 @@ if ($Review -and $result -eq "PASS") {
     # Fallback: use basename in case task was moved
     if (-not (Test-Path -LiteralPath $taskInWorktree -PathType Leaf)) { $taskInWorktree = Join-Path $worktreeAbs (Split-Path -Leaf $TaskFile) }
 
-    $validatorsFound = $false
+    $vtExists = $false
+    $vcExists = $false
+    $vsExists = $false
     # validate-task
     $vtScript = Join-Path $scriptsDir "validate-task.ps1"
     if (Test-Path -LiteralPath $vtScript -PathType Leaf) {
-        $validatorsFound = $true
+        $vtExists = $true
         try { & pwsh -NoProfile -File $vtScript -Handoff -TaskFile $taskInWorktree 2>&1 | Write-Host } catch { $reviewFailed = $true }
         if ($LASTEXITCODE -ne 0) { $reviewFailed = $true }
     }
@@ -749,7 +756,7 @@ if ($Review -and $result -eq "PASS") {
     if (-not $reviewFailed) {
         $vcScript = Join-Path $scriptsDir "validate-context.ps1"
         if (Test-Path -LiteralPath $vcScript -PathType Leaf) {
-            $validatorsFound = $true
+            $vcExists = $true
             try { & pwsh -NoProfile -File $vcScript -Handoff -TaskFile $taskInWorktree 2>&1 | Write-Host } catch { $reviewFailed = $true }
             if ($LASTEXITCODE -ne 0) { $reviewFailed = $true }
         }
@@ -758,13 +765,13 @@ if ($Review -and $result -eq "PASS") {
     if (-not $reviewFailed) {
         $vsScript = Join-Path $scriptsDir "validate-skills.ps1"
         if (Test-Path -LiteralPath $vsScript -PathType Leaf) {
-            $validatorsFound = $true
+            $vsExists = $true
             try { & pwsh -NoProfile -File $vsScript -Handoff -TaskFile $taskInWorktree 2>&1 | Write-Host } catch { $reviewFailed = $true }
             if ($LASTEXITCODE -ne 0) { $reviewFailed = $true }
         }
     }
-    if (-not $validatorsFound) {
-        Write-Log "WARNING: no validator scripts found; review BLOCKED."
+    if (-not $vtExists -or -not $vcExists -or -not $vsExists) {
+        Write-Log "WARNING: missing validator scripts (validate-task=$vtExists validate-context=$vcExists validate-skills=$vsExists); review BLOCKED."
         $reviewFailed = $true
     }
     if ($reviewFailed) {
