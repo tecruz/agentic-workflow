@@ -1073,7 +1073,7 @@ SHIM
     [ -f "$BUNDLE/.agentic/scripts/health-report.sh" ]
     [ -f "$BUNDLE/.agentic/scripts/health-report.ps1" ]
     [ -f "$BUNDLE/.agentic/context/INDEX.md" ]
-    for mod in security-review database-migrations dependency-changes infrastructure-change public-api-change performance accessibility i18n mobile-adaptive testing-infrastructure data-integrity api-design-patterns error-handling; do
+    for mod in security-review database-migrations dependency-changes infrastructure-change public-api-change performance accessibility i18n mobile-adaptive testing-infrastructure data-integrity api-design-patterns error-handling mcp-tool-governance; do
         [ -f "$BUNDLE/.agentic/context/$mod/MODULE.md" ]
     done
     [ -f "$BUNDLE/.agentic/schemas/context-selection-v1.schema.json" ]

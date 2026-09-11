@@ -32,8 +32,10 @@ requires escalation. No dependencies added; no files deleted.
 - AC-2: MCP/A2A doc tables updated — README tool tables and AGENTS.md §6
   record the MCP/A2A relationship with pointers to the orchestration README.
 - AC-3: Goal-condition support lands — `.agentic/templates/task.md` gains an
-  optional `## Goal conditions` section (exit-0 definition of done);
-  validators are untouched (unknown sections are ignored by contract).
+  optional `## Goal conditions` section (exit-0 definition of done); both
+  task validators enforce the canonical form and ship an opt-in
+  `--run-goals` / `-RunGoals` execution mode; fixtures, golden rows, and
+  Bats/Pester tests cover the contract.
 - AC-4: Spec-pipeline eval coverage — 2 new offline scenarios
   (`mcp-tool-governance`, `spec-pipeline-chain`); corpus 17→19 with both
   eval twins 19/19; JsonContracts counts updated (17→19 docs, 15→17
@@ -50,7 +52,7 @@ requires escalation. No dependencies added; no files deleted.
 | --- | --- | --- |
 | AC-1 | Fresh-install + bundle contain mcp-tool-governance as managed; install suites green | passed |
 | AC-2 | README + AGENTS.md diff shows MCP/A2A rows | passed |
-| AC-3 | task.md template diff; validate-task --handoff on TASK-037 VALID | passed |
+| AC-3 | task.md template diff; canonical-form enforcement + --run-goals in both twins; 5 fixtures + golden rows + Bats/Pester tests; validate-task --handoff on TASK-037 VALID | passed |
 | AC-4 | run-evals twins 19/19; JsonContracts counts updated | passed |
 | AC-5 | Sweep check: all gate paths agree on 1.15.0; CHANGELOG/ROADMAP/STATUS/ADR-0016 present | passed |
 | AC-6 | Pester suites green (417 passed / 0 failed); Bats legs deferred to CI | passed |
@@ -73,10 +75,13 @@ requires escalation. No dependencies added; no files deleted.
 
 - .agentic/context/mcp-tool-governance/MODULE.md (new)
 - .agentic/context/INDEX.md
+- .agentic/scripts/validate-task.sh, .agentic/scripts/validate-task.ps1 (goal canonical-form check + --run-goals/-RunGoals)
 - install.sh, install.ps1, scripts/build-bundle.sh
 - tests/bats/install_test.bats, tests/pester/Install.Tests.ps1
 - tests/fixtures/context-tasks/context-mcp-tool-governance-*.md (new, 4 files)
 - tests/bats/validate_context_test.bats, tests/pester/ValidateContext.Tests.ps1
+- tests/fixtures/tasks/goal-*.md (new, 5 files), tests/parity/task-expectations.tsv
+- tests/bats/validate_task_test.bats, tests/pester/ValidateTask.Tests.ps1
 - README.md, AGENTS.md
 - .agentic/templates/task.md
 - evals/generate-scenarios.ps1, evals/scenarios/mcp-tool-governance/*, evals/scenarios/spec-pipeline-chain/* (new)

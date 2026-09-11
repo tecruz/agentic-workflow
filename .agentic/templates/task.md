@@ -37,9 +37,11 @@ Profile: standard
 
 <!-- Optional exit-0 definition of done (spec-pipeline goal support): one
 bullet per machine-checkable end state, each phrased as "Exit 0 when: ...".
-Validators ignore this section. Keep it free of AC-N / R-N / AG-N
-identifiers (those belong to their canonical sections). Omit the section
-when goal conditions add no signal beyond the acceptance criteria. -->
+Validators enforce the canonical form and reject prose or non-canonical
+lines; run 'validate-task --run-goals <file>' to execute each command and
+require exit 0. Keep bullets free of AC-N / R-N / AG-N identifiers (those
+belong to their canonical sections). Omit the section when goal conditions
+add no signal beyond the acceptance criteria. -->
 
 ## Approval gates
 

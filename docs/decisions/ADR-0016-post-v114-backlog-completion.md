@@ -26,11 +26,15 @@ status.
    No new validator or schema is introduced: the module is evolutionary
    registry data, so no protocol-breaking change results.
 
-2. **Goal conditions are an optional, validator-ignored template section.**
+2. **Goal conditions are a validated, executable template section.**
    `## Goal conditions` in `task.md` states the exit-0 definition of
-   done, one bullet per machine-checkable end state. Validators ignore
-   unknown sections by contract, so existing task files validate
-   unchanged and no validator change ships with this decision.
+   done, one bullet per machine-checkable end state. Both task
+   validators enforce the canonical `- Exit 0 when: <command>` form
+   (reusing the in-schema `CRITERION_INVALID` code, so no schema change
+   ships), and a new opt-in `--run-goals` / `-RunGoals` mode executes
+   each command in the working directory and requires exit 0. Unknown
+   sections remain ignored by contract, so existing task files validate
+   unchanged.
 
 3. **Spec-pipeline coverage is behavioral, not structural.** The eval
    harness classifies task files; it cannot verify cross-file SPEC →

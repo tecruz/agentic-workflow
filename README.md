@@ -530,6 +530,8 @@ CI on any mismatch. Both the Bats and Pester suites run on all three platforms;
 | **GitHub Copilot** | Supports `AGENTS.md` files; opt-in `--tools copilot` adds `.github/instructions/agentic-protocol.instructions.md` (pointer only) |
 | **Aider** | `.aider.conf.yml` reads `AGENTS.md` + `.agentic/WORKFLOW.md` |
 | **Codex CLI and other `AGENTS.md`-native tools** | No adapter needed; install with the default `--tools` set |
+| **MCP servers** | Adjacent protocol, not a loader: expose tools to agents; govern with `mcp-tool-governance` (see MCP and A2A) |
+| **A2A peers** | Adjacent protocol, not a loader: delegate across agents; isolate via coordinator worktrees (see MCP and A2A) |
 
 Entry points contain only imports or pointers — never duplicated protocol
 content. Change the protocol in **one place** (`AGENTS.md`) and every tool

@@ -16,11 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   assertions, four validate-context fixtures with golden outcome tests,
   and a dedicated eval scenario. All 14 context modules now have
   registry, installer, fixture, and eval coverage. (TASK-037)
-- **Goal-condition support in the task template.** `.agentic/templates/task.md`
+- **Verifiable goal-condition support in the task template.** `.agentic/templates/task.md`
   gains an optional `## Goal conditions` section: one bullet per
-  machine-checkable end state phrased as "Exit 0 when: ...". Validators
-  ignore unknown sections by contract, so existing task files validate
-  unchanged and no validator change ships. (TASK-037)
+  machine-checkable end state phrased as "Exit 0 when: ...". Both task
+  validators enforce the canonical form (`CRITERION_INVALID` otherwise),
+  and a new opt-in `--run-goals` / `-RunGoals` mode executes each command
+  and requires exit 0. Five new fixtures with golden expectations plus
+  Bats/Pester execution tests cover the contract. (TASK-037)
 - **Spec-pipeline eval coverage.** New `spec-pipeline-chain` scenario
   carries a `## Goal conditions` section through all three production
   validators end to end. Corpus is 19 scenarios; both eval twins

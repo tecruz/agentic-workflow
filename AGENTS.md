@@ -115,6 +115,8 @@ Reusable procedures live in the on-demand registry under `.agentic/skills/` — 
 | **GitHub Copilot** | Supports one or more repository `AGENTS.md` files; opt-in `--tools copilot` adds `.github/instructions/agentic-protocol.instructions.md` (`applyTo: **`, pointer only) |
 | **Aider** | `.aider.conf.yml` reads `AGENTS.md` and `.agentic/WORKFLOW.md` |
 | **Codex CLI and other `AGENTS.md`-native tools** | No adapter needed; install with the default `--tools` set |
+| **MCP servers** | Adjacent protocol, not a loader: expose tools to agents; govern with `mcp-tool-governance` (see MCP and A2A) |
+| **A2A peers** | Adjacent protocol, not a loader: delegate across agents; isolate via coordinator worktrees (see MCP and A2A) |
 
 Entry points contain only imports or pointers — never duplicated protocol content.
 

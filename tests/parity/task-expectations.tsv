@@ -50,6 +50,11 @@ duplicate-updated-invalid.md	1	INVALID: task must declare exactly one 'Updated:'
 emoji-only-approver-invalid.md	1	INVALID: approval gate must record a meaningful approver.
 emoji-only-evidence-blocked.md	2	BLOCKED: row has a placeholder evidence description.
 first-id-placeholder-second-id-real-blocked.md	2	BLOCKED: entry has a placeholder description.
+goal-conditions-empty.md	1	INVALID: goal conditions must declare at least one '- Exit 0 when: <command>' entry.
+goal-conditions-malformed.md	1	INVALID: goal conditions must use the form '- Exit 0 when: <command>'; identifiers may not appear in prose or non-canonical lines.
+goal-conditions-valid.md	0	VALID: profile=standard
+goal-run-fail.md	0	VALID: profile=standard
+goal-run-pass.md	0	VALID: profile=standard
 headings-in-fenced-code.md	1	INVALID: missing required section '## profile rationale' for profile 'standard'.
 high-assurance-bracket-placeholder-invalid.md	1	INVALID: high-assurance section '## risk analysis' must contain real content (no headings, placeholders, or separators).
 high-assurance-completed-missing-approval.md	2	BLOCKED: task is marked complete but an approval gate remains unchecked.
