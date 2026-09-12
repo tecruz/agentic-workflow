@@ -1179,14 +1179,12 @@ run_goal_conditions() {
     while IFS= read -r line || [ -n "$line" ]; do
         cmd="$(printf '%s' "$line" | sed -nE 's/^[[:space:]]*[-*+][[:space:]]+[Ee][Xx][Ii][Tt][[:space:]]+0[[:space:]]+[Ww][Hh][Ee][Nn]:[[:space:]]*(.*[^[:space:]])[[:space:]]*$/\1/p')"
         [ -n "$cmd" ] || continue
-        case "$cmd" in
-            *\$(\ *) | *`\ * | *rm\ -rf\ * | *dd\ * | *mkfs\ * | *chmod\ 777\ *)
-                echo "GOAL REJECTED (unsafe): $cmd"
-                failed=$(( failed + 1 ))
-                continue
-                ;;
-        esac
         count=$(( count + 1 ))
+        if printf '%s' "$cmd" | grep -qE '\$\(|`|rm[[:space:]]+-rf|dd[[:space:]]+|mkfs[[:space:]]+|chmod[[:space:]]+777'; then
+            echo "GOAL REJECTED (unsafe): $cmd"
+            failed=$(( failed + 1 ))
+            continue
+        fi
         if timeout 30s bash -c "$cmd" 2>&1; then
             echo "GOAL PASS (exit 0): $cmd"
         else
