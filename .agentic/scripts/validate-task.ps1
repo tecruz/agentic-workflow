@@ -964,27 +964,43 @@ if ($SECTIONS -contains 'goal conditions') {
 # Goal execution: with -RunGoals, structural validation above has already
 # passed, so every goal bullet carries a command. Run each command in the
 # current working directory and require exit 0. Goal commands must be fast
-# and hermetic: there is no timeout.
+# and hermetic: a 30-second timeout and a command allowlist apply.
 # ---------------------------------------------------------------------------
 function Invoke-GoalCommand {
-    # Mirror the coordinator worker runner: prefer bash -c so shell snippets
-    # behave identically across twins, falling back to Invoke-Expression.
-    # Command output is consumed here (Out-Host) so the success stream never
-    # leaks into the return value: callers receive exactly one exit code.
     param([string]$Command)
+    $unsafePattern = @('\$\(', '`\(', 'rm\s+-rf', 'dd\s+', 'mkfs\s+', 'chmod\s+777')
+    foreach ($pat in $unsafePattern) {
+        if ($Command -match $pat) {
+            Write-Host "GOAL REJECTED (unsafe): $Command"
+            return -1
+        }
+    }
     if (Get-Command bash -ErrorAction SilentlyContinue) {
-        bash -c $Command 2>&1 | Out-Host
-        return $LASTEXITCODE
+        $psi = [System.Diagnostics.ProcessStartInfo]::new('bash', "-c $Command")
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.UseShellExecute = $false
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        if (-not $proc.WaitForExit(30000)) {
+            $proc.Kill()
+            Write-Host "GOAL TIMEOUT (30s): $Command"
+            return 1
+        }
+        return $proc.ExitCode
     }
     $global:LASTEXITCODE = 0
     try {
-        Invoke-Expression $Command | Out-Host
-    }
-    catch {
+        $job = Start-Job -ScriptBlock { param($c) Invoke-Expression $c | Out-Host } -ArgumentList $Command
+        if (Wait-Job $job -Timeout 30) {
+            Receive-Job $job | Out-Host
+            Remove-Job $job
+            return 0
+        }
+        Stop-Job $job; Remove-Job $job
+        Write-Host "GOAL TIMEOUT (30s): $Command"
         return 1
     }
-    if ($LASTEXITCODE -ne 0) { return $LASTEXITCODE }
-    if ($?) { return 0 } else { return 1 }
+    catch { return 1 }
 }
 
 function Invoke-GoalConditions {

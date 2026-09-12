@@ -31,8 +31,8 @@ Fixture artifact for the behavioral evaluation harness.
 
 ## Goal conditions
 
-- Exit 0 when the dry-run export completes without errors.
-- Exit 0 when the contract fixtures pass against the chained task files.
+- Exit 0 when: the dry-run export completes without errors.
+- Exit 0 when: the contract fixtures pass against the chained task files.
 
 ## Context modules
 

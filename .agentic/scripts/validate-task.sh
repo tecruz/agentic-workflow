@@ -1179,17 +1179,28 @@ run_goal_conditions() {
     while IFS= read -r line || [ -n "$line" ]; do
         cmd="$(printf '%s' "$line" | sed -nE 's/^[[:space:]]*[-*+][[:space:]]+[Ee][Xx][Ii][Tt][[:space:]]+0[[:space:]]+[Ww][Hh][Ee][Nn]:[[:space:]]*(.*[^[:space:]])[[:space:]]*$/\1/p')"
         [ -n "$cmd" ] || continue
+        case "$cmd" in
+            *\$(\ *) | *`\ * | *rm\ -rf\ * | *dd\ * | *mkfs\ * | *chmod\ 777\ *)
+                echo "GOAL REJECTED (unsafe): $cmd"
+                failed=$(( failed + 1 ))
+                continue
+                ;;
+        esac
         count=$(( count + 1 ))
-        if bash -c "$cmd"; then
+        if timeout 30s bash -c "$cmd" 2>&1; then
             echo "GOAL PASS (exit 0): $cmd"
         else
             code=$?
-            echo "GOAL FAIL (exit $code): $cmd"
+            if [ "$code" -eq 124 ]; then
+                echo "GOAL TIMEOUT (30s): $cmd"
+            else
+                echo "GOAL FAIL (exit $code): $cmd"
+            fi
             failed=$(( failed + 1 ))
         fi
     done <<< "$content"
     if [ "$failed" -gt 0 ]; then
-        echo "Goal conditions failed: $failed of $count goal(s) exited non-zero."
+        echo "Goal conditions failed: $failed of $count goal(s) exited non-zero or timed out."
         return 1
     fi
     echo "Goal conditions passed: $count goal(s) exited 0."
