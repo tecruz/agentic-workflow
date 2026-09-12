@@ -33,6 +33,26 @@ esac
 FAILURES=0
 seen=""
 
+# Locate a usable PowerShell. On WSL/MSYS bash invoked from Windows only
+# 'pwsh.exe' is on PATH (bare 'pwsh' is not); CI's Linux and Git Bash runners
+# resolve 'pwsh' directly, so the fallback is a no-op there.
+find_pwsh() {
+    command -v pwsh 2>/dev/null || command -v pwsh.exe 2>/dev/null
+}
+
+# Translate an absolute POSIX path to a Windows path when pwsh is a Windows
+# binary. MSYS auto-converts arguments, but WSL does not translate
+# '/mnt/c/...' paths for Win32 interop, so the conversion is explicit.
+to_windows_path() {
+    if command -v cygpath >/dev/null 2>&1; then
+        cygpath -w "$1"
+    elif command -v wslpath >/dev/null 2>&1; then
+        wslpath -w "$1"
+    else
+        printf '%s\n' "$1" | sed -E 's#^/(mnt/)?([A-Za-z])/#\U\2:/#'
+    fi
+}
+
 run_one() {  # run_one <fixture> — sets globals code/out for the validator
     local f="$1"
     # stdin is redirected from /dev/null so the validator never inherits this
@@ -42,8 +62,17 @@ run_one() {  # run_one <fixture> — sets globals code/out for the validator
     if [ "$LANG" = "bash" ]; then
         out="$(bash "$VALIDATOR" "$f" < /dev/null 2>&1)" && code=0 || code=$?
     else
-        out="$(pwsh -NoProfile -File "$VALIDATOR" "$f" < /dev/null 2>&1)" && code=0 || code=$?
+        PWSH="$(find_pwsh)" || { echo "run-golden.sh: pwsh not found (tried 'pwsh' and 'pwsh.exe')" >&2; exit 2; }
+        local fixture_path="$f"
+        case "$PWSH" in
+            *.exe) fixture_path="$(to_windows_path "$f")" ;;
+        esac
+        out="$("$PWSH" -NoProfile -File "$VALIDATOR" "$fixture_path" < /dev/null 2>&1)" && code=0 || code=$?
     fi
+    # Normalize CRLF: Windows pwsh.exe emits \r\n, and the golden manifest
+    # stores LF. The golden side already strips a trailing \r; the validator
+    # output needs the same treatment so both legs compare byte-for-byte.
+    out="${out//$'\r'/}"
 }
 
 while IFS=$'\t' read -r name expected_code expected_msg || [ -n "$name" ]; do
