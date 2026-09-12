@@ -19,6 +19,18 @@
 #   --events <path>       JSONL event stream destination (must be under
 #                         .agentic/runs/). Cannot be combined with --format json.
 #   --events-force        Overwrite existing event file.
+#   --sandbox <type>      Worker sandbox mode: none (default), docker, podman.
+#                         Falls back to AGENTIC_WORKER_SANDBOX env var.
+#   --sandbox-image <img> Custom container image for sandbox mode.
+#                         Falls back to AGENTIC_WORKER_SANDBOX_IMAGE env var.
+#   --review              Run task validators (validate-task/context/skills) after
+#                         the worker completes; fails the run on validation errors.
+#   --hooks <dir>         Directory of hook scripts invoked at lifecycle events:
+#                         pre-spawn, post-worker, post-review. Each hook receives
+#                         the task file path as $1 and the worktree as $2.
+#   --traceparent <tp>    W3C Trace Context parent (traceparent header value).
+#                         Falls back to TRACEPARENT env var. Propagated into all
+#                         JSONL events as trace_id / span_id fields.
 #   -h, --help            Show usage.
 #
 # Exit codes:
@@ -33,7 +45,7 @@
 
 set -uo pipefail
 
-PROTOCOL_VERSION="1.14.0"
+PROTOCOL_VERSION="1.15.0"
 FORMAT="text"
 EVENTS_FILE=""
 EVENTS_FORCE=0
@@ -47,6 +59,13 @@ WORKTREE_REL=""
 WORKTREE_ABS=""
 LOCK_FILE=""
 PROJECT_ROOT=""
+SANDBOX="none"
+SANDBOX_IMAGE=""
+REVIEW=0
+HOOKS_DIR=""
+TRACE_ID=""
+SPAN_ID=""
+TRACE_FLAGS="01"
 
 # Event stream scratch (for atomic promotion)
 EVENTS_SCRATCH=""
@@ -66,6 +85,13 @@ Options:
   --format <text|json>  Output format (default text)
   --events <path>       JSONL event stream (must be under .agentic/runs/)
   --events-force        Overwrite existing event file
+  --sandbox <type>      Worker sandbox mode: none (default), docker, podman
+                        (falls back to AGENTIC_WORKER_SANDBOX env var)
+  --sandbox-image <img> Custom container image for sandbox mode
+                        (falls back to AGENTIC_WORKER_SANDBOX_IMAGE env var)
+  --review              Run task validators after worker completes
+  --hooks <dir>         Hook scripts directory (pre-spawn, post-worker, post-review)
+  --traceparent <tp>    W3C Trace Context parent (falls back to TRACEPARENT env var)
   -h, --help            Show this help
 
 Exit codes:
@@ -83,6 +109,21 @@ log() {
     else
         printf '%s\n' "$*"
     fi
+}
+
+now_ms() {
+    if [ -n "${EPOCHREALTIME:-}" ]; then
+        local _sec="${EPOCHREALTIME%%.*}" _frac="${EPOCHREALTIME#*.}000"
+        printf '%s%s' "$_sec" "${_frac:0:3}"
+        return
+    fi
+    local _d
+    _d="$(date +%s%3N 2>/dev/null)" || _d=""
+    if [[ "$_d" =~ ^[0-9]+$ ]]; then
+        printf '%s' "$_d"
+        return
+    fi
+    printf '%d' "$((SECONDS * 1000))"
 }
 
 json_escape() {
@@ -251,7 +292,11 @@ write_event() {
 }
 
 emit_orchestration_started() {
-    write_event '{"event":"orchestration_started"}'
+    local trace_json=""
+    if [ -n "$TRACE_ID" ]; then
+        trace_json=",\"trace_id\":\"$(json_escape "$TRACE_ID")\",\"span_id\":\"$(json_escape "$SPAN_ID")\""
+    fi
+    write_event "{\"event\":\"orchestration_started\"${trace_json}}"
 }
 
 emit_worker_started() {
@@ -259,7 +304,11 @@ emit_worker_started() {
     local esc_id esc_cwd
     esc_id="$(json_escape "$worker_id")"
     esc_cwd="$(json_escape "$cwd_rel")"
-    local payload="{\"event\":\"worker_started\",\"worker_id\":\"$esc_id\",\"working_directory\":\"$esc_cwd\"}"
+    local trace_json=""
+    if [ -n "$TRACE_ID" ]; then
+        trace_json=",\"trace_id\":\"$(json_escape "$TRACE_ID")\",\"span_id\":\"$(json_escape "$SPAN_ID")\""
+    fi
+    local payload="{\"event\":\"worker_started\",\"worker_id\":\"$esc_id\",\"working_directory\":\"$esc_cwd\"${trace_json}}"
     write_event "$payload"
 }
 
@@ -278,13 +327,21 @@ emit_worker_completed() {
     else
         esc_ec="null"
     fi
-    local payload="{\"event\":\"worker_completed\",\"worker_id\":\"$esc_id\",\"status\":\"$status\",\"exit_code\":$esc_ec,\"duration_ms\":${duration_ms:-0},\"working_directory\":\"$esc_cwd\",\"reason_code\":$esc_rcode}"
+    local trace_json=""
+    if [ -n "$TRACE_ID" ]; then
+        trace_json=",\"trace_id\":\"$(json_escape "$TRACE_ID")\",\"span_id\":\"$(json_escape "$SPAN_ID")\""
+    fi
+    local payload="{\"event\":\"worker_completed\",\"worker_id\":\"$esc_id\",\"status\":\"$status\",\"exit_code\":$esc_ec,\"duration_ms\":${duration_ms:-0},\"working_directory\":\"$esc_cwd\",\"reason_code\":$esc_rcode${trace_json}}"
     write_event "$payload"
 }
 
 emit_orchestration_completed() {
     local result="$1" exit_code="$2"
-    local payload="{\"event\":\"orchestration_completed\",\"result\":\"$result\",\"exit_code\":$exit_code}"
+    local trace_json=""
+    if [ -n "$TRACE_ID" ]; then
+        trace_json=",\"trace_id\":\"$(json_escape "$TRACE_ID")\",\"span_id\":\"$(json_escape "$SPAN_ID")\""
+    fi
+    local payload="{\"event\":\"orchestration_completed\",\"result\":\"$result\",\"exit_code\":$exit_code${trace_json}}"
     write_event "$payload"
 }
 
@@ -397,6 +454,58 @@ while [ $# -gt 0 ]; do
             CLEANUP=1
             shift
             ;;
+        --sandbox)
+            if [ $# -lt 2 ]; then
+                echo "ERROR: --sandbox requires a value ('none', 'docker', or 'podman')." >&2
+                exit 1
+            fi
+            SANDBOX="$2"
+            shift 2
+            ;;
+        --sandbox=*)
+            SANDBOX="${1#*=}"
+            shift
+            ;;
+        --sandbox-image)
+            if [ $# -lt 2 ]; then
+                echo "ERROR: --sandbox-image requires an image name." >&2
+                exit 1
+            fi
+            SANDBOX_IMAGE="$2"
+            shift 2
+            ;;
+        --sandbox-image=*)
+            SANDBOX_IMAGE="${1#*=}"
+            shift
+            ;;
+        --review)
+            REVIEW=1
+            shift
+            ;;
+        --hooks)
+            if [ $# -lt 2 ]; then
+                echo "ERROR: --hooks requires a directory path." >&2
+                exit 1
+            fi
+            HOOKS_DIR="$2"
+            shift 2
+            ;;
+        --hooks=*)
+            HOOKS_DIR="${1#*=}"
+            shift
+            ;;
+        --traceparent)
+            if [ $# -lt 2 ]; then
+                echo "ERROR: --traceparent requires a W3C Trace Context value." >&2
+                exit 1
+            fi
+            TRACE_ID="$2"
+            shift 2
+            ;;
+        --traceparent=*)
+            TRACE_ID="${1#*=}"
+            shift
+            ;;
         --worker)
             if [ $# -lt 2 ]; then
                 echo "ERROR: --worker requires a command." >&2
@@ -448,6 +557,38 @@ done
 # Resolve worker from env if not supplied via flag
 if [ -z "$WORKER_CMD" ] && [ -n "${AGENTIC_WORKER_CMD:-}" ]; then
     WORKER_CMD="$AGENTIC_WORKER_CMD"
+fi
+
+# Resolve sandbox from env if not supplied via flag
+if [ "$SANDBOX" = "none" ] && [ -n "${AGENTIC_WORKER_SANDBOX:-}" ]; then
+    SANDBOX="$AGENTIC_WORKER_SANDBOX"
+fi
+if [ -z "$SANDBOX_IMAGE" ] && [ -n "${AGENTIC_WORKER_SANDBOX_IMAGE:-}" ]; then
+    SANDBOX_IMAGE="$AGENTIC_WORKER_SANDBOX_IMAGE"
+fi
+
+# Resolve traceparent from env if not supplied via flag
+if [ -z "$TRACE_ID" ] && [ -n "${TRACEPARENT:-}" ]; then
+    TRACE_ID="$TRACEPARENT"
+fi
+
+# Parse W3C Trace Context: extract trace_id (bytes 2-33) and span_id (bytes 35-50)
+if [ -n "$TRACE_ID" ]; then
+    # Format: 00-{trace_id}-{span_id}-{flags}
+    _tp="$TRACE_ID"
+    case "$_tp" in
+        00-[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]-[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]-[0-9a-fA-F][0-9a-fA-F])
+            TRACE_ID="${_tp:3:32}"
+            SPAN_ID="${_tp:36:16}"
+            TRACE_FLAGS="${_tp:53:2}"
+            ;;
+        *)
+            # Invalid format; clear to avoid bad data in events
+            TRACE_ID=""
+            SPAN_ID=""
+            TRACE_FLAGS="01"
+            ;;
+    esac
 fi
 
 case "$(printf '%s' "$FORMAT" | tr '[:upper:]' '[:lower:]')" in
@@ -670,7 +811,11 @@ if [ -n "$EVENTS_FILE" ]; then
     mkdir -p "$(dirname "$EVENTS_FILE")"
     events_scratch="$(mktemp "$(dirname "$EVENTS_FILE")/.orchestration-events.XXXXXX")" || exit 1
     EVENTS_SCRATCH="$events_scratch"
-    if ! printf '{"event":"orchestration_started"}\n' > "$events_scratch"; then
+    _trace_json=""
+    if [ -n "$TRACE_ID" ]; then
+        _trace_json=",\"trace_id\":\"$(json_escape "$TRACE_ID")\",\"span_id\":\"$(json_escape "$SPAN_ID")\""
+    fi
+    if ! printf '{"event":"orchestration_started"%s}\n' "$_trace_json" > "$events_scratch"; then
         echo "ERROR: failed to initialize event stream." >&2
         rm -f "$events_scratch"
         exit 1
@@ -762,49 +907,66 @@ fi
 
 # Determine worker to run
 if [ -z "$WORKER_CMD" ]; then
-    # No worker supplied: synthesize a PASS worker for worktree creation
+    # No worker supplied: synthesize a worker for worktree creation.
+    # Worker events are emitted after the optional push so the event
+    # stream always matches the final result.
     worker_id="$TASK_ID"
     cwd_rel="$WORKTREE_REL"
     case "$cwd_rel" in
         ./*) : ;;
         *) cwd_rel="./$cwd_rel" ;;
     esac
+    nw_status="PASS"
+    nw_reason="null"
+    nw_exit="0"
+    nw_result="PASS"
+    nw_code=0
+    log "No worker command supplied; worktree ready."
+    if [ "$PUSH" -eq 1 ]; then
+        # Remote write gate already checked
+        if ! git -C "$WORKTREE_ABS" push origin "$worktree_branch" 2>&1 | log; then
+            nw_status="FAIL"
+            nw_reason="WORKER_FAILED"
+            nw_exit="1"
+            nw_result="FAIL"
+            nw_code=1
+            log "Push failed for $worktree_branch"
+        else
+            log "Pushed branch $worktree_branch"
+        fi
+    fi
     if [ -n "$EVENTS_FILE" ]; then
         emit_worker_started "$worker_id" "$cwd_rel" || {
             echo "ERROR: failed to write worker_started event." >&2
             rm -f "$LOCK_FILE" 2>/dev/null || true
             exit 1
         }
-        emit_worker_completed "$worker_id" "PASS" "0" "0" "$cwd_rel" "null" || {
+        emit_worker_completed "$worker_id" "$nw_status" "$nw_exit" "0" "$cwd_rel" "$nw_reason" || {
             echo "ERROR: failed to write worker_completed event." >&2
             rm -f "$LOCK_FILE" 2>/dev/null || true
             exit 1
         }
     fi
-    workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"PASS\",\"exit_code\":0,\"duration_ms\":0,\"reason_code\":null}"
-    summary_json="{\"workers_defined\":1,\"workers_run\":1,\"passed\":1,\"failed\":0,\"blocked\":0}"
-    log "No worker command supplied; worktree ready."
-    if [ "$PUSH" -eq 1 ]; then
-        # Remote write gate already checked
-        if ! git -C "$WORKTREE_ABS" push origin "$worktree_branch" 2>&1 | log; then
-            rm -f "$LOCK_FILE" 2>/dev/null || true
-            workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"FAIL\",\"exit_code\":1,\"duration_ms\":0,\"reason_code\":\"WORKER_FAILED\"}"
-            summary_json="{\"workers_defined\":1,\"workers_run\":1,\"passed\":0,\"failed\":1,\"blocked\":0}"
-            complete_orchestration "FAIL" 1 "$workers_json" "$summary_json"
+    if [ "$nw_result" = "PASS" ]; then
+        workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"PASS\",\"exit_code\":0,\"duration_ms\":0,\"reason_code\":null}"
+        summary_json="{\"workers_defined\":1,\"workers_run\":1,\"passed\":1,\"failed\":0,\"blocked\":0}"
+        if [ "$CLEANUP" -eq 1 ]; then
+            git worktree remove --force "$WORKTREE_ABS" 2>/dev/null || rm -rf "$WORKTREE_ABS" 2>/dev/null || true
+            git branch -D "$worktree_branch" 2>/dev/null || true
+            log "Cleaned up worktree $WORKTREE_REL"
         fi
-        log "Pushed branch $worktree_branch"
-    fi
-    if [ "$CLEANUP" -eq 1 ]; then
-        git worktree remove --force "$WORKTREE_ABS" 2>/dev/null || rm -rf "$WORKTREE_ABS" 2>/dev/null || true
-        git branch -D "$worktree_branch" 2>/dev/null || true
-        log "Cleaned up worktree $WORKTREE_REL"
-    fi
-    rm -f "$LOCK_FILE" 2>/dev/null || true
-    if [ "$FORMAT" = "json" ]; then
-        complete_orchestration "PASS" 0 "$workers_json" "$summary_json"
+        rm -f "$LOCK_FILE" 2>/dev/null || true
+        if [ "$FORMAT" = "json" ]; then
+            complete_orchestration "PASS" 0 "$workers_json" "$summary_json"
+        else
+            log "Orchestration PASS: worktree ready at $WORKTREE_REL"
+            complete_orchestration "PASS" 0 "$workers_json" "$summary_json"
+        fi
     else
-        log "Orchestration PASS: worktree ready at $WORKTREE_REL"
-        complete_orchestration "PASS" 0 "$workers_json" "$summary_json"
+        rm -f "$LOCK_FILE" 2>/dev/null || true
+        workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"FAIL\",\"exit_code\":1,\"duration_ms\":0,\"reason_code\":\"WORKER_FAILED\"}"
+        summary_json="{\"workers_defined\":1,\"workers_run\":1,\"passed\":0,\"failed\":1,\"blocked\":0}"
+        complete_orchestration "FAIL" 1 "$workers_json" "$summary_json"
     fi
 fi
 
@@ -816,6 +978,45 @@ case "$cwd_rel" in
     *) cwd_rel="./$cwd_rel" ;;
 esac
 
+# --- Pre-spawn hook ---
+if [ -n "$HOOKS_DIR" ] && [ -d "$HOOKS_DIR" ] && [ -x "$HOOKS_DIR/pre-spawn" ]; then
+    if ! "$HOOKS_DIR/pre-spawn" "$TASK_FILE" "$WORKTREE_ABS" 2>&1 | log; then
+        echo "ERROR: pre-spawn hook failed; aborting." >&2
+        workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"BLOCKED\",\"exit_code\":null,\"duration_ms\":0,\"reason_code\":\"WORKER_BLOCKED\"}"
+        summary_json="{\"workers_defined\":1,\"workers_run\":0,\"passed\":0,\"failed\":0,\"blocked\":1}"
+        rm -f "$LOCK_FILE" 2>/dev/null || true
+        complete_orchestration "BLOCKED" 2 "$workers_json" "$summary_json"
+    fi
+fi
+
+start_ms="$(now_ms)"
+check_ok=0
+worker_exit=0
+
+# Execute worker — sandbox or direct
+case "$SANDBOX" in
+    docker|podman)
+        container_runtime="$SANDBOX"
+        if ! command -v "$container_runtime" >/dev/null 2>&1; then
+            echo "ERROR: $container_runtime not available; requested --sandbox $container_runtime is BLOCKED." >&2
+            status="BLOCKED"
+            reason_code="TOOLING_UNAVAILABLE"
+            workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"BLOCKED\",\"exit_code\":null,\"duration_ms\":0,\"reason_code\":\"TOOLING_UNAVAILABLE\"}"
+            summary_json="{\"workers_defined\":1,\"workers_run\":0,\"passed\":0,\"failed\":0,\"blocked\":1}"
+            result="BLOCKED"
+            exit_code=2
+            rm -f "$LOCK_FILE" 2>/dev/null || true
+            complete_orchestration "$result" "$exit_code" "$workers_json" "$summary_json"
+        fi
+        ;;
+    none) ;;
+    *)
+        rm -f "$LOCK_FILE" 2>/dev/null || true
+        fail_with_result "FAIL" 1 "--sandbox must be 'none', 'docker', or 'podman' (got '$SANDBOX')." "WORKER_FAILED"
+        ;;
+esac
+
+# Emit worker_started only after sandbox availability is confirmed
 if [ -n "$EVENTS_FILE" ]; then
     if ! emit_worker_started "$worker_id" "$cwd_rel"; then
         echo "ERROR: failed to write worker_started event." >&2
@@ -824,25 +1025,46 @@ if [ -n "$EVENTS_FILE" ]; then
     fi
 fi
 
-start_ms="$(python3 -c 'import time; print(int(time.time()*1000))' 2>/dev/null || python -c 'import time; print(int(time.time()*1000))' 2>/dev/null || echo 0)"
-check_ok=0
-worker_exit=0
-
-# Execute worker with stdout/stderr handling: keep JSON stdout clean
-if [ "$FORMAT" = "json" ]; then
-    (cd "$WORKTREE_ABS" && bash -c "$WORKER_CMD") >&2 && check_ok=1
-    worker_exit=$?
+if [ "$SANDBOX" != "none" ]; then
+    # Container sandbox: mount the worktree, run worker inside
+    _image="${SANDBOX_IMAGE:-ubuntu:24.04}"
+    _trace_arg=""
+    if [ -n "$TRACE_ID" ]; then
+        _trace_arg="TRACEPARENT=00-${TRACE_ID}-${SPAN_ID}-${TRACE_FLAGS}"
+    fi
+    if [ "$FORMAT" = "json" ]; then
+        if [ -n "$_trace_arg" ]; then
+            (cd "$WORKTREE_ABS" && "$container_runtime" run --rm -e "$_trace_arg" -v "$(pwd):/work" -w /work "$_image" bash -c "$WORKER_CMD") >&2 && check_ok=1
+        else
+            (cd "$WORKTREE_ABS" && "$container_runtime" run --rm -v "$(pwd):/work" -w /work "$_image" bash -c "$WORKER_CMD") >&2 && check_ok=1
+        fi
+        worker_exit=$?
+    else
+        if [ -n "$_trace_arg" ]; then
+            (cd "$WORKTREE_ABS" && "$container_runtime" run --rm -e "$_trace_arg" -v "$(pwd):/work" -w /work "$_image" bash -c "$WORKER_CMD") && check_ok=1
+        else
+            (cd "$WORKTREE_ABS" && "$container_runtime" run --rm -v "$(pwd):/work" -w /work "$_image" bash -c "$WORKER_CMD") && check_ok=1
+        fi
+        worker_exit=$?
+    fi
 else
-    (cd "$WORKTREE_ABS" && bash -c "$WORKER_CMD") && check_ok=1
-    worker_exit=$?
+    # Direct execution in worktree (existing behavior)
+    if [ "$FORMAT" = "json" ]; then
+        (cd "$WORKTREE_ABS" && bash -c "$WORKER_CMD") >&2 && check_ok=1
+        worker_exit=$?
+    else
+        (cd "$WORKTREE_ABS" && bash -c "$WORKER_CMD") && check_ok=1
+        worker_exit=$?
+    fi
 fi
+
 if [ "$check_ok" -eq 1 ]; then
     worker_exit=0
 else
     [ "$worker_exit" -eq 0 ] && worker_exit=1
 fi
 
-end_ms="$(python3 -c 'import time; print(int(time.time()*1000))' 2>/dev/null || python -c 'import time; print(int(time.time()*1000))' 2>/dev/null || echo 0)"
+end_ms="$(now_ms)"
 duration_ms=$(( end_ms - start_ms ))
 [ "$duration_ms" -ge 0 ] || duration_ms=0
 
@@ -850,7 +1072,6 @@ status="PASS"
 reason_code="null"
 exit_code_str="0"
 if [ "$check_ok" -eq 0 ]; then
-    # Detect tooling unavailable (command not found 127, permission 126)
     if [ "$worker_exit" -eq 127 ] || [ "$worker_exit" -eq 126 ]; then
         status="BLOCKED"
         reason_code="TOOLING_UNAVAILABLE"
@@ -862,6 +1083,142 @@ if [ "$check_ok" -eq 0 ]; then
     fi
 fi
 
+# --- Post-worker hook ---
+# A hook failure overrides the worker outcome below; worker_completed is
+# emitted once, after this hook, so the event and result always agree.
+if [ -n "$HOOKS_DIR" ] && [ -d "$HOOKS_DIR" ] && [ -x "$HOOKS_DIR/post-worker" ]; then
+    if ! "$HOOKS_DIR/post-worker" "$TASK_FILE" "$WORKTREE_ABS" 2>&1 | log; then
+        echo "ERROR: post-worker hook failed; aborting." >&2
+        status="FAIL"
+        reason_code="WORKER_FAILED"
+        worker_exit=1
+        exit_code_str="1"
+        result="FAIL"
+        exit_code=1
+        log "Post-worker hook failed; marking orchestration as FAIL."
+    fi
+fi
+
+# Build workers JSON and summary
+if [ "$status" = "PASS" ]; then
+    workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"PASS\",\"exit_code\":0,\"duration_ms\":$duration_ms,\"reason_code\":null}"
+    summary_json="{\"workers_defined\":1,\"workers_run\":1,\"passed\":1,\"failed\":0,\"blocked\":0}"
+    result="PASS"
+    exit_code=0
+elif [ "$status" = "FAIL" ]; then
+    workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"FAIL\",\"exit_code\":$worker_exit,\"duration_ms\":$duration_ms,\"reason_code\":\"WORKER_FAILED\"}"
+    summary_json="{\"workers_defined\":1,\"workers_run\":1,\"passed\":0,\"failed\":1,\"blocked\":0}"
+    result="FAIL"
+    exit_code=1
+else
+    workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"BLOCKED\",\"exit_code\":null,\"duration_ms\":$duration_ms,\"reason_code\":\"$reason_code\"}"
+    summary_json="{\"workers_defined\":1,\"workers_run\":1,\"passed\":0,\"failed\":0,\"blocked\":1}"
+    result="BLOCKED"
+    exit_code=2
+fi
+
+# --- Review stage (runs only when --review is set and worker passed) ---
+review_failed=0
+if [ "$REVIEW" -eq 1 ] && [ "$result" = "PASS" ]; then
+    log "Running review stage (validate-task, validate-context, validate-skills)..."
+    _scripts_dir="$(cd "$(dirname "$0")" && pwd)"
+    # Resolve validator path relative to .agentic/scripts, not .agentic/orchestration
+    if [ ! -f "$_scripts_dir/validate-task.sh" ] && [ -f "$PROJECT_ROOT/.agentic/scripts/validate-task.sh" ]; then
+        _scripts_dir="$PROJECT_ROOT/.agentic/scripts"
+    fi
+    _task_rel="${TASK_FILE#./}"
+    # Normalize absolute task paths relative to PROJECT_ROOT
+    case "$_task_rel" in
+        /*|/[A-Za-z]*)
+            case "$_task_rel" in
+                "$PROJECT_ROOT"/*) _task_rel="${_task_rel#"$PROJECT_ROOT"/}" ;;
+            esac
+            _task_rel="$_task_rel"
+            ;;
+    esac
+    _task_in_worktree="$WORKTREE_ABS/$_task_rel"
+    # Fallback: use basename in case task was moved
+    if [ ! -f "$_task_in_worktree" ]; then
+        _task_in_worktree="$WORKTREE_ABS/$(basename "$TASK_FILE")"
+    fi
+    _vt_exists=0
+    _vc_exists=0
+    _vs_exists=0
+    # validate-task
+    if [ -x "$_scripts_dir/validate-task.sh" ] || [ -f "$_scripts_dir/validate-task.sh" ]; then
+        _vt_exists=1
+        if ! bash "$_scripts_dir/validate-task.sh" --handoff "$_task_in_worktree" 2>&1 | log; then
+            review_failed=1
+        fi
+    fi
+    # validate-context
+    if [ "$review_failed" -eq 0 ] && { [ -x "$_scripts_dir/validate-context.sh" ] || [ -f "$_scripts_dir/validate-context.sh" ]; }; then
+        _vc_exists=1
+        if ! bash "$_scripts_dir/validate-context.sh" --handoff "$_task_in_worktree" 2>&1 | log; then
+            review_failed=1
+        fi
+    fi
+    # validate-skills
+    if [ "$review_failed" -eq 0 ] && { [ -x "$_scripts_dir/validate-skills.sh" ] || [ -f "$_scripts_dir/validate-skills.sh" ]; }; then
+        _vs_exists=1
+        if ! bash "$_scripts_dir/validate-skills.sh" --handoff "$_task_in_worktree" 2>&1 | log; then
+            review_failed=1
+        fi
+    fi
+    if [ "$_vt_exists" -eq 0 ] || [ "$_vc_exists" -eq 0 ] || [ "$_vs_exists" -eq 0 ]; then
+        log "WARNING: missing validator scripts (validate-task=$_vt_exists validate-context=$_vc_exists validate-skills=$_vs_exists); review BLOCKED."
+        review_failed=1
+    fi
+    if [ "$review_failed" -eq 1 ]; then
+        status="FAIL"
+        reason_code="REVIEW_FAILED"
+        worker_exit=1
+        exit_code_str="1"
+        result="FAIL"
+        exit_code=1
+        workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"FAIL\",\"exit_code\":1,\"duration_ms\":$duration_ms,\"reason_code\":\"REVIEW_FAILED\"}"
+        summary_json="{\"workers_defined\":1,\"workers_run\":1,\"passed\":0,\"failed\":1,\"blocked\":0}"
+        log "Review stage failed; marking orchestration as FAIL."
+    else
+        log "Review stage passed."
+    fi
+fi
+
+# --- Post-review hook ---
+if [ -n "$HOOKS_DIR" ] && [ -d "$HOOKS_DIR" ] && [ -x "$HOOKS_DIR/post-review" ]; then
+    if ! "$HOOKS_DIR/post-review" "$TASK_FILE" "$WORKTREE_ABS" 2>&1 | log; then
+        echo "ERROR: post-review hook failed." >&2
+        review_failed=1
+        status="FAIL"
+        reason_code="REVIEW_FAILED"
+        worker_exit=1
+        exit_code_str="1"
+        result="FAIL"
+        exit_code=1
+        workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"FAIL\",\"exit_code\":1,\"duration_ms\":$duration_ms,\"reason_code\":\"REVIEW_FAILED\"}"
+        summary_json="{\"workers_defined\":1,\"workers_run\":1,\"passed\":0,\"failed\":1,\"blocked\":0}"
+    fi
+fi
+
+# Handle remote write if requested and worker passed
+if [ "$PUSH" -eq 1 ] && [ "$result" = "PASS" ]; then
+    log "Pushing branch $worktree_branch..."
+    if ! git -C "$WORKTREE_ABS" push origin "$worktree_branch" 2>&1 | while IFS= read -r line; do log "$line"; done; then
+        status="FAIL"
+        reason_code="WORKER_FAILED"
+        worker_exit=1
+        exit_code_str="1"
+        workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"FAIL\",\"exit_code\":1,\"duration_ms\":$duration_ms,\"reason_code\":\"WORKER_FAILED\"}"
+        summary_json="{\"workers_defined\":1,\"workers_run\":1,\"passed\":0,\"failed\":1,\"blocked\":0}"
+        result="FAIL"
+        exit_code=1
+        log "Push failed for $worktree_branch"
+    else
+        log "Pushed $worktree_branch"
+    fi
+fi
+
+# Emit worker_completed once, after all downstream stages, matching the result below.
 if [ -n "$EVENTS_FILE" ]; then
     if [ "$status" = "PASS" ]; then
         emit_worker_completed "$worker_id" "$status" "$exit_code_str" "$duration_ms" "$cwd_rel" "null" || {
@@ -884,42 +1241,10 @@ if [ -n "$EVENTS_FILE" ]; then
     fi
 fi
 
-# Build workers JSON and summary
-if [ "$status" = "PASS" ]; then
-    workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"PASS\",\"exit_code\":0,\"duration_ms\":$duration_ms,\"reason_code\":null}"
-    summary_json="{\"workers_defined\":1,\"workers_run\":1,\"passed\":1,\"failed\":0,\"blocked\":0}"
-    result="PASS"
-    exit_code=0
-elif [ "$status" = "FAIL" ]; then
-    workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"FAIL\",\"exit_code\":$worker_exit,\"duration_ms\":$duration_ms,\"reason_code\":\"WORKER_FAILED\"}"
-    summary_json="{\"workers_defined\":1,\"workers_run\":1,\"passed\":0,\"failed\":1,\"blocked\":0}"
-    result="FAIL"
-    exit_code=1
-else
-    workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"BLOCKED\",\"exit_code\":null,\"duration_ms\":$duration_ms,\"reason_code\":\"$reason_code\"}"
-    summary_json="{\"workers_defined\":1,\"workers_run\":1,\"passed\":0,\"failed\":0,\"blocked\":1}"
-    result="BLOCKED"
-    exit_code=2
-fi
-
-# Handle remote write if requested and worker passed
-if [ "$PUSH" -eq 1 ] && [ "$result" = "PASS" ]; then
-    log "Pushing branch $worktree_branch..."
-    if ! git -C "$WORKTREE_ABS" push origin "$worktree_branch" 2>&1 | while IFS= read -r line; do log "$line"; done; then
-        # Push failed -> FAIL
-        workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"FAIL\",\"exit_code\":1,\"duration_ms\":$duration_ms,\"reason_code\":\"WORKER_FAILED\"}"
-        summary_json="{\"workers_defined\":1,\"workers_run\":1,\"passed\":0,\"failed\":1,\"blocked\":0}"
-        result="FAIL"
-        exit_code=1
-        log "Push failed for $worktree_branch"
-    else
-        log "Pushed $worktree_branch"
-    fi
-fi
-
-if [ "$CLEANUP" -eq 1 ]; then
+# Cleanup only on success: failed/blocked worktrees are preserved for inspection.
+if [ "$CLEANUP" -eq 1 ] && [ "$result" = "PASS" ]; then
     git worktree remove --force "$WORKTREE_ABS" 2>/dev/null || rm -rf "$WORKTREE_ABS" 2>/dev/null || true
-    # Do not delete branch on cleanup unless explicitly wanted; keep for inspection
+    git branch -D "$worktree_branch" 2>/dev/null || true
     log "Cleaned up worktree $WORKTREE_REL"
 fi
 

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "id": "spec-pipeline-chain",
+  "description": "Authoring a SPEC to PLAN to TASKS chain with exit-0 goal conditions must validate end to end.",
+  "input": {
+    "task": "Author the SPEC to PLAN to TASKS chain with exit-0 goal conditions for the orders export endpoint.",
+    "changed_paths": [
+      "docs/spec/orders-export-SPEC.md",
+      "docs/spec/orders-export-PLAN.md",
+      "docs/spec/orders-export-TASKS.md"
+    ]
+  },
+  "expected": {
+    "minimum_profile": "standard",
+    "required_modules": [
+      "public-api-change"
+    ],
+    "required_approval_gates": [
+      "api-review"
+    ],
+    "required_evidence": [
+      "contract-tests",
+      "goal-conditions-verified"
+    ]
+  }
+}

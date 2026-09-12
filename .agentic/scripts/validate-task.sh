@@ -26,6 +26,8 @@
 #     operation occurred and that production readiness was not established
 #   - approvals use structured records: `- [x] AG-N: Approved by <x> on <date>`
 #   - a task marked `done` has no unresolved evidence and no unchecked gates
+#   - an optional `## Goal conditions` section, when present, holds only
+#     canonical `- Exit 0 when: <command>` bullets (one per exit-0 end state)
 #
 # Result values: passed | satisfied | n/a are resolved; pending | partial |
 # blocked | missing | not-run are unresolved and block a completed task. `n/a`
@@ -39,27 +41,34 @@
 # Usage:
 #   ./.agentic/scripts/validate-task.sh [--handoff] path/to/TASK-001.md
 #   --handoff  require `Status: done` and enforce the full completion gate.
+#   --run-goals  after successful structural validation, execute each
+#     `## Goal conditions` command and require exit 0 (text output only).
 
 set -uo pipefail
 
 FORMAT="text"
 HANDOFF=0
+RUN_GOALS=0
 TASK_FILE=""
 
 usage() {
     cat <<'EOF'
-Usage: validate-task.sh [--format text|json] [--handoff] <task-file>
+Usage: validate-task.sh [--format text|json] [--handoff] [--run-goals] <task-file>
 
 Validates the structural evidence contract of an agentic task file.
 
 Options:
   --format    Output format: text (default) or json.
   --handoff   Require Status: done and enforce the completion gate.
+  --run-goals After VALID, execute each '## Goal conditions' command in the
+              current working directory and require exit 0. Text output only;
+              cannot be combined with --format json. Goal commands must be
+              fast and hermetic: there is no timeout.
   -h, --help  Show this help.
 
 Exit codes:
-  0  VALID
-  1  INVALID
+  0  VALID (and, with --run-goals, every goal exited 0)
+  1  INVALID (or, with --run-goals, a goal exited non-zero)
   2  BLOCKED — referenced evidence or approval is missing at completion
 EOF
 }
@@ -74,6 +83,7 @@ while [ $# -gt 0 ]; do
             FORMAT="$2"; shift 2 ;;
         --format=*) FORMAT="${1#*=}"; shift ;;
         --handoff) HANDOFF=1; shift ;;
+        --run-goals) RUN_GOALS=1; shift ;;
         -h|--help) usage; exit 0 ;;
         -*) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
         *)
@@ -99,6 +109,12 @@ case "$(printf '%s' "$FORMAT" | tr '[:upper:]' '[:lower:]')" in
         exit 1
         ;;
 esac
+
+# Goal execution reports plain per-goal lines; it has no JSON contract.
+if [ "$RUN_GOALS" -eq 1 ] && [ "$FORMAT" = "json" ]; then
+    echo "ERROR: --run-goals does not support --format json." >&2
+    exit 1
+fi
 
 if [ -z "$TASK_FILE" ]; then
     usage >&2
@@ -167,7 +183,7 @@ else:
 
 doc = {
     "schema_version": 1,
-    "protocol_version": "1.14.0",
+    "protocol_version": "1.15.0",
     "kind": "task_validation_result",
     "mode": mode,
     "result": res_str,
@@ -1125,6 +1141,72 @@ if has_section "approval gates"; then
     if [ "$COMPLETED" -eq 1 ] && [ "$unchecked" -gt 0 ]; then
         fail_blocked "APPROVAL_UNRESOLVED" "## Approval gates" "" "task is marked complete but an approval gate remains unchecked."
     fi
+fi
+
+# ---------------------------------------------------------------------------
+# Goal conditions: optional exit-0 definition of done. Validated for every
+# profile whenever a '## Goal conditions' section exists: each entry must be
+# a canonical '- Exit 0 when: <command>' bullet with a non-empty command.
+# ---------------------------------------------------------------------------
+if has_section "goal conditions"; then
+    goal_content="$(section_content "goal conditions" || true)"
+    goal_count=0
+    while IFS= read -r goal_line || [ -n "$goal_line" ]; do
+        goal_trimmed="$(printf '%s' "$goal_line" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+        [ -n "$goal_trimmed" ] || continue
+        goal_low="$(printf '%s' "$goal_trimmed" | lower)"
+        if printf '%s' "$goal_low" | grep -qE '^[-*+][[:space:]]+exit[[:space:]]+0[[:space:]]+when:[[:space:]]*[^[:space:]]'; then
+            goal_count=$(( goal_count + 1 ))
+        else
+            fail_invalid "CRITERION_INVALID" "## Goal conditions" "" "goal conditions must use the form '- Exit 0 when: <command>'; identifiers may not appear in prose or non-canonical lines."
+        fi
+    done <<< "$goal_content"
+    [ "$goal_count" -gt 0 ] || fail_invalid "CRITERION_INVALID" "## Goal conditions" "" "goal conditions must declare at least one '- Exit 0 when: <command>' entry."
+fi
+
+# ---------------------------------------------------------------------------
+# Goal execution: with --run-goals, structural validation above has already
+# passed, so every goal bullet carries a command. Run each command in the
+# current working directory and require exit 0.
+# ---------------------------------------------------------------------------
+run_goal_conditions() {
+    local content count=0 failed=0 line cmd code
+    if ! has_section "goal conditions"; then
+        echo "No goal conditions declared."
+        return 0
+    fi
+    content="$(section_content "goal conditions" || true)"
+    while IFS= read -r line || [ -n "$line" ]; do
+        cmd="$(printf '%s' "$line" | sed -nE 's/^[[:space:]]*[-*+][[:space:]]+[Ee][Xx][Ii][Tt][[:space:]]+0[[:space:]]+[Ww][Hh][Ee][Nn]:[[:space:]]*(.*[^[:space:]])[[:space:]]*$/\1/p')"
+        [ -n "$cmd" ] || continue
+        count=$(( count + 1 ))
+        if printf '%s' "$cmd" | grep -qE '\$\(|`|rm[[:space:]]+-rf|dd[[:space:]]+|mkfs[[:space:]]+|chmod[[:space:]]+777'; then
+            echo "GOAL REJECTED (unsafe): $cmd"
+            failed=$(( failed + 1 ))
+            continue
+        fi
+        if timeout 30s bash -c "$cmd" 2>&1; then
+            echo "GOAL PASS (exit 0): $cmd"
+        else
+            code=$?
+            if [ "$code" -eq 124 ]; then
+                echo "GOAL TIMEOUT (30s): $cmd"
+            else
+                echo "GOAL FAIL (exit $code): $cmd"
+            fi
+            failed=$(( failed + 1 ))
+        fi
+    done <<< "$content"
+    if [ "$failed" -gt 0 ]; then
+        echo "Goal conditions failed: $failed of $count goal(s) exited non-zero or timed out."
+        return 1
+    fi
+    echo "Goal conditions passed: $count goal(s) exited 0."
+    return 0
+}
+
+if [ "$RUN_GOALS" -eq 1 ]; then
+    run_goal_conditions || exit 1
 fi
 
 if [ "$FORMAT" = "json" ]; then
