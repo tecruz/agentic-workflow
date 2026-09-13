@@ -940,3 +940,38 @@ EOF
     classify continuation-without-id-valid.md
     [ "$status" -eq 0 ]
 }
+
+@test "VALID (0) for canonical goal conditions" {
+    classify goal-conditions-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "INVALID (1) for a malformed goal conditions entry" {
+    classify goal-conditions-malformed.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for an empty goal conditions section" {
+    classify goal-conditions-empty.md
+    [ "$status" -eq 1 ]
+}
+
+@test "--run-goals exits 0 when every goal command exits 0" {
+    run bash "$VALIDATE" --run-goals "$FIXTURES/goal-run-pass.md" >/dev/null 2>&1
+    [ "$status" -eq 0 ]
+}
+
+@test "--run-goals exits 1 when a goal command fails" {
+    run bash "$VALIDATE" --run-goals "$FIXTURES/goal-run-fail.md" >/dev/null 2>&1
+    [ "$status" -eq 1 ]
+}
+
+@test "--run-goals exits 1 with malformed goal conditions" {
+    run bash "$VALIDATE" --run-goals "$FIXTURES/goal-conditions-malformed.md" >/dev/null 2>&1
+    [ "$status" -eq 1 ]
+}
+
+@test "--run-goals rejects --format json" {
+    run bash "$VALIDATE" --format json --run-goals "$FIXTURES/goal-run-pass.md" >/dev/null 2>&1
+    [ "$status" -eq 1 ]
+}

@@ -87,7 +87,8 @@ mkdir -p "$BUNDLE/.agentic/rules" \
          "$BUNDLE/.agentic/context/testing-infrastructure" \
          "$BUNDLE/.agentic/context/data-integrity" \
          "$BUNDLE/.agentic/context/api-design-patterns" \
-         "$BUNDLE/.agentic/context/error-handling" \
+          "$BUNDLE/.agentic/context/error-handling" \
+          "$BUNDLE/.agentic/context/mcp-tool-governance" \
          "$BUNDLE/.agentic/skills" \
          "$BUNDLE/.agentic/skills/task-decomposition" \
          "$BUNDLE/.agentic/skills/verification-triage" \
@@ -121,7 +122,7 @@ cp "$ROOT/.agentic/tasks/README.md" "$BUNDLE/.agentic/tasks/"
 cp "$ROOT/.agentic/decisions/README.md" "$BUNDLE/.agentic/decisions/"
 cp "$ROOT"/.agentic/schemas/*.json "$BUNDLE/.agentic/schemas/"
 cp "$ROOT/.agentic/context/INDEX.md" "$BUNDLE/.agentic/context/"
-for _mod in security-review database-migrations dependency-changes infrastructure-change public-api-change performance accessibility i18n mobile-adaptive testing-infrastructure data-integrity api-design-patterns error-handling; do
+for _mod in security-review database-migrations dependency-changes infrastructure-change public-api-change performance accessibility i18n mobile-adaptive testing-infrastructure data-integrity api-design-patterns error-handling mcp-tool-governance; do
     cp "$ROOT/.agentic/context/$_mod/MODULE.md" "$BUNDLE/.agentic/context/$_mod/"
 done
 cp "$ROOT/.agentic/skills/INDEX.md" "$BUNDLE/.agentic/skills/"

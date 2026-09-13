@@ -101,7 +101,7 @@ Describe 'install.ps1' {
         try {
             & $install -Target $tmp *> $null
             Test-Path (Join-Path $tmp '.agentic\context\INDEX.md') | Should -Be $true
-            foreach ($mod in @('security-review','database-migrations','dependency-changes','infrastructure-change','public-api-change','performance','accessibility','i18n','mobile-adaptive','testing-infrastructure','data-integrity','api-design-patterns','error-handling')) {
+            foreach ($mod in @('security-review','database-migrations','dependency-changes','infrastructure-change','public-api-change','performance','accessibility','i18n','mobile-adaptive','testing-infrastructure','data-integrity','api-design-patterns','error-handling','mcp-tool-governance')) {
                 Test-Path (Join-Path $tmp ".agentic\context\$mod\MODULE.md") | Should -Be $true
             }
             Test-Path (Join-Path $tmp '.agentic\scripts\validate-context.ps1') | Should -Be $true
@@ -109,7 +109,7 @@ Describe 'install.ps1' {
             Test-Path (Join-Path $tmp '.agentic\schemas\context-selection-v1.schema.json') | Should -Be $true
             $manifest = Get-Content -Raw (Join-Path $tmp '.agentic\install-manifest.tsv')
             $manifest -match "\.agentic/context/INDEX\.md`tmanaged" | Should -Be $true
-            foreach ($mod in @('security-review','database-migrations','dependency-changes','infrastructure-change','public-api-change','performance','accessibility','i18n','mobile-adaptive','testing-infrastructure','data-integrity','api-design-patterns','error-handling')) {
+            foreach ($mod in @('security-review','database-migrations','dependency-changes','infrastructure-change','public-api-change','performance','accessibility','i18n','mobile-adaptive','testing-infrastructure','data-integrity','api-design-patterns','error-handling','mcp-tool-governance')) {
                 $manifest -match "\.agentic/context/$mod/MODULE\.md`tmanaged" | Should -Be $true
             }
             $manifest -match "\.agentic/scripts/validate-context\.ps1`tmanaged" | Should -Be $true
@@ -1510,7 +1510,7 @@ Describe 'install.ps1' {
             # v1.5.0 payload: context registry, validators, and schema ship;
             # the evaluation harness does not.
             Test-Path (Join-Path $bundleRoot '.agentic\context\INDEX.md') | Should -Be $true
-            foreach ($mod in @('security-review','database-migrations','dependency-changes','infrastructure-change','public-api-change','performance','accessibility','i18n','mobile-adaptive','testing-infrastructure','data-integrity','api-design-patterns','error-handling')) {
+            foreach ($mod in @('security-review','database-migrations','dependency-changes','infrastructure-change','public-api-change','performance','accessibility','i18n','mobile-adaptive','testing-infrastructure','data-integrity','api-design-patterns','error-handling','mcp-tool-governance')) {
                 Test-Path (Join-Path $bundleRoot ".agentic\context\$mod\MODULE.md") | Should -Be $true
             }
             Test-Path (Join-Path $bundleRoot '.agentic\scripts\validate-context.ps1') | Should -Be $true
@@ -1762,7 +1762,7 @@ Describe 'install.ps1' {
             # Step 5: v1.5.0 additions landed as managed files.
             (Get-Content -Raw (Join-Path $tmp '.agentic\VERSION')).Trim() | Should -Be $version
             Test-Path (Join-Path $tmp '.agentic\context\INDEX.md') | Should -Be $true
-            foreach ($mod in @('security-review','database-migrations','dependency-changes','infrastructure-change','public-api-change','performance','accessibility','i18n','mobile-adaptive','testing-infrastructure','data-integrity','api-design-patterns','error-handling')) {
+            foreach ($mod in @('security-review','database-migrations','dependency-changes','infrastructure-change','public-api-change','performance','accessibility','i18n','mobile-adaptive','testing-infrastructure','data-integrity','api-design-patterns','error-handling','mcp-tool-governance')) {
                 Test-Path (Join-Path $tmp ".agentic\context\$mod\MODULE.md") | Should -Be $true
             }
             Test-Path (Join-Path $tmp '.agentic\scripts\validate-context.ps1') | Should -Be $true

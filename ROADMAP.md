@@ -7,7 +7,7 @@
 
 ## Current state
 
-- **Version**: `1.14.0` (workspace/monorepo detection landed; deeper Android/Kotlin detection landed; context-module expansion + orchestration maturity landed; skills as a first-class category landed; Cursor/Copilot bridges + verifier large-contract performance landed; Nx/Turborepo/Bazel workspace detection landed; .NET lint-check gating parity landed; skills expansion landed; post-v1.12.0 audit fixes landed; health report + task templates + three new context modules + eval scenario expansion landed; post-v1.13.0 hygiene landed — second negative control, validator-drift fixes, eval-suite caching, adoption-focused docs; CI retry hardening; eval-scenario coverage for all 13 context modules)
+- **Version**: `1.15.0` (post-v1.14 trend-driven backlog completed: worker sandboxing, review stage, trace context, hooks, MCP/A2A guidance + tool-governance module, spec pipeline + goal conditions, memory lifecycle; eval corpus 19 scenarios; all 14 context modules with fixture + eval coverage)
 - The core loop (`DISCOVER → CLASSIFY RISK → PLAN → IMPLEMENT → VERIFY →
   HANDOFF`), the honest verification model, the non-destructive installer, risk
   profiles + evidence contracts, context modules + behavioral evals, and the
@@ -17,6 +17,7 @@
   files in both installers, N-1 migration guarantee, secrets-exclusion policy)
   and by the project's **cross-language parity rule** (every `*.sh` change is
   mirrored in `*.ps1` with shared fixtures).
+- Post-v1.14 trend-driven backlog (items 7–13) recorded below.
 
 ## Guiding constraints
 
@@ -132,6 +133,66 @@ registry now ships parallel to context modules (ADR-0014):
   the check `required` in `checks.tsv` instead.
 
 All later-items have landed as of v1.12.0.
+
+## Post-v1.14 backlog (2026 trend-driven, completed in v1.15.0)
+
+> Candidates identified from 2026 industry research (Anthropic Agentic Coding
+> Trends Report, AI Engineer Q1-2026, LangChain State of Agent Engineering,
+> MCP 2026 Roadmap). All items below landed via PR #26 (TASK-037, ADR-0016);
+> remaining boxes were closed in v1.15.0.
+
+### 7. Process-level worker sandboxing — *highest priority*
+Worktree isolation protects files, not execution. The 2026 baseline treats
+sandboxed, disposable execution of agent-run code as a requirement because
+untrusted input (issues, PRs, lockfiles) is attacker-reachable.
+- [x] Container/microVM sandbox option for coordinator workers (e.g.
+      `AGENTIC_WORKER_SANDBOX`), with current worktree mode as fallback.
+- [x] Cross-language parity (Bash + PowerShell).
+- [x] Documentation update for `orchestration/README.md`.
+
+### 8. Reviewer / verifier stage in orchestration
+Role-separated review in a fresh context (optionally a different model)
+reduces self-review bias before `orchestration_completed`.
+- [x] Built-in second-stage review step in `coordinator.sh` / `coordinator.ps1`.
+- [x] Reuse existing `validate-task`, `validate-context`, `validate-skills`
+      contracts as the review gate.
+- [x] Cross-language parity and eval-scenario coverage.
+
+### 9. OpenTelemetry / W3C Trace Context mapping
+MCP's 2026 spec embeds W3C Trace Context (`traceparent` / `tracestate`);
+custom event schemas risk fragmenting and losing interoperability.
+- [x] Map `orchestration-events-v1` to OTel spans; accept/propagate `traceparent`.
+- [x] Schema migration path preserving existing JSONL consumers.
+- [x] Cross-language parity (Bash + PowerShell event emission).
+
+### 10. MCP / A2A guidance and adapters
+MCP (agent-to-tool, vertical) and A2A (agent-to-agent, horizontal) are
+the emerging connective layer. The protocol currently says nothing about either.
+- [x] Document how the protocol relates to MCP and A2A.
+- [x] Context module for MCP-governed tool access (`mcp-tool-governance`).
+- [x] Update README and AGENTS.md §6 tool table accordingly.
+
+### 11. Spec-driven pipeline (spec → plan → tasks)
+Spec-first development (GitHub Spec Kit style) is becoming the default
+harness shape. Templates exist but no pipeline validation connects them.
+- [x] Extend `.agentic/templates/` into a spec → plan → tasks chain.
+- [x] Verifiable goal-condition support (exit-0 definition of done via optional `## Goal conditions` in `task.md`).
+- [x] Task template update; eval-scenario coverage for the pipeline (`spec-pipeline-chain`).
+
+### 12. Deterministic event hooks
+Guardrails that do not depend on model judgment (PostToolUse / Stop analogues)
+are a 2026 requirement for long-running and autonomous work.
+- [x] Hook mechanism triggered by verifier/validator events.
+- [x] Pairs with §9 events for observability integration.
+- [x] Cross-language parity and documentation.
+
+### 13. Memory lifecycle for project state
+Memory is becoming a first-class architectural primitive. `STATUS.md` is
+currently static; there is no update / forget / retrieve lifecycle or
+staleness detection ("context rot").
+- [x] Define update / forget / retrieve lifecycle for `.agentic/STATUS.md`.
+- [x] Staleness detection to avoid outdated instructions poisoning agent context.
+- [x] Cross-language parity and documentation.
 
 ## How items land
 

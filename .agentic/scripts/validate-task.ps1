@@ -18,6 +18,8 @@
       - exactly one recognized status: planned | in-progress | blocked | done
       - exact required `##` sections per profile, with `### Baseline` and
         `### Final` scoped inside `## Verification`
+      - an optional `## Goal conditions` section, when present, holds only
+        canonical `- Exit 0 when: <command>` bullets (one per exit-0 end state)
       - acceptance criteria declare unique `AC-N` identifiers, and the
         required evidence table maps every `AC-N` exactly once with meaningful
         evidence (at least one letter or number after trimming Markdown syntax
@@ -45,6 +47,9 @@
 
 .EXAMPLE
     ./.agentic/scripts/validate-task.ps1 -Handoff path/to/TASK-001.md
+
+.EXAMPLE
+    ./.agentic/scripts/validate-task.ps1 -RunGoals path/to/TASK-001.md
 #>
 [CmdletBinding()]
 param(
@@ -52,7 +57,8 @@ param(
     [Parameter(Mandatory = $true, Position = 0)]
     [string]$TaskFile,
     [ValidateSet('Text', 'Json')]
-    [string] $Format = 'Text'
+    [string] $Format = 'Text',
+    [switch]$RunGoals
 )
 
 $ErrorActionPreference = 'Stop'
@@ -74,7 +80,7 @@ function Output-TaskJson {
     $statusOut = if ($script:StatusName -in @('planned', 'in-progress', 'blocked', 'done')) { $script:StatusName } else { $null }
     $resultObject = [ordered]@{
         schema_version   = 1
-        protocol_version = "1.14.0"
+        protocol_version = "1.15.0"
         kind             = "task_validation_result"
         mode             = if ($Handoff) { "handoff" } else { "standard" }
         result           = $Result
@@ -159,6 +165,12 @@ function Write-Blocked {
         [Console]::Error.WriteLine("BLOCKED: $Message")
         exit 2
     }
+}
+
+# Goal execution reports plain per-goal lines; it has no JSON contract.
+if ($RunGoals -and $Format -ne 'Text') {
+    [Console]::Error.WriteLine("ERROR: -RunGoals does not support -Format Json.")
+    exit 1
 }
 
 if (-not (Test-Path -LiteralPath $TaskFile -PathType Leaf)) {
@@ -926,6 +938,102 @@ if ($SECTIONS -contains 'approval gates') {
     if ($Completed -and $unchecked -gt 0) {
         Write-Blocked "APPROVAL_UNRESOLVED" '## Approval gates' '' "task is marked complete but an approval gate remains unchecked."
     }
+}
+
+# ---------------------------------------------------------------------------
+# Goal conditions: optional exit-0 definition of done. Validated for every
+# profile whenever a '## Goal conditions' section exists: each entry must be
+# a canonical '- Exit 0 when: <command>' bullet with a non-empty command.
+# ---------------------------------------------------------------------------
+if ($SECTIONS -contains 'goal conditions') {
+    $goalCount = 0
+    foreach ($rawLine in (Get-SectionContent 'goal conditions')) {
+        $gl = $rawLine.Trim()
+        if (-not $gl) { continue }
+        if ($gl -match '^[-*+]\s+exit\s+0\s+when:\s*\S') {
+            $goalCount++
+        }
+        else {
+            Write-Invalid "CRITERION_INVALID" '## Goal conditions' '' "goal conditions must use the form '- Exit 0 when: <command>'; identifiers may not appear in prose or non-canonical lines."
+        }
+    }
+    if ($goalCount -eq 0) { Write-Invalid "CRITERION_INVALID" '## Goal conditions' '' "goal conditions must declare at least one '- Exit 0 when: <command>' entry." }
+}
+
+# ---------------------------------------------------------------------------
+# Goal execution: with -RunGoals, structural validation above has already
+# passed, so every goal bullet carries a command. Run each command in the
+# current working directory and require exit 0. Goal commands must be fast
+# and hermetic: a 30-second timeout and a command allowlist apply.
+# ---------------------------------------------------------------------------
+function Invoke-GoalCommand {
+    param([string]$Command)
+    $unsafePattern = @('\$\(', '`\(', 'rm\s+-rf', 'dd\s+', 'mkfs\s+', 'chmod\s+777')
+    foreach ($pat in $unsafePattern) {
+        if ($Command -match $pat) {
+            Write-Host "GOAL REJECTED (unsafe): $Command"
+            return -1
+        }
+    }
+    if (Get-Command bash -ErrorAction SilentlyContinue) {
+        $psi = [System.Diagnostics.ProcessStartInfo]::new('bash', "-c $Command")
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.UseShellExecute = $false
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        if (-not $proc.WaitForExit(30000)) {
+            $proc.Kill()
+            Write-Host "GOAL TIMEOUT (30s): $Command"
+            return 1
+        }
+        return $proc.ExitCode
+    }
+    $global:LASTEXITCODE = 0
+    try {
+        $job = Start-Job -ScriptBlock { param($c) Invoke-Expression $c | Out-Host } -ArgumentList $Command
+        if (Wait-Job $job -Timeout 30) {
+            Receive-Job $job | Out-Host
+            Remove-Job $job
+            return 0
+        }
+        Stop-Job $job; Remove-Job $job
+        Write-Host "GOAL TIMEOUT (30s): $Command"
+        return 1
+    }
+    catch { return 1 }
+}
+
+function Invoke-GoalConditions {
+    if ($SECTIONS -notcontains 'goal conditions') {
+        Write-Host "No goal conditions declared."
+        return 0
+    }
+    $count = 0
+    $failed = 0
+    foreach ($rawLine in (Get-SectionContent 'goal conditions')) {
+        $m = [regex]::Match($rawLine, '^\s*[-*+]\s+exit\s+0\s+when:\s*(.*\S)\s*$', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        if (-not $m.Success) { continue }
+        $cmd = $m.Groups[1].Value
+        $count++
+        $code = Invoke-GoalCommand $cmd
+        if ($code -eq 0) {
+            Write-Host "GOAL PASS (exit 0): $cmd"
+        }
+        else {
+            [Console]::Error.WriteLine("GOAL FAIL (exit $code): $cmd")
+            $failed++
+        }
+    }
+    if ($failed -gt 0) {
+        [Console]::Error.WriteLine("Goal conditions failed: $failed of $count goal(s) exited non-zero.")
+        return 1
+    }
+    Write-Host "Goal conditions passed: $count goal(s) exited 0."
+    return 0
+}
+
+if ($RunGoals) {
+    if ((Invoke-GoalConditions) -ne 0) { exit 1 }
 }
 
 if ($Format -eq 'Json') {

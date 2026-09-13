@@ -130,7 +130,7 @@ doc = json.loads(sys.stdin.read())
 assert doc["kind"] == "context_validation_result", doc["kind"]
 assert doc["result"] == "VALID", doc["result"]
 assert doc["exit_code"] == 0, doc["exit_code"]
-assert doc["protocol_version"] == "1.14.0", doc["protocol_version"]
+assert doc["protocol_version"] == "1.15.0", doc["protocol_version"]
 assert [m["id"] for m in doc["selected_modules"]] == ["security-review"], doc["selected_modules"]
 assert doc["diagnostics"] == [], doc["diagnostics"]
 '
@@ -500,4 +500,18 @@ assert doc["exit_code"] == 0, doc
         classify "context-$m-fenced-none.md"
         [ "$status" -eq 1 ] || { echo "context-$m-fenced-none.md → $status (want 1)"; return 1; }
     done
+}
+
+@test "VALID (0) for valid and none variants of the v1.15 mcp-tool-governance fixtures" {
+    classify "context-mcp-tool-governance-valid.md"
+    [ "$status" -eq 0 ] || { echo "context-mcp-tool-governance-valid.md → $status (want 0)"; return 1; }
+    classify "context-mcp-tool-governance-none.md"
+    [ "$status" -eq 0 ] || { echo "context-mcp-tool-governance-none.md → $status (want 0)"; return 1; }
+}
+
+@test "INVALID (1) for fenced variants of the v1.15 mcp-tool-governance fixtures" {
+    classify "context-mcp-tool-governance-fenced-valid.md"
+    [ "$status" -eq 1 ] || { echo "context-mcp-tool-governance-fenced-valid.md → $status (want 1)"; return 1; }
+    classify "context-mcp-tool-governance-fenced-none.md"
+    [ "$status" -eq 1 ] || { echo "context-mcp-tool-governance-fenced-none.md → $status (want 1)"; return 1; }
 }

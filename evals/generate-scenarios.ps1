@@ -43,6 +43,7 @@ function New-ScenarioTask {
         [string]$SkillsBlock,
         [string[]]$AcceptanceCriteria,
         [string[]]$EvidenceRows,
+        [string[]]$GoalConditions = @(),
         [string[]]$Approvals,
         [string[]]$BaselineLines,
         [string[]]$FinalLines,
@@ -58,6 +59,11 @@ function New-ScenarioTask {
 
     $acText = ($AcceptanceCriteria | ForEach-Object { "- $_" }) -join "`n"
     $evidenceText = ($EvidenceRows | ForEach-Object { "| $_ |" }) -join "`n"
+    # Optional exit-0 goal-conditions section (spec-pipeline support). Empty by
+    # default so regeneration stays byte-stable for scenarios that omit it.
+    $goalLines = @($GoalConditions | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $goalText = ($goalLines | ForEach-Object { "- $_" }) -join "`n"
+    $goalSection = if ($goalLines.Count -gt 0) { "## Goal conditions`n`n$goalText`n`n" } else { '' }
     $approvalsText = if ($Approvals.Count -gt 0) { ($Approvals | ForEach-Object { "- $_" }) -join "`n" } else { '- None identified' }
     $baselineText = ($BaselineLines | ForEach-Object { "- $_" }) -join "`n"
     $finalText = ($FinalLines | ForEach-Object { "- $_" }) -join "`n"
@@ -131,7 +137,7 @@ $acText
 | --- | --- | --- |
 $evidenceText
 
-## Context modules
+$goalSection## Context modules
 
 $ContextModulesBlock
 
@@ -167,7 +173,7 @@ function New-VerificationDoc {
     # insertion order of [ordered] dictionaries.
     [ordered]@{
         schema_version   = 1
-        protocol_version = '1.14.0'
+        protocol_version = '1.15.0'
         kind             = 'verification_result'
         result           = 'PASS'
         exit_code        = 0
@@ -541,6 +547,45 @@ $scenarios = @(
         checkA = 'responsive-layout-screenshots'; checkB = 'touch-target-audit'
     },
     @{
+        id = 'mcp-tool-governance'
+        description = 'Adding a read-only MCP database-inspection server must select mcp-tool-governance with MCP review approval and scope evidence.'
+        task = 'Add a read-only MCP server for database inspection with least-privilege tool scoping.'
+        changed = @('mcp/servers/db-inspector.json')
+        minProfile = 'standard'; reqModules = @('mcp-tool-governance'); reqGates = @('mcp-review'); reqEvidence = @('tool-scope-manifest','least-privilege-audit')
+        forbidden = @{ modules = @(); paths = @(); actions = @() }
+        expected = 'PASS'
+        profile = 'standard'
+        modulesBlock = "- mcp-tool-governance v1 loaded — read-only database inspector scoped to least privilege"
+        skillsBlock = "- verification-triage v1 invoked — scope manifest triaged before merge"
+        approvals = @("[x] AG-1: Approved by MCP Review on $date")
+        acceptance = @('AC-1: The inspector exposes only read-only tools within the scoped schema.', 'AC-2: Widening any tool scope requires a new approval record.')
+        evidence = @('AC-1 | tool-scope-manifest: exposed tools listed with least-privilege bounds | passed', 'AC-2 | least-privilege-audit: audit confirms no write-capable tools | passed')
+        baseline = @("No MCP database inspector exists; inspection runs against a shared credential.")
+        final = @("Inspector serves read-only tools under the scoped manifest; audit clean.")
+        files = @('mcp/servers/db-inspector.json')
+        checkA = 'tool-scope-manifest'; checkB = 'least-privilege-audit'
+    },
+    @{
+        id = 'spec-pipeline-chain'
+        description = 'Authoring a SPEC to PLAN to TASKS chain with exit-0 goal conditions must validate end to end.'
+        task = 'Author the SPEC to PLAN to TASKS chain with exit-0 goal conditions for the orders export endpoint.'
+        changed = @('docs/spec/orders-export-SPEC.md', 'docs/spec/orders-export-PLAN.md', 'docs/spec/orders-export-TASKS.md')
+        minProfile = 'standard'; reqModules = @('public-api-change'); reqGates = @('api-review'); reqEvidence = @('contract-tests','goal-conditions-verified')
+        forbidden = @{ modules = @(); paths = @(); actions = @() }
+        expected = 'PASS'
+        profile = 'standard'
+        modulesBlock = "- public-api-change v1 loaded — export endpoint chain covers the response contract"
+        skillsBlock = "- task-decomposition v1 invoked — chain broken into spec, plan, and tasks steps"
+        approvals = @("[x] AG-1: Approved by API Review on $date")
+        acceptance = @('AC-1: The chain links SPEC to PLAN to TASKS with no missing step.', 'AC-2: Every acceptance criterion maps to an exit-0 goal condition.')
+        evidence = @('AC-1 | contract-tests: request and response schema compliance verified | passed', 'AC-2 | goal-conditions-verified: every criterion maps to an exit-0 condition | passed')
+        goal = @('Exit 0 when: the dry-run export completes without errors.', 'Exit 0 when: the contract fixtures pass against the chained task files.')
+        baseline = @("Export endpoint ships without a written chain; verification is manual.")
+        final = @("Chain authored with goal conditions; contract fixtures green.")
+        files = @('docs/spec/orders-export-SPEC.md', 'docs/spec/orders-export-PLAN.md', 'docs/spec/orders-export-TASKS.md')
+        checkA = 'contract-fixtures'; checkB = 'goal-conditions-check'
+    },
+    @{
         id = 'testing-ci-config'
         description = 'Changing the test-runner configuration must select the testing-infrastructure module with ci-lead approval and pipeline evidence.'
         task = 'Add Jest shard parallelization to the CI pipeline and raise the coverage threshold.'
@@ -585,11 +630,12 @@ foreach ($s in $scenarios) {
 
     Write-Utf8 (Join-Path $dir 'scenario.json') (($scenario | ConvertTo-Json -Depth 6) + "`n")
 
+    $goalLines = if ($s.ContainsKey('goal')) { $s.goal } else { @() }
     if ($s.profile -eq 'high-assurance') {
         $task = New-ScenarioTask -Title $s.id -Profile $s.profile `
             -Rationale 'Fixture artifact for the behavioral evaluation harness.' `
             -ContextModulesBlock $s.modulesBlock -SkillsBlock $s.skillsBlock `
-            -AcceptanceCriteria $s.acceptance -EvidenceRows $s.evidence -Approvals $s.approvals `
+            -AcceptanceCriteria $s.acceptance -EvidenceRows $s.evidence -GoalConditions $goalLines -Approvals $s.approvals `
             -BaselineLines $s.baseline -FinalLines $s.final -FilesChanged $s.files `
             -Requirements $s.requirements -RiskAnalysis $s.riskAnalysis -RequirementMatrixRows $s.matrix `
             -NegativePathLines $s.negativePath -IntegrationLines $s.integration `
@@ -599,7 +645,7 @@ foreach ($s in $scenarios) {
         $task = New-ScenarioTask -Title $s.id -Profile $s.profile `
             -Rationale 'Fixture artifact for the behavioral evaluation harness.' `
             -ContextModulesBlock $s.modulesBlock -SkillsBlock $s.skillsBlock `
-            -AcceptanceCriteria $s.acceptance -EvidenceRows $s.evidence -Approvals $s.approvals `
+            -AcceptanceCriteria $s.acceptance -EvidenceRows $s.evidence -GoalConditions $goalLines -Approvals $s.approvals `
             -BaselineLines $s.baseline -FinalLines $s.final -FilesChanged $s.files
     }
     Write-Utf8 (Join-Path $dir 'artifacts\task.md') ($task + "`n")

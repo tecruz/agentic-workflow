@@ -647,4 +647,36 @@ Describe 'validate-task.ps1 risk-profile validator' {
     It 'VALID (0) when a canonical entry has a continuation prose line with no identifier' {
         Invoke-Validator 'continuation-without-id-valid.md' | Should -Be 0
     }
+
+    It 'VALID (0) for canonical goal conditions' {
+        Invoke-Validator 'goal-conditions-valid.md' | Should -Be 0
+    }
+
+    It 'INVALID (1) for a malformed goal conditions entry' {
+        Invoke-Validator 'goal-conditions-malformed.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) for an empty goal conditions section' {
+        Invoke-Validator 'goal-conditions-empty.md' | Should -Be 1
+    }
+
+    It '-RunGoals exits 0 when every goal command exits 0' {
+        & $validate -RunGoals (Join-Path $fixtures 'goal-run-pass.md') *> $null
+        $LASTEXITCODE | Should -Be 0
+    }
+
+    It '-RunGoals exits 1 when a goal command fails' {
+        & $validate -RunGoals (Join-Path $fixtures 'goal-run-fail.md') *> $null
+        $LASTEXITCODE | Should -Be 1
+    }
+
+    It '-RunGoals exits 1 with malformed goal conditions' {
+        & $validate -RunGoals (Join-Path $fixtures 'goal-conditions-malformed.md') *> $null
+        $LASTEXITCODE | Should -Be 1
+    }
+
+    It '-RunGoals rejects -Format Json' {
+        & $validate -Format Json -RunGoals (Join-Path $fixtures 'goal-run-pass.md') *> $null
+        $LASTEXITCODE | Should -Be 1
+    }
 }
