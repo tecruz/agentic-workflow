@@ -254,7 +254,7 @@ bash dist/agentic-workflow-<version>/install.sh /path/to/your-project
 ```
 
 The version is stamped from `.agentic/VERSION`; replace `<version>` with the
-directory `build-bundle.sh` produced (e.g. `1.13.0`).
+directory `build-bundle.sh` produced (e.g. `1.15.0`).
 
 ---
 
