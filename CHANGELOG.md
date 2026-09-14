@@ -38,6 +38,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   worker sandboxing, review stage, trace context, hooks, MCP/A2A
   guidance, spec pipeline, and memory lifecycle (PR #26). (TASK-037)
 
+### Fixed
+
+- **Task-file validator goal execution portability.** Fixed release-blocking CI failures on Windows and macOS where `--run-goals`/`-RunGoals` relied on non-portable execution paths:
+  - Bash: `timeout` missing on macOS; replaced with priority-ordered fallback
+    (timeout, gtimeout, pure-bash watchdog) that preserves GNU `timeout` exit 124
+    semantics. `.agentic/scripts/validate-task.sh` refactored with `run_goal_command`
+    helper; `run_goal_conditions()` now uses the portable runner.
+  - PowerShell: `bash` command resolves to WSL launcher on Windows CI,
+    causing pass-fixture exit failures. Replaced with self-contained
+    `pwsh` child-process execution that captures exit codes correctly.
+    `.agentic/scripts/validate-task.ps1` `Invoke-GoalCommand()` now spawns
+    native PowerShell directly, removing the Windows bash dependency.
+
 ## [1.14.0] - 2026-09-10
 
 ### Added

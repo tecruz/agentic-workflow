@@ -975,32 +975,25 @@ function Invoke-GoalCommand {
             return -1
         }
     }
-    if (Get-Command bash -ErrorAction SilentlyContinue) {
-        $psi = [System.Diagnostics.ProcessStartInfo]::new('bash', "-c $Command")
-        $psi.RedirectStandardOutput = $true
-        $psi.RedirectStandardError = $true
+    # Execute the goal in a child pwsh process: self-contained (no bash
+    # dependency — WSL bash on Windows runners is unreliable), exit
+    # codes propagate naturally, and a 30-second cap applies.
+    try {
+        $psi = [System.Diagnostics.ProcessStartInfo]::new((Get-Process -Id $PID).Path)
+        $psi.Arguments = "-NoProfile -NonInteractive -Command `"$($Command.Replace('"', '\"'))`""
         $psi.UseShellExecute = $false
         $proc = [System.Diagnostics.Process]::Start($psi)
-        if (-not $proc.WaitForExit(30000)) {
-            $proc.Kill()
-            Write-Host "GOAL TIMEOUT (30s): $Command"
-            return 1
-        }
-        return $proc.ExitCode
     }
-    $global:LASTEXITCODE = 0
-    try {
-        $job = Start-Job -ScriptBlock { param($c) Invoke-Expression $c | Out-Host } -ArgumentList $Command
-        if (Wait-Job $job -Timeout 30) {
-            Receive-Job $job | Out-Host
-            Remove-Job $job
-            return 0
-        }
-        Stop-Job $job; Remove-Job $job
+    catch {
+        Write-Host "GOAL FAIL (spawn): $Command"
+        return 1
+    }
+    if (-not $proc.WaitForExit(30000)) {
+        $proc.Kill()
         Write-Host "GOAL TIMEOUT (30s): $Command"
         return 1
     }
-    catch { return 1 }
+    return $proc.ExitCode
 }
 
 function Invoke-GoalConditions {

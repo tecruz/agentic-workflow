@@ -1167,8 +1167,44 @@ fi
 # ---------------------------------------------------------------------------
 # Goal execution: with --run-goals, structural validation above has already
 # passed, so every goal bullet carries a command. Run each command in the
-# current working directory and require exit 0.
+# current working directory and require exit 0. Goal commands must be fast and
+# hermetic: a portable 30-second cap is enforced (see run_goal_command).
 # ---------------------------------------------------------------------------
+# Run a goal command with a 30-second cap, matching GNU `timeout` semantics
+# (exit 124 == timed out). GNU coreutils `timeout` is absent on macOS by
+# default, so prefer `timeout`, then `gtimeout`, then a pure bash watchdog
+# (bash 3.2-safe) when neither is available.
+run_goal_command() {
+    local cmd="$1" code pid wpid
+    if command -v timeout >/dev/null 2>&1; then
+        timeout 30s bash -c "$cmd"
+        return $?
+    fi
+    if command -v gtimeout >/dev/null 2>&1; then
+        gtimeout 30s bash -c "$cmd"
+        return $?
+    fi
+    # Portable watchdog: run in the background and TERM it if still alive after
+    # 30s. A watchdog-initiated TERM surfaces as exit 143 (128+SIGTERM), which we
+    # normalize to 124 to mirror GNU `timeout`.
+    bash -c "$cmd" &
+    pid=$!
+    {
+        sleep 30
+        if kill -0 "$pid" 2>/dev/null; then
+            kill -TERM "$pid" 2>/dev/null
+        fi
+    } &
+    wpid=$!
+    wait "$pid" 2>/dev/null
+    code=$?
+    kill -0 "$wpid" 2>/dev/null && kill "$wpid" 2>/dev/null
+    wait "$wpid" 2>/dev/null
+    if [ "$code" -eq 143 ]; then
+        code=124
+    fi
+    return "$code"
+}
 run_goal_conditions() {
     local content count=0 failed=0 line cmd code
     if ! has_section "goal conditions"; then
@@ -1185,7 +1221,7 @@ run_goal_conditions() {
             failed=$(( failed + 1 ))
             continue
         fi
-        if timeout 30s bash -c "$cmd" 2>&1; then
+        if run_goal_command "$cmd" 2>&1; then
             echo "GOAL PASS (exit 0): $cmd"
         else
             code=$?
