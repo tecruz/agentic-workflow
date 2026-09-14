@@ -38,13 +38,13 @@ if [ ! -f "$TASK_FILE" ]; then
 fi
 
 task_code=0
-task_diag="$(bash "$SCRIPT_DIR/validate-task.sh" --handoff "$TASK_FILE" 2>&1 >/dev/null)" || task_code=$?
+task_diag="$("$SCRIPT_DIR/validate-task.sh" --handoff "$TASK_FILE" </dev/null 2>&1 >/dev/null)" || task_code=$?
 
 context_code=0
-context_diag="$(bash "$SCRIPT_DIR/validate-context.sh" --handoff "$TASK_FILE" 2>&1 >/dev/null)" || context_code=$?
+context_diag="$("$SCRIPT_DIR/validate-context.sh" --handoff "$TASK_FILE" </dev/null 2>&1 >/dev/null)" || context_code=$?
 
 skills_code=0
-skills_diag="$(bash "$SCRIPT_DIR/validate-skills.sh" --handoff "$TASK_FILE" 2>&1 >/dev/null)" || skills_code=$?
+skills_diag="$("$SCRIPT_DIR/validate-skills.sh" --handoff "$TASK_FILE" </dev/null 2>&1 >/dev/null)" || skills_code=$?
 
 if [ "$task_code" -eq 0 ] && [ "$context_code" -eq 0 ] && [ "$skills_code" -eq 0 ]; then
     echo "VALID: handoff gate satisfied (task contract + context contract + skills contract)"
