@@ -122,8 +122,7 @@ jobs:
               --json isDraft --jq '.isDraft' 2>/dev/null || echo "none"
           )"
           if [ "$IS_DRAFT" = "false" ]; then
-            echo "::error Published release $TAG already exists"
-            exit 1
+            echo "::notice Published release $TAG already exists; rerun will verify asset integrity"
           fi
           if [ "$IS_DRAFT" = "true" ]; then
             echo "::notice Draft release $TAG exists and will be reused"
@@ -335,8 +334,7 @@ jobs:
                 --notes-file /tmp/release-notes.md
               ;;
             false)
-              echo "::error Published release $TAG already exists; cannot overwrite"
-              exit 1
+              echo "::notice Published release $TAG already exists; verifying integrity"
               ;;
             none)
               gh release create "$TAG" \
@@ -397,5 +395,9 @@ jobs:
           )
           rm -rf "$REMOTE_DIR"
 
-          # Publish the draft
-          gh release edit "$TAG" --repo "${{ github.repository }}" --draft=false
+          # Publish the draft (if not already published)
+          if [ "$IS_DRAFT" != "false" ]; then
+            gh release edit "$TAG" --repo "${{ github.repository }}" --draft=false
+          else
+            echo "Release $TAG is already published and verified intact"
+          fi

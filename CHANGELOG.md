@@ -5,6 +5,31 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.15.1] - 2026-09-14
+
+### Fixed
+
+- **Task-file validator goal execution portability.** Fixed release-blocking CI failures on Windows and macOS where `--run-goals`/`-RunGoals` relied on non-portable execution paths:
+  - Bash: `timeout` missing on macOS; replaced with priority-ordered fallback
+    (timeout, gtimeout, pure-bash watchdog) that preserves GNU `timeout` exit 124
+    semantics. `.agentic/scripts/validate-task.sh` refactored with `run_goal_command`
+    helper; `run_goal_conditions()` now uses the portable runner.
+  - PowerShell: `bash` command resolves to WSL launcher on Windows CI,
+    causing pass-fixture exit failures. Replaced with self-contained
+    `pwsh` child-process execution that captures exit codes correctly.
+    `.agentic/scripts/validate-task.ps1` `Invoke-GoalCommand()` now spawns
+    native PowerShell directly, removing the Windows bash dependency.
+- **Handoff validator stdin redirect.** `.agentic/scripts/validate-handoff.sh`
+  now explicitly redirects sub-validator stdin from `/dev/null` (`</dev/null`),
+  preventing non-interactive MSYS/Git Bash batch invocation deadlocks under
+  Windows.
+
+### Changed
+
+- **Release workflow rerun hardening.** `.github/workflows/release.yml` now
+  supports idempotent reruns of already-published releases (verifying asset
+  integrity and checksums instead of failing mid-workflow).
+
 ## [1.15.0] - 2026-09-13
 
 ### Added

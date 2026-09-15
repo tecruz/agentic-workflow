@@ -49,6 +49,7 @@
 - [x] TASK-036 — v1.14.0 publication + bookkeeping consistency: recorded the published tag/release, backfilled TASK-025/034/035 into the Active Tasks checklist, refreshed the ROADMAP current-state line (see `.agentic/tasks/TASK-036-v1140-publication-and-bookkeeping.md`)
 - [x] TASK-037 — Post-v1.14 backlog completion (v1.15.0): MCP tool-governance module, MCP/A2A doc tables, goal-condition template support, 2 eval scenarios (corpus 17→19), ADR-0016, CHANGELOG, version sweep (see `.agentic/tasks/TASK-037-post-v114-backlog-completion.md`)
 - [x] TASK-038 — Goal-run fixtures + Windows PowerShell golden-harness portability: goal-run-unsafe/goal-run-timeout fixtures and golden rows; run-golden.sh pwsh leg fixed for WSL/MSYS bash (pwsh.exe resolution, POSIX→Windows path translation, CRLF normalization) so all 162 fixtures pass in both legs (see `.agentic/tasks/TASK-038-goal-run-fixtures-pwsh-golden-portability.md`)
+- [x] TASK-040 — v1.15.1 patch release and release workflow rerun hardening: protocol_version sweep to 1.15.1, release.yml idempotency check for published releases, `validate-handoff.sh` non-interactive stdin redirect hardening (see `.agentic/tasks/TASK-040-v1151-patch-and-hardening.md`)
 
 ## Recent Decisions
 
