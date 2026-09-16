@@ -369,15 +369,31 @@ function Invoke-Check {
             }
         }
     }
+    # When a check routes through bash on Windows (an extensionless launcher or a
+    # direct `bash <script.sh> ...` check), feed stdin from the null device:
+    # MSYS/Git Bash processes spawned from a parent without an interactive
+    # console (CI service host, agent wrapper) can otherwise stall waiting on an
+    # attached-but-never-fed stdin pipe.
+    $stdinNull = $IsWindows -and ($invocationExe -match '(?:^|[\\/])bash(?:\.exe)?$')
     try {
         $ErrorActionPreference = 'Stop'
         $global:LASTEXITCODE = $null
         $prevErrorCount = $Error.Count
         if ($Format -eq 'Json') {
-            & $invocationExe @invocationArgs 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
+            if ($stdinNull) {
+                $null | & $invocationExe @invocationArgs 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
+            }
+            else {
+                & $invocationExe @invocationArgs 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
+            }
         }
         else {
-            & $invocationExe @invocationArgs
+            if ($stdinNull) {
+                $null | & $invocationExe @invocationArgs
+            }
+            else {
+                & $invocationExe @invocationArgs
+            }
         }
         $code = $LASTEXITCODE
         if ($null -eq $code) {

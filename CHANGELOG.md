@@ -5,6 +5,22 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Verifier stdin redirect for bash-routed checks on Windows.** `verify.ps1`
+  now feeds stdin from the null device (`$null |`) whenever a check runs
+  through bash (both extensionless `/usr/bin/env` launchers and explicit
+  `bash <script.sh>` checks such as `handoff-gate`, `evals-sh`, and the
+  `sh-syntax-*` suite). MSYS/Git Bash checks spawned from a non-interactive
+  PowerShell parent (CI service host, agent wrapper) inherit a stdin pipe that
+  never reaches EOF, so any check whose script reads stdin would block until
+  the outer harness timeout kills it; local dogfooding via `verify.ps1` now
+  completes instead of stalling at the first stdin-reading bash check.
+  Exit codes and JSON output semantics are unchanged. Covered by two new
+  Pester regression tests. (TASK-041)
+
 ## [1.15.1] - 2026-09-14
 
 ### Fixed

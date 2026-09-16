@@ -183,6 +183,47 @@ Describe 'verify.ps1 state model' {
         finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
     }
 
+    # Windows regression: stdin redirect for bash-routed checks
+    # -----------------------------------------------------------
+    # On Windows, MSYS/Git Bash agents spawned under a non-interactive parent
+    # (CI service host, agent wrapper) can block indefinitely if a check that
+    # reads stdin inherits a never-closed pipe. verify.ps1 must feed stdin from
+    # the null device for `bash <script.sh>` checks and propagate the exit code.
+
+    It 'a bash-script check that reads stdin completes on Windows without hanging' {
+        if (-not $IsWindows) { return }
+        $bash = Get-Command bash -ErrorAction SilentlyContinue
+        if (-not $bash) { Set-ItResult -Skipped -Because 'bash not available'; return }
+        $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vtest-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic') -Force | Out-Null
+        try {
+            # This check reads stdin and then exits 0; with stdin redirected from
+            # the null device it must see EOF immediately instead of blocking.
+            Set-Content -LiteralPath (Join-Path $tmp 'check.sh') -Value "#!/usr/bin/env bash`ncat >/dev/null`nexit 0"
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value ("required`tstdin-check`t.`tbash`tcheck.sh")
+            Push-Location $tmp
+            try { & $verify *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
+            $code | Should -Be 0
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'a bash-script check still propagates its exit code when stdin is redirected' {
+        if (-not $IsWindows) { return }
+        $bash = Get-Command bash -ErrorAction SilentlyContinue
+        if (-not $bash) { Set-ItResult -Skipped -Because 'bash not available'; return }
+        $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vtest-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic') -Force | Out-Null
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'fail.sh') -Value "#!/usr/bin/env bash`ncat >/dev/null`nexit 1"
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\checks.tsv') -Value ("required`tstdin-fail`t.`tbash`tfail.sh")
+            Push-Location $tmp
+            try { & $verify *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
+            $code | Should -Be 1
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
     It 'checks.tsv working dir with a sibling-prefix path is rejected' {
         $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vtest-' + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic') -Force | Out-Null
