@@ -7,7 +7,7 @@
 
 ## Current state
 
-- **Version**: `1.15.0` (post-v1.14 trend-driven backlog completed: worker sandboxing, review stage, trace context, hooks, MCP/A2A guidance + tool-governance module, spec pipeline + goal conditions, memory lifecycle; eval corpus 19 scenarios; all 14 context modules with fixture + eval coverage)
+- **Version**: `1.15.1` (post-v1.14 trend-driven backlog completed: worker sandboxing, review stage, trace context, hooks, MCP/A2A guidance + tool-governance module, spec pipeline + goal conditions, memory lifecycle; v1.15.1 swept + release-hardened — rerun-safe publish step, portable `--run-goals` timeouts; post-release fix on master: `verify.ps1` redirects stdin from `$null` for bash-routed checks on Windows; eval corpus 19 scenarios; all 14 context modules with fixture + eval coverage)
 - The core loop (`DISCOVER → CLASSIFY RISK → PLAN → IMPLEMENT → VERIFY →
   HANDOFF`), the honest verification model, the non-destructive installer, risk
   profiles + evidence contracts, context modules + behavioral evals, and the
