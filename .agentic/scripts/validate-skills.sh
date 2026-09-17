@@ -286,6 +286,62 @@ registry_invalid() {
     fail_blocked "SKILLS_REGISTRY_INVALID" "registry" "${2:-}" "Skills registry is unusable: $1"
 }
 
+# Optional ecosystem Agent Skills frontmatter (YAML between leading '---'
+# fences). When the file starts with '---', validate the fields the contract
+# depends on (name/description both required when frontmatter is present).
+# Files without frontmatter stay valid: the protocol '##' sections below
+# remain the authoritative contract, so adopter-authored skills are not
+# broken by this check.
+validate_frontmatter() {
+    local f="$1" dirname="$2" first
+    first="$(sed -n '1p' "$f" | tr -d '\r')"
+    [ "$first" = "---" ] || return 0
+    local name="" desc="" closed=0 line key value idx
+    while IFS= read -r line || [ -n "$line" ]; do
+        line="${line%$'\r'}"
+        if [ "$line" = "---" ]; then closed=1; break; fi
+        case "$line" in
+            '#'*|'') continue ;;
+        esac
+        case "$line" in *:*) ;; *) continue ;; esac
+        idx=""
+        idx="$(printf '%s\n' "$line" | awk '{print index($0, ":")}')"
+        [ -n "$idx" ] && [ "$idx" -gt 0 ] || continue
+        key="${line:0:$((idx - 1))}"
+        value="${line:$((idx))}"
+        value="$(printf '%s' "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+        value="${value%\"}"
+        value="${value#\"}"
+        case "$key" in
+            name) name="$value" ;;
+            description) desc="$value" ;;
+        esac
+    done < <(sed -n '2,$p' "$f")
+    if [ "$closed" -ne 1 ]; then
+        registry_invalid "skill '$dirname' frontmatter has no closing '---' fence." "$dirname"
+        return 1
+    fi
+    if [ -z "$name" ]; then
+        registry_invalid "skill '$dirname' frontmatter is missing 'name'." "$dirname"
+        return 1
+    fi
+    if ! printf '%s' "$name" | grep -Eq '^[a-z0-9][a-z0-9-]{0,63}$' \
+        || printf '%s' "$name" | grep -Eq -e '--' \
+        || printf '%s' "$name" | grep -Eq -e '-$'; then
+        registry_invalid "skill '$dirname' frontmatter name '$name' is not a valid skill name." "$dirname"
+        return 1
+    fi
+    if [ "$name" != "$dirname" ]; then
+        registry_invalid "skill '$dirname' frontmatter name '$name' differs from its directory name." "$dirname"
+        return 1
+    fi
+    if [ -z "$desc" ]; then
+        registry_invalid "skill '$dirname' frontmatter is missing a non-empty 'description'." "$dirname"
+        return 1
+    fi
+    return 0
+}
+
 load_registry() {
     if [ ! -d "$REGISTRY" ]; then
         fail_blocked "SKILLS_REGISTRY_MISSING" "" "" "Skills registry not found: $(basename "$REGISTRY")"
@@ -299,6 +355,8 @@ load_registry() {
         mf="${dir}SKILL.md"
         [ -f "$mf" ] || continue
         dirname="$(basename "$dir")"
+
+        validate_frontmatter "$mf" "$dirname" || return 1
 
         id="" ; ver="" ; min=""
         id_n=0 ; ver_n=0 ; min_n=0

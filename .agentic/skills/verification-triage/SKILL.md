@@ -1,3 +1,10 @@
+---
+name: verification-triage
+description: Diagnosing a failing check or blocked verification before attempting repair. Use when a required check fails or reports BLOCKED, when a verifier fails and a repair cycle is needed, or to distinguish flaky order-dependent behavior from real regressions.
+metadata:
+  minimum-risk-profile: standard
+  skill-id: verification-triage
+---
 # Skill: verification-triage
 
 ## ID

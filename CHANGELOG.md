@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Ecosystem Agent Skills frontmatter (hybrid interop).** Each registry
+  skill (`.agentic/skills/*/SKILL.md`) now opens with a YAML frontmatter block
+  compatible with the ecosystem Agent Skills format (`name`, `description`,
+  `metadata: minimum-risk-profile, skill-id`), followed by the existing
+  protocol `##` sections unchanged. The skill validators now validate the
+  frontmatter when present (name must match the directory, description must be
+  non-empty, name charset per the ecosystem rules) and tolerate its absence —
+  adopter skills without frontmatter remain valid. Covered by five sandboxed
+  registry tests per language (Bats + Pester) verifying byte-identical
+  outcomes across both twins. (TASK-042)
+
 ### Fixed
 
 - **Verifier stdin redirect for bash-routed checks on Windows.** `verify.ps1`

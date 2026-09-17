@@ -146,6 +146,153 @@ Describe 'validate-skills.ps1 skill-invocation validator' {
             Remove-Item -Recurse -Force $sb -ErrorAction SilentlyContinue
         }
     }
+
+    # Ecosystem Agent Skills frontmatter (TASK-042 hybrid format):
+    # frontmatter is optional; when present it must be well-formed and the
+    # declared name must match the skill directory.
+
+    It 'VALID (0) when a skill carries well-formed ecosystem frontmatter' {
+        $sb = Join-Path ([System.IO.Path]::GetTempPath()) ("skreg-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $sb 'test-skill') -Force | Out-Null
+        $body = @(
+            '---', 'name: test-skill', 'description: helper', '---',
+            '# Skill: x', '', '## ID', '', 'test-skill', '',
+            '## Version', '', '1', '',
+            '## Minimum risk profile', '', 'standard', '',
+            '## Invoked when', '', '- trigger', '',
+            '## Required context', '', '- context', '',
+            '## Approval gates', '', '- gate', '',
+            '## Required evidence', '', '- evidence', '',
+            '## Prohibited shortcuts', '', '- shortcut'
+        )
+        Set-Content -LiteralPath (Join-Path $sb 'test-skill' 'SKILL.md') -Value $body
+        $taskDir = Join-Path ([System.IO.Path]::GetTempPath()) ("sktask-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $taskDir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $taskDir 'task.md') -Value @('# TASK-X', '', '## Status', '', 'Status: done', '', '## Risk profile', '', 'Profile: standard', '', '## Skills', '', '- test-skill v1 invoked — probe')
+        $old = $env:AGENTIC_SKILLS_REGISTRY
+        $env:AGENTIC_SKILLS_REGISTRY = $sb
+        try {
+            $out = & $script:validate -TaskFile (Join-Path $taskDir 'task.md') 2>&1
+            $LASTEXITCODE | Should -Be 0
+        }
+        finally {
+            if ($null -eq $old) { Remove-Item Env:AGENTIC_SKILLS_REGISTRY -ErrorAction SilentlyContinue }
+            else { $env:AGENTIC_SKILLS_REGISTRY = $old }
+            Remove-Item -Recurse -Force $sb, $taskDir -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'BLOCKED (2) when frontmatter name differs from the skill directory' {
+        $sb = Join-Path ([System.IO.Path]::GetTempPath()) ("skreg-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $sb 'test-skill') -Force | Out-Null
+        $body = @(
+            '---', 'name: wrong-name', 'description: helper', '---',
+            '# Skill: x', '', '## ID', '', 'test-skill', '',
+            '## Version', '', '1', '',
+            '## Minimum risk profile', '', 'standard', '',
+            '## Invoked when', '', '- trigger', '',
+            '## Required context', '', '- context', '',
+            '## Approval gates', '', '- gate', '',
+            '## Required evidence', '', '- evidence', '',
+            '## Prohibited shortcuts', '', '- shortcut'
+        )
+        Set-Content -LiteralPath (Join-Path $sb 'test-skill' 'SKILL.md') -Value $body
+        $old = $env:AGENTIC_SKILLS_REGISTRY
+        $env:AGENTIC_SKILLS_REGISTRY = $sb
+        try {
+            Invoke-Validator 'skill-valid-single.md' | Select-Object -ExpandProperty Code | Should -Be 2
+        }
+        finally {
+            if ($null -eq $old) { Remove-Item Env:AGENTIC_SKILLS_REGISTRY -ErrorAction SilentlyContinue }
+            else { $env:AGENTIC_SKILLS_REGISTRY = $old }
+            Remove-Item -Recurse -Force $sb -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'BLOCKED (2) when frontmatter has an empty description' {
+        $sb = Join-Path ([System.IO.Path]::GetTempPath()) ("skreg-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $sb 'test-skill') -Force | Out-Null
+        $body = @(
+            '---', 'name: test-skill', 'description:', '---',
+            '# Skill: x', '', '## ID', '', 'test-skill', '',
+            '## Version', '', '1', '',
+            '## Minimum risk profile', '', 'standard', '',
+            '## Invoked when', '', '- trigger', '',
+            '## Required context', '', '- context', '',
+            '## Approval gates', '', '- gate', '',
+            '## Required evidence', '', '- evidence', '',
+            '## Prohibited shortcuts', '', '- shortcut'
+        )
+        Set-Content -LiteralPath (Join-Path $sb 'test-skill' 'SKILL.md') -Value $body
+        $old = $env:AGENTIC_SKILLS_REGISTRY
+        $env:AGENTIC_SKILLS_REGISTRY = $sb
+        try {
+            Invoke-Validator 'skill-valid-single.md' | Select-Object -ExpandProperty Code | Should -Be 2
+        }
+        finally {
+            if ($null -eq $old) { Remove-Item Env:AGENTIC_SKILLS_REGISTRY -ErrorAction SilentlyContinue }
+            else { $env:AGENTIC_SKILLS_REGISTRY = $old }
+            Remove-Item -Recurse -Force $sb -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'BLOCKED (2) when the frontmatter fence is unclosed' {
+        $sb = Join-Path ([System.IO.Path]::GetTempPath()) ("skreg-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $sb 'test-skill') -Force | Out-Null
+        # Opening '---' with no closing fence: everything after is frontmatter-ish.
+        $body = @(
+            '---', 'name: test-skill', 'description: helper',
+            '# Skill: x', '', '## ID', '', 'test-skill', '',
+            '## Version', '', '1', '',
+            '## Minimum risk profile', '', 'standard', '',
+            '## Invoked when', '', '- trigger', '',
+            '## Required context', '', '- context', '',
+            '## Approval gates', '', '- gate', '',
+            '## Required evidence', '', '- evidence', '',
+            '## Prohibited shortcuts', '', '- shortcut'
+        )
+        Set-Content -LiteralPath (Join-Path $sb 'test-skill' 'SKILL.md') -Value $body
+        $old = $env:AGENTIC_SKILLS_REGISTRY
+        $env:AGENTIC_SKILLS_REGISTRY = $sb
+        try {
+            Invoke-Validator 'skill-valid-single.md' | Select-Object -ExpandProperty Code | Should -Be 2
+        }
+        finally {
+            if ($null -eq $old) { Remove-Item Env:AGENTIC_SKILLS_REGISTRY -ErrorAction SilentlyContinue }
+            else { $env:AGENTIC_SKILLS_REGISTRY = $old }
+            Remove-Item -Recurse -Force $sb -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'VALID (0) legacy skill without frontmatter remains valid' {
+        $sb = Join-Path ([System.IO.Path]::GetTempPath()) ("skreg-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $sb 'test-skill') -Force | Out-Null
+        $body = @(
+            '# Skill: x', '', '## ID', '', 'test-skill', '',
+            '## Version', '', '1', '',
+            '## Minimum risk profile', '', 'standard', '',
+            '## Invoked when', '', '- trigger', '',
+            '## Required context', '', '- context', '',
+            '## Approval gates', '', '- gate', '',
+            '## Required evidence', '', '- evidence', '',
+            '## Prohibited shortcuts', '', '- shortcut'
+        )
+        Set-Content -LiteralPath (Join-Path $sb 'test-skill' 'SKILL.md') -Value $body
+        $taskDir = Join-Path ([System.IO.Path]::GetTempPath()) ("sktask-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $taskDir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $taskDir 'task.md') -Value @('# TASK-X', '', '## Status', '', 'Status: done', '', '## Risk profile', '', 'Profile: standard', '', '## Skills', '', '- test-skill v1 invoked — probe')
+        $old = $env:AGENTIC_SKILLS_REGISTRY
+        $env:AGENTIC_SKILLS_REGISTRY = $sb
+        try {
+            $out = & $script:validate -TaskFile (Join-Path $taskDir 'task.md') 2>&1
+            $LASTEXITCODE | Should -Be 0
+        }
+        finally {
+            if ($null -eq $old) { Remove-Item Env:AGENTIC_SKILLS_REGISTRY -ErrorAction SilentlyContinue }
+            else { $env:AGENTIC_SKILLS_REGISTRY = $old }
+            Remove-Item -Recurse -Force $sb, $taskDir -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 Describe 'validate-skills cross-language semantic parity' {

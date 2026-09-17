@@ -7,6 +7,11 @@
 > `## Skills`. Do not load skill contents into every session: load only what
 > the task invokes, before the corresponding work begins.
 >
+> Every `SKILL.md` also carries the ecosystem **[Agent Skills](https://agentskills.io/)
+> frontmatter** (`name`, `description`, `metadata`) above the protocol sections
+> (TASK-042). The protocol validators validate the frontmatter when present and
+> tolerate its absence for adopter-authored skills.
+>
 > Invocation line format (one bullet per skill, recorded in the task file):
 >
 >     - <skill-id> v<version> invoked — <invocation rationale>

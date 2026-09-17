@@ -178,6 +178,113 @@ assert doc["diagnostics"][0]["code"] == "SKILL_UNKNOWN", doc["diagnostics"][0]
     [ "$code" -eq 1 ]
 }
 
+# --- Ecosystem Agent Skills frontmatter (TASK-042 hybrid format) ------------
+# Frontmatter (--- delimiters + name/description) is optional; when present it
+# must be well-formed (name = directory, non-empty description).
+
+_fm_script_body() {
+    printf '%s\n' \
+        '# Skill: x' \
+        '' \
+        '## ID' \
+        '' \
+        'test-skill' \
+        '' \
+        '## Version' \
+        '' \
+        '1' \
+        '' \
+        '## Minimum risk profile' \
+        '' \
+        'standard' \
+        '' \
+        '## Invoked when' \
+        '' \
+        '- trigger' \
+        '' \
+        '## Required context' \
+        '' \
+        '- context' \
+        '' \
+        '## Approval gates' \
+        '' \
+        '- gate' \
+        '' \
+        '## Required evidence' \
+        '' \
+        '- evidence' \
+        '' \
+        '## Prohibited shortcuts' \
+        '' \
+        '- shortcut'
+}
+
+@test "VALID (0) when a skill carries well-formed frontmatter" {
+    sandbox="$(mktemp -d)"
+    mkdir -p "$sandbox/test-skill"
+    {
+        printf -- '---\nname: test-skill\ndescription: helper\n---\n'
+        _fm_script_body
+    } > "$sandbox/test-skill/SKILL.md"
+    mk_task="$(mktemp -d)/task.md"
+    printf '%s\n' '# TASK-X' '' '## Status' '' 'Status: done' '' '## Risk profile' '' 'Profile: standard' '' '## Skills' '' '- test-skill v1 invoked — probe' > "$mk_task"
+    AGENTIC_SKILLS_REGISTRY="$sandbox" run bash "$VALIDATE" "$mk_task" >/dev/null 2>&1
+    code="$status"
+    rm -rf "$sandbox" "$mk_task" 2>/dev/null || true
+    [ "$code" -eq 0 ]
+}
+
+@test "BLOCKED (2) when a skill's frontmatter name differs from its directory" {
+    sandbox="$(mktemp -d)"
+    mkdir -p "$sandbox/test-skill"
+    {
+        printf -- '---\nname: different-name\ndescription: helper\n---\n'
+        _fm_script_body
+    } > "$sandbox/test-skill/SKILL.md"
+    classify_with_registry "$sandbox" "$FIXTURES/skill-valid-single.md"
+    code="$status"
+    rm -rf "$sandbox"
+    [ "$code" -eq 2 ]
+}
+
+@test "BLOCKED (2) when a skill's frontmatter has an empty description" {
+    sandbox="$(mktemp -d)"
+    mkdir -p "$sandbox/test-skill"
+    {
+        printf -- '---\nname: test-skill\ndescription:\n---\n'
+        _fm_script_body
+    } > "$sandbox/test-skill/SKILL.md"
+    classify_with_registry "$sandbox" "$FIXTURES/skill-valid-single.md"
+    code="$status"
+    rm -rf "$sandbox"
+    [ "$code" -eq 2 ]
+}
+
+@test "BLOCKED (2) when a skill's frontmatter fence is unclosed" {
+    sandbox="$(mktemp -d)"
+    mkdir -p "$sandbox/test-skill"
+    {
+        printf -- '---\nname: test-skill\n'
+        _fm_script_body
+    } > "$sandbox/test-skill/SKILL.md"
+    classify_with_registry "$sandbox" "$FIXTURES/skill-valid-single.md"
+    code="$status"
+    rm -rf "$sandbox"
+    [ "$code" -eq 2 ]
+}
+
+@test "VALID (0) legacy skill without frontmatter remains valid" {
+    sandbox="$(mktemp -d)"
+    mkdir -p "$sandbox/test-skill"
+    _fm_script_body > "$sandbox/test-skill/SKILL.md"
+    mk_task="$(mktemp -d)/task.md"
+    printf '%s\n' '# TASK-X' '' '## Status' '' 'Status: done' '' '## Risk profile' '' 'Profile: standard' '' '## Skills' '' '- test-skill v1 invoked — probe' > "$mk_task"
+    AGENTIC_SKILLS_REGISTRY="$sandbox" run bash "$VALIDATE" "$mk_task" >/dev/null 2>&1
+    code="$status"
+    rm -rf "$sandbox" "$mk_task" 2>/dev/null || true
+    [ "$code" -eq 0 ]
+}
+
 @test "INVALID (1) for an invocation hidden inside a fenced code block" {
     classify skill-fenced-selection.md
     [ "$status" -eq 1 ]

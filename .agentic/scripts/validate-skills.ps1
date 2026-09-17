@@ -221,6 +221,48 @@ function Test-PlaceholderText {
 # ---------------------------------------------------------------------------
 $script:RegistryRecords = [System.Collections.Generic.List[object]]::new()
 
+# Optional ecosystem Agent Skills frontmatter (YAML between leading '---'
+# fences). When the file starts with '---', validate the fields the contract
+# depends on (name/description both required once frontmatter is present).
+# Files without frontmatter stay valid: the protocol '##' sections below
+# remain the authoritative contract, so adopter-authored skills are not
+# broken by this check.
+function Test-SkillFrontmatter {
+    param([string]$Path, [string]$DirName)
+    $raw = Get-Content -LiteralPath $Path
+    $first = ($raw | Select-Object -First 1)
+    if ($null -eq $first) { $first = '' }
+    if ($first.TrimEnd("`r") -ne '---') { return }
+    $name = ''; $desc = ''; $closed = $false
+    foreach ($line in ($raw | Select-Object -Skip 1)) {
+        $l = $line.TrimEnd("`r")
+        if ($l -eq '---') { $closed = $true; break }
+        if ($l -match '^\s*#' -or $l -match '^\s*$') { continue }
+        if ($l -notmatch '^[^:]+:') { continue }
+        $kv = $l -split ':', 2
+        $v2 = $kv[1].Trim().Trim('"')
+        switch ($kv[0]) {
+            'name' { $name = $v2 }
+            'description' { $desc = $v2 }
+        }
+    }
+    if (-not $closed) {
+        Write-Blocked 'SKILLS_REGISTRY_INVALID' 'registry' $DirName "Skills registry is unusable: skill '$DirName' frontmatter has no closing '---' fence."
+    }
+    elseif ([string]::IsNullOrWhiteSpace($name)) {
+        Write-Blocked 'SKILLS_REGISTRY_INVALID' 'registry' $DirName "Skills registry is unusable: skill '$DirName' frontmatter is missing 'name'."
+    }
+    elseif ($name -cnotmatch '^[a-z0-9][a-z0-9-]{0,63}$' -or $name -match '--' -or $name -match '-$') {
+        Write-Blocked 'SKILLS_REGISTRY_INVALID' 'registry' $DirName "Skills registry is unusable: skill '$DirName' frontmatter name '$name' is not a valid skill name."
+    }
+    elseif ($name -cne $DirName) {
+        Write-Blocked 'SKILLS_REGISTRY_INVALID' 'registry' $DirName "Skills registry is unusable: skill '$DirName' frontmatter name '$name' differs from its directory name."
+    }
+    elseif ([string]::IsNullOrWhiteSpace($desc)) {
+        Write-Blocked 'SKILLS_REGISTRY_INVALID' 'registry' $DirName "Skills registry is unusable: skill '$DirName' frontmatter is missing a non-empty 'description'."
+    }
+}
+
 function Get-HeadingStats {
     # Returns an ordered hashtable heading-lower-name -> @{ Count; First; HasContent }
     param([string[]]$ContentLines)
@@ -264,6 +306,8 @@ if (-not (Test-Path -LiteralPath $script:RegistryDir -PathType Container)) {
 foreach ($dir in (Get-ChildItem -LiteralPath $script:RegistryDir -Directory | Sort-Object Name)) {
     $mf = Join-Path $dir.FullName 'SKILL.md'
     if (-not (Test-Path -LiteralPath $mf -PathType Leaf)) { continue }
+
+    Test-SkillFrontmatter -Path $mf -DirName $dir.Name
 
     $stats = Get-HeadingStats (Get-Content -LiteralPath $mf)
 

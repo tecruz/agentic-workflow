@@ -1,3 +1,10 @@
+---
+name: release-verification
+description: Confirming VERSION/CHANGELOG/tag agreement and release pipeline integrity before publishing. Use when cutting, tagging, and publishing a release.
+metadata:
+  minimum-risk-profile: standard
+  skill-id: release-verification
+---
 # Skill: release-verification
 
 ## ID

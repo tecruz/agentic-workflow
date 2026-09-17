@@ -1,3 +1,10 @@
+---
+name: task-decomposition
+description: Breaking a request into atomic, verifiable steps before planning. Use when a task is too large or multi-phase for a single implementation pass.
+metadata:
+  minimum-risk-profile: standard
+  skill-id: task-decomposition
+---
 # Skill: task-decomposition
 
 ## ID

@@ -1,3 +1,10 @@
+---
+name: migration-rollback
+description: Reversible migration planning with preflight checks and checkpoint commits. Use for schema changes, backfills, destructive data operations, or anything needing a recovery plan.
+metadata:
+  minimum-risk-profile: high-assurance
+  skill-id: migration-rollback
+---
 # Skill: migration-rollback
 
 ## ID

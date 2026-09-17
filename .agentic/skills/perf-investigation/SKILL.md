@@ -1,3 +1,10 @@
+---
+name: perf-investigation
+description: Perfetto/system-trace-driven performance analysis. Use for latency or memory regressions and benchmark-justified hot-path changes.
+metadata:
+  minimum-risk-profile: standard
+  skill-id: perf-investigation
+---
 # Skill: perf-investigation
 
 ## ID

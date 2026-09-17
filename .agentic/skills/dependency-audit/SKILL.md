@@ -1,3 +1,10 @@
+---
+name: dependency-audit
+description: Auditing manifest or lockfile changes, dependency upgrades, and supply-chain implications. Use when changing dependencies or package manager configuration.
+metadata:
+  minimum-risk-profile: standard
+  skill-id: dependency-audit
+---
 # Skill: dependency-audit
 
 ## ID
