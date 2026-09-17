@@ -56,8 +56,8 @@ behavior. Escalation signals reviewed; none apply.
 
 - .agentic/STATUS.md — added TASK-025/034/035/036 to the Active Tasks checklist
 - .agentic/tasks/TASK-033-v1140-release-bookkeeping.md — recorded publication (removed the stale pending-approval wording)
-- .agentic/tasks/034-ci-retry-hardening.md — approval gate date added
-- .agentic/tasks/035-module-eval-scenarios.md — approval gate date added
+- .agentic/tasks/TASK-034-ci-retry-hardening.md — approval gate date added
+- .agentic/tasks/TASK-035-module-eval-scenarios.md — approval gate date added
 - ROADMAP.md — current-state line refreshed
 - .agentic/tasks/TASK-036-v1140-publication-and-bookkeeping.md (new)
 
