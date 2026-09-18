@@ -22,6 +22,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **CI badge URL in README.** The badge image used the legacy
+  `/workflows/CI/badge.svg` endpoint, which now returns "no status" (the
+  workflow-name URL form is no longer maintained); switched to the canonical
+  `/actions/workflows/ci.yml/badge.svg` form wrapped around a link to the CI
+  workflow page (`href=/actions/<workflow-filename>`), which renders correctly.
+  (TASK-043)
+- **README self-drift.** Bundle example version moved from `1.15.0` to
+  `1.15.1`; the What's-Included file tree gains the `.agentic/orchestration/`
+  directory. (TASK-043)
 - **Verifier stdin redirect for bash-routed checks on Windows.** `verify.ps1`
   now feeds stdin from the null device (`$null |`) whenever a check runs
   through bash (both extensionless `/usr/bin/env` launchers and explicit

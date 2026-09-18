@@ -1,6 +1,6 @@
 # Universal Agentic Development Protocol
 
-![CI](https://github.com/tecruz/agentic-workflow/workflows/CI/badge.svg?branch=master)
+[![CI](https://github.com/tecruz/agentic-workflow/actions/workflows/ci.yml/badge.svg)](https://github.com/tecruz/agentic-workflow/actions/workflows/ci.yml)
 
 A technology-agnostic, tool-agnostic agentic workflow you can drop into your
 project. It gives every AI coding agent the same operating instructions, the
@@ -254,7 +254,7 @@ bash dist/agentic-workflow-<version>/install.sh /path/to/your-project
 ```
 
 The version is stamped from `.agentic/VERSION`; replace `<version>` with the
-directory `build-bundle.sh` produced (e.g. `1.15.0`).
+directory `build-bundle.sh` produced (e.g. `1.15.1`).
 
 ---
 
@@ -500,6 +500,7 @@ CI on any mismatch. Both the Bats and Pester suites run on all three platforms;
     ├── tasks/                     # One file per task
     ├── decisions/                 # Immutable Architecture Decision Records
     ├── templates/                 # Feature spec, bug report, refactor plan, chore, spike, verdict, task file
+    ├── orchestration/             # Coordinator twins, README, runtime worktrees
     └── scripts/
         ├── verify.sh              # Verifier (Linux/macOS)
         ├── verify.ps1             # Verifier (Windows)
