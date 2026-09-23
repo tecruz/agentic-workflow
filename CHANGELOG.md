@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Architecture pointer seeding.** When the adopting project already
+  documents its architecture (`ARCHITECTURE.md` at the repository root, or
+  `docs/ARCHITECTURE.md`), a fresh install seeds `.agentic/ARCHITECTURE.md`
+  as a short pointer to the canonical doc instead of the blank fill-in
+  template, and the post-install hint says so. Existing seeds are
+  project-owned and never overwritten, so nothing changes for adopters who already filled
+  it in. Mirrored across `install.sh` / `install.ps1`; covered by four new
+  install regression tests per language (root doc, docs/ doc, no-doc
+  template path, existing-seed preservation). (TASK-045)
 - **Ecosystem Agent Skills frontmatter (hybrid interop).** Each registry
   skill (`.agentic/skills/*/SKILL.md`) now opens with a YAML frontmatter block
   compatible with the ecosystem Agent Skills format (`name`, `description`,

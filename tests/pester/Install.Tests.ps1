@@ -193,6 +193,57 @@ Describe 'install.ps1' {
         finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
     }
 
+    It 'fresh install seeds an architecture pointer when a root ARCHITECTURE.md exists' {
+        $tmp = New-TestDir
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'ARCHITECTURE.md') -Value '# Existing Architecture'
+            & $install -Target $tmp *> $null
+            $seed = Get-Content -Raw -LiteralPath (Join-Path $tmp '.agentic\ARCHITECTURE.md')
+            $seed | Should -Match 'pointer'
+            $seed | Should -Match ([regex]::Escape('`ARCHITECTURE.md`'))
+            $seed | Should -Not -Match 'bracketed placeholders'
+            Get-Content -Raw -LiteralPath (Join-Path $tmp '.agentic\install-manifest.tsv') |
+                Should -Match ([regex]::Escape(".agentic/ARCHITECTURE.md`tseed`t"))
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'fresh install seeds an architecture pointer when only docs/ARCHITECTURE.md exists' {
+        $tmp = New-TestDir
+        try {
+            New-Item -ItemType Directory -Path (Join-Path $tmp 'docs') -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $tmp 'docs\ARCHITECTURE.md') -Value '# Docs Architecture'
+            & $install -Target $tmp *> $null
+            $seed = Get-Content -Raw -LiteralPath (Join-Path $tmp '.agentic\ARCHITECTURE.md')
+            $seed | Should -Match 'pointer'
+            $seed | Should -Match ([regex]::Escape('`docs/ARCHITECTURE.md`'))
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'fresh install seeds the architecture template when the project has no architecture doc' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp *> $null
+            (Get-Content -Raw -LiteralPath (Join-Path $tmp '.agentic\ARCHITECTURE.md')) |
+                Should -Match 'bracketed placeholders'
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'an existing .agentic/ARCHITECTURE.md is never overwritten by the pointer seed' {
+        $tmp = New-TestDir
+        try {
+            New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic') -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\ARCHITECTURE.md') -Value 'my own architecture notes'
+            Set-Content -LiteralPath (Join-Path $tmp 'ARCHITECTURE.md') -Value '# Existing Architecture'
+            & $install -Target $tmp *> $null
+            (Get-Content -Raw -LiteralPath (Join-Path $tmp '.agentic\ARCHITECTURE.md')) |
+                Should -Match 'my own architecture notes'
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
     It 'a modified managed file produces a conflict candidate and is not clobbered' {
         $tmp = New-TestDir
         try {

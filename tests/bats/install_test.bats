@@ -203,6 +203,36 @@ keep me" ]
     grep -q "my custom checks" .agentic/checks.tsv
 }
 
+@test "install seeds an architecture pointer when a root ARCHITECTURE.md exists" {
+    printf '# Existing Architecture\n' > ARCHITECTURE.md
+    bash "$INSTALL" . >/dev/null
+    grep -qF 'pointer' .agentic/ARCHITECTURE.md
+    grep -qF '`ARCHITECTURE.md`' .agentic/ARCHITECTURE.md
+    ! grep -qF 'bracketed placeholders' .agentic/ARCHITECTURE.md
+    grep -qF "$(printf '.agentic/ARCHITECTURE.md\tseed\t')" .agentic/install-manifest.tsv
+}
+
+@test "install seeds an architecture pointer when only docs/ARCHITECTURE.md exists" {
+    mkdir -p docs
+    printf '# Docs Architecture\n' > docs/ARCHITECTURE.md
+    bash "$INSTALL" . >/dev/null
+    grep -qF 'pointer' .agentic/ARCHITECTURE.md
+    grep -qF '`docs/ARCHITECTURE.md`' .agentic/ARCHITECTURE.md
+}
+
+@test "install seeds the architecture template when the project has no architecture doc" {
+    bash "$INSTALL" . >/dev/null
+    grep -qF 'bracketed placeholders' .agentic/ARCHITECTURE.md
+}
+
+@test "an existing .agentic/ARCHITECTURE.md is never overwritten by the pointer seed" {
+    mkdir -p .agentic
+    printf 'my own architecture notes\n' > .agentic/ARCHITECTURE.md
+    printf '# Existing Architecture\n' > ARCHITECTURE.md
+    bash "$INSTALL" . >/dev/null
+    grep -qF 'my own architecture notes' .agentic/ARCHITECTURE.md
+}
+
 @test "a modified managed file produces a conflict candidate and is not clobbered" {
     bash "$INSTALL" . >/dev/null 2>&1
     printf '\n# custom\n' >> .agentic/WORKFLOW.md

@@ -89,6 +89,9 @@ Update an existing install by re-running the installer; use `--replace-managed`
 1. **Commit the installed files.**
 2. **Fill in `.agentic/ARCHITECTURE.md`** with your project's real architecture
    — or skip this and let your agent do it during its first session.
+   If your project already documents its architecture (`ARCHITECTURE.md` or
+   `docs/ARCHITECTURE.md`), the installer instead seeds
+   `.agentic/ARCHITECTURE.md` as a pointer to that canonical file.
 3. **Define your checks contract.** Run the verifier once, review the detected
    candidate, and accept it (`--detect-checks` → `--accept-detected-checks`, see
    [The checks candidate lifecycle](#the-checks-candidate-lifecycle)) — or
@@ -489,7 +492,7 @@ CI on any mismatch. Both the Bats and Pester suites run on all three platforms;
 └── .agentic/
     ├── VERSION                    # Protocol version
     ├── WORKFLOW.md                # The development loop, in detail
-    ├── ARCHITECTURE.md            # Fill-in template describing the host project
+    ├── ARCHITECTURE.md            # Fill-in template, or a pointer to an existing ARCHITECTURE.md
     ├── STATUS.md                  # Index of current project state
     ├── checks.tsv                 # Authoritative check list (auto-detect fallback)
     ├── schemas/                   # Versioned JSON contracts for verifier/validator output
