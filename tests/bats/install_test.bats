@@ -447,6 +447,38 @@ keep me" ]
     grep -q $'\tnpm\t' .agentic/checks.generated.tsv
 }
 
+@test "--detect-checks appends commented CI run-step hints when workflows exist" {
+    printf '{"name":"x","scripts":{"test":"true"}}\n' > package.json
+    mkdir -p .github/workflows
+    printf '%s\n' \
+        'name: CI' \
+        'on: [push]' \
+        'jobs:' \
+        '  build:' \
+        '    runs-on: ubuntu-latest' \
+        '    steps:' \
+        '      - uses: actions/checkout@v4' \
+        '      - run: npm test' \
+        '      - run: |' \
+        '          echo multi' \
+        '          echo line' \
+        > .github/workflows/ci.yml
+    bash "$INSTALL" . --detect-checks >/dev/null
+    [ -f .agentic/checks.generated.tsv ]
+    grep -qF '# CI workflow hints' .agentic/checks.generated.tsv
+    grep -qF '#   .github/workflows/ci.yml:8 run: npm test' .agentic/checks.generated.tsv
+    grep -qF 'run: (multi-line script; review manually)' .agentic/checks.generated.tsv
+    # hints are comments: the candidate still validates
+    bash "$REPO_ROOT/.agentic/scripts/verify.sh" --validate-checks .agentic/checks.generated.tsv >/dev/null
+}
+
+@test "--detect-checks emits no CI hint block when no workflows exist" {
+    printf '{"name":"x","scripts":{"test":"true"}}\n' > package.json
+    bash "$INSTALL" . --detect-checks >/dev/null
+    [ -f .agentic/checks.generated.tsv ]
+    ! grep -qF '# CI workflow hints' .agentic/checks.generated.tsv
+}
+
 @test "--detect-checks --plan makes no filesystem changes" {
     printf '{"name":"x","scripts":{"test":"true"}}\n' > package.json
     run bash "$INSTALL" . --detect-checks --plan --tools claude

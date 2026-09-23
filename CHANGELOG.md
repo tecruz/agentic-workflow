@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **CI workflow run-step hints in the checks candidate.** When the adopting
+  project has GitHub Actions workflows (`.github/workflows/*.yml` / `.yaml`),
+  `--generate-checks` and `--detect-checks` append commented hint lines to
+  `.agentic/checks.generated.tsv` naming each single-line `run:` step with its
+  file and line number; block-scalar scripts collapse to
+  `(multi-line script; review manually)`. Hints are comments — the candidate
+  still validates, promotion still requires the explicit
+  `--accept-detected-checks` review step, and projects without workflows get
+  byte-identical candidates. Mirrored across `install.sh` / `install.ps1`.
+  (TASK-046)
 - **Architecture pointer seeding.** When the adopting project already
   documents its architecture (`ARCHITECTURE.md` at the repository root, or
   `docs/ARCHITECTURE.md`), a fresh install seeds `.agentic/ARCHITECTURE.md`

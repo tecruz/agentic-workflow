@@ -517,6 +517,53 @@ Describe 'install.ps1' {
         finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
     }
 
+    It '-DetectChecks appends commented CI run-step hints when workflows exist' {
+        $tmp = New-TestDir
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'package.json') -Value '{"name":"x","scripts":{"test":"true"}}'
+            New-Item -ItemType Directory -Path (Join-Path $tmp '.github\workflows') -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $tmp '.github\workflows\ci.yml') -Value @(
+                'name: CI',
+                'on: [push]',
+                'jobs:',
+                '  build:',
+                '    runs-on: ubuntu-latest',
+                '    steps:',
+                '      - uses: actions/checkout@v4',
+                '      - run: npm test',
+                '      - run: |',
+                '          echo multi',
+                '          echo line'
+            )
+            & $install -Target $tmp -DetectChecks *> $null
+            $LASTEXITCODE | Should -Be 0
+            $cand = Get-Content -Raw -LiteralPath (Join-Path $tmp '.agentic\checks.generated.tsv')
+            $cand | Should -Match ([regex]::Escape('# CI workflow hints'))
+            $cand | Should -Match ([regex]::Escape('#   .github/workflows/ci.yml:8 run: npm test'))
+            $cand | Should -Match ([regex]::Escape('run: (multi-line script; review manually)'))
+            # hints are comments: the candidate still validates
+            Push-Location $tmp
+            try {
+                & (Join-Path $repoRoot '.agentic\scripts\verify.ps1') -ValidateChecks '.agentic/checks.generated.tsv' *> $null
+                $LASTEXITCODE | Should -Be 0
+            }
+            finally { Pop-Location }
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-DetectChecks emits no CI hint block when no workflows exist' {
+        $tmp = New-TestDir
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'package.json') -Value '{"name":"x","scripts":{"test":"true"}}'
+            & $install -Target $tmp -DetectChecks *> $null
+            $LASTEXITCODE | Should -Be 0
+            Get-Content -Raw -LiteralPath (Join-Path $tmp '.agentic\checks.generated.tsv') |
+                Should -Not -Match ([regex]::Escape('# CI workflow hints'))
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
     It '-AcceptDetectedChecks promotes the exact reviewed candidate, not a fresh detection' {
         $tmp = New-TestDir
         try {
