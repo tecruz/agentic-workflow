@@ -367,6 +367,26 @@ run_checks_in_tmp() {  # run_checks_in_tmp <line>...
     rm -rf "$TMPD"
 }
 
+@test "workspace modules emit the root Gradle wrapper as a relative path" {
+    case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*) skip "unix wrapper detection requires a POSIX shell" ;;
+    esac
+    TMPD="$(mktemp -d)"
+    mkdir -p "$TMPD/app" "$TMPD/lib/core"
+    printf 'plugins { id "java" }\n' > "$TMPD/build.gradle"
+    printf "include ':app', ':lib:core'\n" > "$TMPD/settings.gradle"
+    printf '#!/bin/sh\n' > "$TMPD/gradlew" && chmod +x "$TMPD/gradlew"
+    printf 'plugins { id "java" }\n' > "$TMPD/app/build.gradle"
+    printf 'plugins { id "java" }\n' > "$TMPD/lib/core/build.gradle"
+    run bash -c "cd '$TMPD' && bash '$VERIFY' --emit-checks 2>/dev/null"
+    [ "$status" -eq 0 ]
+    # fixed-string matches: module checks must not use the bare-gradle fallback
+    printf '%s' "$output" | grep -qF $'required\tapp-gradle-test\tapp\t../gradlew\ttest'
+    printf '%s' "$output" | grep -qF $'required\tlib-core-gradle-test\tlib/core\t../../gradlew\ttest'
+    ! printf '%s' "$output" | grep -q $'\tgradle\ttest'
+    rm -rf "$TMPD"
+}
+
 # ---------------------------------------------------------------------------
 # PR #9 review regression tests: JSON summary semantics, nested working-
 # directory labels, strict --format parsing, and event-stream promotion.

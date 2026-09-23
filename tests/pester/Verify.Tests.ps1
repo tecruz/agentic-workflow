@@ -599,4 +599,41 @@ Describe 'verify.ps1 state model' {
         }
         finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
     }
+
+    # Workspace regression: module directories never ship a Gradle wrapper (it
+    # lives at the build root), so module checks must reference the root
+    # wrapper via a relative path instead of falling back to a global gradle.
+    It 'Workspace Gradle modules resolve the root wrapper via a relative path' {
+        $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vtest-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $tmp 'app') -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $tmp 'lib\core') -Force | Out-Null
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'build.gradle') -Value 'plugins { id "java" }'
+            Set-Content -LiteralPath (Join-Path $tmp 'settings.gradle') -Value "include ':app', ':lib:core'"
+            Set-Content -LiteralPath (Join-Path $tmp 'gradlew') -Value '#!/usr/bin/env sh'
+            Set-Content -LiteralPath (Join-Path $tmp 'gradlew.bat') -Value '@echo off'
+            Set-Content -LiteralPath (Join-Path $tmp 'app\build.gradle') -Value 'plugins { id "java" }'
+            Set-Content -LiteralPath (Join-Path $tmp 'lib\core\build.gradle') -Value 'plugins { id "java" }'
+            Push-Location $tmp
+            try { $out = & $verify -EmitChecks 2> $null; $code = $LASTEXITCODE } finally { Pop-Location }
+            $code | Should -Be 0
+            $appTest = $out | Where-Object { $_ -match 'app-gradle-test' } | Select-Object -First 1
+            $coreTest = $out | Where-Object { $_ -match 'lib-core-gradle-test' } | Select-Object -First 1
+            $appTest | Should -Not -BeNullOrEmpty
+            $coreTest | Should -Not -BeNullOrEmpty
+            # never the bare-gradle fallback while a wrapper exists
+            $appTest | Should -Not -Match "`tgradle`t"
+            $coreTest | Should -Not -Match "`tgradle`t"
+            if ($IsWindows) {
+                $appTest | Should -Match ([regex]::Escape('../gradlew.bat'))
+                $coreTest | Should -Match ([regex]::Escape('../../gradlew.bat'))
+            }
+            else {
+                $appTest | Should -Match ([regex]::Escape('../gradlew'))
+                $coreTest | Should -Match ([regex]::Escape('../../gradlew'))
+            }
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
 }

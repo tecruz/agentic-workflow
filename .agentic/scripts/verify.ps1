@@ -465,11 +465,34 @@ function Get-GradleCommand {
     # Wrapper-enabled Gradle projects ship both platform scripts; the platform
     # script must be selected so the emitted contract runs under the shell that
     # will execute it (gradlew.bat under PowerShell on Windows).
-    if ($IsWindows -and (Test-Path -LiteralPath '.\gradlew.bat')) {
-        return '.\gradlew.bat'
+    # For a workspace module $Dir the wrapper is not inside the module (Gradle
+    # keeps a single wrapper at the build root), so the search walks the
+    # ancestors from $Dir up to the invocation root and emits the wrapper path
+    # relative to $Dir (e.g. ../gradlew.bat) — check executable resolution
+    # interprets separator-qualified paths against the check's working dir.
+    param([string] $Dir = '.')
+    $segments = @()
+    if (-not [string]::IsNullOrEmpty($Dir) -and $Dir -ne '.') {
+        $segments = @($Dir.Replace('\', '/').Trim('/').Split('/', [StringSplitOptions]::RemoveEmptyEntries))
     }
-    if (Test-Path -LiteralPath './gradlew') {
-        return './gradlew'
+    for ($up = 0; $up -le $segments.Count; $up++) {
+        if ($up -eq 0) {
+            $ancestor = $Dir
+            $rel = if ($segments.Count -eq 0) { '' } else { './' }
+        }
+        else {
+            $keep = $segments.Count - $up
+            $ancestor = if ($keep -le 0) { '.' } else { $segments[0..($keep - 1)] -join '/' }
+            $rel = '../' * $up
+        }
+        if ($IsWindows -and (Test-Path -LiteralPath (Join-Path $ancestor 'gradlew.bat'))) {
+            if ($segments.Count -eq 0) { return '.\gradlew.bat' }
+            return ($rel + 'gradlew.bat')
+        }
+        if (Test-Path -LiteralPath (Join-Path $ancestor 'gradlew')) {
+            if ($segments.Count -eq 0) { return './gradlew' }
+            return ($rel + 'gradlew')
+        }
     }
     return 'gradle'
 }
@@ -723,14 +746,13 @@ function Get-DetectedChecks {
         if ((Test-Path -LiteralPath (Join-Path $dir 'build.gradle')) -or (Test-Path -LiteralPath (Join-Path $dir 'build.gradle.kts'))) {
             Write-Log "Detected: Workspace Gradle project ($dir)"
             $isAndroid = (Test-AndroidModule $dir)
+            $gradleCmd = Get-GradleCommand -Dir $dir
             if ($isAndroid) {
-                if (Test-Path -LiteralPath (Join-Path $dir 'gradlew.bat')) { $gradleCmd = './gradlew.bat' } elseif (Test-Path -LiteralPath (Join-Path $dir 'gradlew')) { $gradleCmd = './gradlew' } else { $gradleCmd = 'gradle' }
                 $script:WorkspaceLines += "required`t${prefix}-android-unit`t${dir}`t${gradleCmd}`ttest"
                 $script:WorkspaceLines += "required`t${prefix}-android-lint`t${dir}`t${gradleCmd}`tlint"
                 $script:WorkspaceLines += "required`t${prefix}-android-build`t${dir}`t${gradleCmd}`tassembleDebug"
                 $script:WorkspaceLines += "optional`t${prefix}-android-device`t${dir}`t${gradleCmd}`tconnectedCheck"
             } else {
-                if (Test-Path -LiteralPath (Join-Path $dir 'gradlew.bat')) { $gradleCmd = './gradlew.bat' } elseif (Test-Path -LiteralPath (Join-Path $dir 'gradlew')) { $gradleCmd = './gradlew' } else { $gradleCmd = 'gradle' }
                 $script:WorkspaceLines += "required`t${prefix}-gradle-test`t${dir}`t${gradleCmd}`ttest"
                 $script:WorkspaceLines += "required`t${prefix}-gradle-lint`t${dir}`t${gradleCmd}`tcheck"
             }

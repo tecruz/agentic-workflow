@@ -22,6 +22,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Workspace-module Gradle checks resolve the root wrapper.** `verify.sh` /
+  `verify.ps1` emitted bare `gradle` for Gradle workspace modules (`app`,
+  `lib/core`, ...) because the wrapper probe only looked inside the module
+  directory, where Gradle builds never ship one; on hosts without a global
+  Gradle install every module check reported
+  `BLOCKED: executable 'gradle' was not found` even though the root wrapper
+  was present and the root-level checks were already using it. Module checks
+  now walk from the module directory up to the invocation root and emit the
+  first wrapper found as a path relative to the module (`../gradlew.bat` /
+  `../gradlew`, one `../` per depth level), which the check runner resolves
+  against the check's working directory. Module-local wrapper, root-level, and
+  no-wrapper contracts are unchanged. Covered by the new
+  `gradle-wrapper-multimodule` fixture (root wrapper + `app` + `lib/core`)
+  and one Bats + one Pester regression test. (TASK-044)
 - **CI badge URL in README.** The badge image used the legacy
   `/workflows/CI/badge.svg` endpoint, which now returns "no status" (the
   workflow-name URL form is no longer maintained); switched to the canonical

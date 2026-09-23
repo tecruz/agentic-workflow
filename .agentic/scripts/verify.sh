@@ -768,6 +768,38 @@ exclude_dir() {
 # tracking seen_packages/excluded_dirs for workspace deduplication. Relies on
 # output_lines, seen_packages, and excluded_dirs being visible in the caller's
 # scope (dynamic scope via Bash).
+# gradle_cmd_for_dir <dir>
+# Prints the Gradle executable for checks whose working directory is <dir>.
+# Gradle multi-module builds keep a single wrapper at the build root — never
+# inside modules — so the search walks from <dir> up to the invocation root
+# and emits the wrapper path relative to <dir> (./gradlew, ../gradlew, ...).
+# The check runner resolves separator-qualified executables against the
+# check's working directory, so the relative form stays valid at any depth.
+gradle_cmd_for_dir() {
+    local anc="$1"
+    local up=0
+    [ -z "$anc" ] && anc="."
+    while :; do
+        if [ -x "$anc/gradlew" ]; then
+            if [ "$up" -eq 0 ]; then
+                printf './gradlew\n'
+            else
+                local out="" i=0
+                while [ "$i" -lt "$up" ]; do out="../$out"; i=$((i + 1)); done
+                printf '%sgradlew\n' "$out"
+            fi
+            return 0
+        fi
+        [ "$anc" = "." ] && break
+        case "$anc" in
+            */*) anc="${anc%/*}" ;;
+            *) anc="." ;;
+        esac
+        up=$((up + 1))
+    done
+    printf 'gradle\n'
+}
+
 emit_checks_for_dir() {
     local dir="$1"
     dir="${dir%/}"
@@ -868,26 +900,16 @@ emit_checks_for_dir() {
         if is_android_module "$dir"; then
             is_android=1
         fi
+        local gradle_cmd
+        gradle_cmd="$(gradle_cmd_for_dir "$dir")"
         if [ "$is_android" -eq 1 ]; then
-            if [ -x "$dir/gradlew" ]; then
-                output_lines+=("required	${prefix}-android-unit	$dir	./gradlew	test")
-                output_lines+=("required	${prefix}-android-lint	$dir	./gradlew	lint")
-                output_lines+=("required	${prefix}-android-build	$dir	./gradlew	assembleDebug")
-                output_lines+=("optional	${prefix}-android-device	$dir	./gradlew	connectedCheck")
-            else
-                output_lines+=("required	${prefix}-android-unit	$dir	gradle	test")
-                output_lines+=("required	${prefix}-android-lint	$dir	gradle	lint")
-                output_lines+=("required	${prefix}-android-build	$dir	gradle	assembleDebug")
-                output_lines+=("optional	${prefix}-android-device	$dir	gradle	connectedCheck")
-            fi
+            output_lines+=("required	${prefix}-android-unit	$dir	$gradle_cmd	test")
+            output_lines+=("required	${prefix}-android-lint	$dir	$gradle_cmd	lint")
+            output_lines+=("required	${prefix}-android-build	$dir	$gradle_cmd	assembleDebug")
+            output_lines+=("optional	${prefix}-android-device	$dir	$gradle_cmd	connectedCheck")
         else
-            if [ -x "$dir/gradlew" ]; then
-                output_lines+=("required	${prefix}-gradle-test	$dir	./gradlew	test")
-                output_lines+=("required	${prefix}-gradle-lint	$dir	./gradlew	check")
-            else
-                output_lines+=("required	${prefix}-gradle-test	$dir	gradle	test")
-                output_lines+=("required	${prefix}-gradle-lint	$dir	gradle	check")
-            fi
+            output_lines+=("required	${prefix}-gradle-test	$dir	$gradle_cmd	test")
+            output_lines+=("required	${prefix}-gradle-lint	$dir	$gradle_cmd	check")
         fi
     fi
     if compgen -G "$dir/*.sln" >/dev/null 2>&1 || compgen -G "$dir/*.csproj" >/dev/null 2>&1; then
