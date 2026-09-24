@@ -291,6 +291,69 @@ run_checks_in_tmp() {  # run_checks_in_tmp <line>...
     rm -rf "$TMPD"
 }
 
+@test "--detect-checks appends CI run-step hints when workflows exist" {
+    TMPD="$(mktemp -d)"
+    printf '{"name":"x","scripts":{"test":"true"}}\n' > "$TMPD/package.json"
+    mkdir -p "$TMPD/.github/workflows"
+    printf '%s\n' \
+        'name: CI' \
+        'on: [push]' \
+        'jobs:' \
+        '  build:' \
+        '    runs-on: ubuntu-latest' \
+        '    steps:' \
+        '      - uses: actions/checkout@v4' \
+        '      - run: npm test' \
+        '      - run: |' \
+        '          echo multi' \
+        '          echo line' \
+        > "$TMPD/.github/workflows/ci.yml"
+    bash -c "cd '$TMPD' && bash '$VERIFY' --detect-checks >/dev/null"
+    grep -qF '# CI workflow hints' "$TMPD/.agentic/checks.generated.tsv"
+    grep -qF '#   .github/workflows/ci.yml:8 run: npm test' "$TMPD/.agentic/checks.generated.tsv"
+    grep -qF 'run: (multi-line script; review manually)' "$TMPD/.agentic/checks.generated.tsv"
+    # hints are comments: the verifier-written candidate still validates
+    bash -c "cd '$TMPD' && bash '$VERIFY' --validate-checks .agentic/checks.generated.tsv >/dev/null"
+    rm -rf "$TMPD"
+}
+
+@test "--detect-checks omits the hint block when workflows are uses-only" {
+    TMPD="$(mktemp -d)"
+    printf '{"name":"x","scripts":{"test":"true"}}\n' > "$TMPD/package.json"
+    mkdir -p "$TMPD/.github/workflows"
+    printf '%s\n' \
+        'name: CI' \
+        'on: [push]' \
+        'jobs:' \
+        '  build:' \
+        '    runs-on: ubuntu-latest' \
+        '    steps:' \
+        '      - uses: actions/checkout@v4' \
+        > "$TMPD/.github/workflows/ci.yml"
+    bash -c "cd '$TMPD' && bash '$VERIFY' --detect-checks >/dev/null"
+    [ -f "$TMPD/.agentic/checks.generated.tsv" ]
+    ! grep -qF '# CI workflow hints' "$TMPD/.agentic/checks.generated.tsv"
+    rm -rf "$TMPD"
+}
+
+@test "--detect-checks matches uppercase workflow file extensions" {
+    TMPD="$(mktemp -d)"
+    printf '{"name":"x","scripts":{"test":"true"}}\n' > "$TMPD/package.json"
+    mkdir -p "$TMPD/.github/workflows"
+    printf '%s\n' \
+        'name: CI' \
+        'on: [push]' \
+        'jobs:' \
+        '  build:' \
+        '    runs-on: ubuntu-latest' \
+        '    steps:' \
+        '      - run: npm test' \
+        > "$TMPD/.github/workflows/CI.YML"
+    bash -c "cd '$TMPD' && bash '$VERIFY' --detect-checks >/dev/null"
+    grep -qF '#   .github/workflows/CI.YML:7 run: npm test' "$TMPD/.agentic/checks.generated.tsv"
+    rm -rf "$TMPD"
+}
+
 @test "--detect-checks removes a stale candidate when no stack is detected" {
     TMPD="$(mktemp -d)"
     printf '{"name":"x","scripts":{"test":"true"}}\n' > "$TMPD/package.json"
