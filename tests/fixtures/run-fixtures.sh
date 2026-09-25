@@ -110,6 +110,7 @@ expect_detect yarn-workspaces-object npm packages-c
 expect_detect cargo-workspace       cargo crates-foo
 expect_detect maven-modules         mvn module-a
 expect_detect gradle-multimodule    gradle app-gradle
+expect_detect gradle-wrapper-multimodule ../gradlew app-gradle lib-core-gradle
 expect_detect android-version-catalog gradle app-android-unit
 expect_detect android-convention-plugin gradle app-android-unit
 expect_detect nx-workspace          libs-ui apps-web

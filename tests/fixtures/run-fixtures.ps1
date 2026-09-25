@@ -101,11 +101,13 @@ if ($IsWindows) {
     Expect-Detect "java-maven-wrapper" @("mvnw.cmd")
     Expect-Detect "gradle-wrapper" @("gradlew.bat")
     Expect-Detect "android-gradle" @("gradlew.bat", "android-unit")
+    Expect-Detect "gradle-wrapper-multimodule" @("../gradlew.bat", "app-gradle", "lib-core-gradle")
 }
 else {
     Expect-Detect "java-maven-wrapper" @("mvnw")
     Expect-Detect "gradle-wrapper" @("gradlew")
     Expect-Detect "android-gradle" @("gradlew", "android-unit")
+    Expect-Detect "gradle-wrapper-multimodule" @("../gradlew", "app-gradle", "lib-core-gradle")
 }
 Expect-Detect "monorepo" @("pnpm", "go")
 Expect-Detect "polyglot-node-go" @("npm", "go")

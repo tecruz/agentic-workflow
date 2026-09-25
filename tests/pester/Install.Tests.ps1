@@ -193,6 +193,57 @@ Describe 'install.ps1' {
         finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
     }
 
+    It 'fresh install seeds an architecture pointer when a root ARCHITECTURE.md exists' {
+        $tmp = New-TestDir
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'ARCHITECTURE.md') -Value '# Existing Architecture'
+            & $install -Target $tmp *> $null
+            $seed = Get-Content -Raw -LiteralPath (Join-Path $tmp '.agentic\ARCHITECTURE.md')
+            $seed | Should -Match 'pointer'
+            $seed | Should -Match ([regex]::Escape('`ARCHITECTURE.md`'))
+            $seed | Should -Not -Match 'bracketed placeholders'
+            Get-Content -Raw -LiteralPath (Join-Path $tmp '.agentic\install-manifest.tsv') |
+                Should -Match ([regex]::Escape(".agentic/ARCHITECTURE.md`tseed`t"))
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'fresh install seeds an architecture pointer when only docs/ARCHITECTURE.md exists' {
+        $tmp = New-TestDir
+        try {
+            New-Item -ItemType Directory -Path (Join-Path $tmp 'docs') -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $tmp 'docs\ARCHITECTURE.md') -Value '# Docs Architecture'
+            & $install -Target $tmp *> $null
+            $seed = Get-Content -Raw -LiteralPath (Join-Path $tmp '.agentic\ARCHITECTURE.md')
+            $seed | Should -Match 'pointer'
+            $seed | Should -Match ([regex]::Escape('`docs/ARCHITECTURE.md`'))
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'fresh install seeds the architecture template when the project has no architecture doc' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp *> $null
+            (Get-Content -Raw -LiteralPath (Join-Path $tmp '.agentic\ARCHITECTURE.md')) |
+                Should -Match 'bracketed placeholders'
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'an existing .agentic/ARCHITECTURE.md is never overwritten by the pointer seed' {
+        $tmp = New-TestDir
+        try {
+            New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic') -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\ARCHITECTURE.md') -Value 'my own architecture notes'
+            Set-Content -LiteralPath (Join-Path $tmp 'ARCHITECTURE.md') -Value '# Existing Architecture'
+            & $install -Target $tmp *> $null
+            (Get-Content -Raw -LiteralPath (Join-Path $tmp '.agentic\ARCHITECTURE.md')) |
+                Should -Match 'my own architecture notes'
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
     It 'a modified managed file produces a conflict candidate and is not clobbered' {
         $tmp = New-TestDir
         try {
@@ -462,6 +513,53 @@ Describe 'install.ps1' {
             & $install -Target $tmp -DetectChecks *> $null
             $LASTEXITCODE | Should -Be 0
             (Get-Content -Raw (Join-Path $tmp '.agentic\checks.generated.tsv')) -match "`tnpm`t" | Should -Be $true
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-DetectChecks appends commented CI run-step hints when workflows exist' {
+        $tmp = New-TestDir
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'package.json') -Value '{"name":"x","scripts":{"test":"true"}}'
+            New-Item -ItemType Directory -Path (Join-Path $tmp '.github\workflows') -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $tmp '.github\workflows\ci.yml') -Value @(
+                'name: CI',
+                'on: [push]',
+                'jobs:',
+                '  build:',
+                '    runs-on: ubuntu-latest',
+                '    steps:',
+                '      - uses: actions/checkout@v4',
+                '      - run: npm test',
+                '      - run: |',
+                '          echo multi',
+                '          echo line'
+            )
+            & $install -Target $tmp -DetectChecks *> $null
+            $LASTEXITCODE | Should -Be 0
+            $cand = Get-Content -Raw -LiteralPath (Join-Path $tmp '.agentic\checks.generated.tsv')
+            $cand | Should -Match ([regex]::Escape('# CI workflow hints'))
+            $cand | Should -Match ([regex]::Escape('#   .github/workflows/ci.yml:8 run: npm test'))
+            $cand | Should -Match ([regex]::Escape('run: (multi-line script; review manually)'))
+            # hints are comments: the candidate still validates
+            Push-Location $tmp
+            try {
+                & (Join-Path $repoRoot '.agentic\scripts\verify.ps1') -ValidateChecks '.agentic/checks.generated.tsv' *> $null
+                $LASTEXITCODE | Should -Be 0
+            }
+            finally { Pop-Location }
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-DetectChecks emits no CI hint block when no workflows exist' {
+        $tmp = New-TestDir
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'package.json') -Value '{"name":"x","scripts":{"test":"true"}}'
+            & $install -Target $tmp -DetectChecks *> $null
+            $LASTEXITCODE | Should -Be 0
+            Get-Content -Raw -LiteralPath (Join-Path $tmp '.agentic\checks.generated.tsv') |
+                Should -Not -Match ([regex]::Escape('# CI workflow hints'))
         }
         finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
     }

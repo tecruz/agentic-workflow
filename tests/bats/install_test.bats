@@ -203,6 +203,36 @@ keep me" ]
     grep -q "my custom checks" .agentic/checks.tsv
 }
 
+@test "install seeds an architecture pointer when a root ARCHITECTURE.md exists" {
+    printf '# Existing Architecture\n' > ARCHITECTURE.md
+    bash "$INSTALL" . >/dev/null
+    grep -qF 'pointer' .agentic/ARCHITECTURE.md
+    grep -qF '`ARCHITECTURE.md`' .agentic/ARCHITECTURE.md
+    ! grep -qF 'bracketed placeholders' .agentic/ARCHITECTURE.md
+    grep -qF "$(printf '.agentic/ARCHITECTURE.md\tseed\t')" .agentic/install-manifest.tsv
+}
+
+@test "install seeds an architecture pointer when only docs/ARCHITECTURE.md exists" {
+    mkdir -p docs
+    printf '# Docs Architecture\n' > docs/ARCHITECTURE.md
+    bash "$INSTALL" . >/dev/null
+    grep -qF 'pointer' .agentic/ARCHITECTURE.md
+    grep -qF '`docs/ARCHITECTURE.md`' .agentic/ARCHITECTURE.md
+}
+
+@test "install seeds the architecture template when the project has no architecture doc" {
+    bash "$INSTALL" . >/dev/null
+    grep -qF 'bracketed placeholders' .agentic/ARCHITECTURE.md
+}
+
+@test "an existing .agentic/ARCHITECTURE.md is never overwritten by the pointer seed" {
+    mkdir -p .agentic
+    printf 'my own architecture notes\n' > .agentic/ARCHITECTURE.md
+    printf '# Existing Architecture\n' > ARCHITECTURE.md
+    bash "$INSTALL" . >/dev/null
+    grep -qF 'my own architecture notes' .agentic/ARCHITECTURE.md
+}
+
 @test "a modified managed file produces a conflict candidate and is not clobbered" {
     bash "$INSTALL" . >/dev/null 2>&1
     printf '\n# custom\n' >> .agentic/WORKFLOW.md
@@ -415,6 +445,38 @@ keep me" ]
     [ "$status" -eq 0 ]
     [ -f .agentic/checks.generated.tsv ]
     grep -q $'\tnpm\t' .agentic/checks.generated.tsv
+}
+
+@test "--detect-checks appends commented CI run-step hints when workflows exist" {
+    printf '{"name":"x","scripts":{"test":"true"}}\n' > package.json
+    mkdir -p .github/workflows
+    printf '%s\n' \
+        'name: CI' \
+        'on: [push]' \
+        'jobs:' \
+        '  build:' \
+        '    runs-on: ubuntu-latest' \
+        '    steps:' \
+        '      - uses: actions/checkout@v4' \
+        '      - run: npm test' \
+        '      - run: |' \
+        '          echo multi' \
+        '          echo line' \
+        > .github/workflows/ci.yml
+    bash "$INSTALL" . --detect-checks >/dev/null
+    [ -f .agentic/checks.generated.tsv ]
+    grep -qF '# CI workflow hints' .agentic/checks.generated.tsv
+    grep -qF '#   .github/workflows/ci.yml:8 run: npm test' .agentic/checks.generated.tsv
+    grep -qF 'run: (multi-line script; review manually)' .agentic/checks.generated.tsv
+    # hints are comments: the candidate still validates
+    bash "$REPO_ROOT/.agentic/scripts/verify.sh" --validate-checks .agentic/checks.generated.tsv >/dev/null
+}
+
+@test "--detect-checks emits no CI hint block when no workflows exist" {
+    printf '{"name":"x","scripts":{"test":"true"}}\n' > package.json
+    bash "$INSTALL" . --detect-checks >/dev/null
+    [ -f .agentic/checks.generated.tsv ]
+    ! grep -qF '# CI workflow hints' .agentic/checks.generated.tsv
 }
 
 @test "--detect-checks --plan makes no filesystem changes" {

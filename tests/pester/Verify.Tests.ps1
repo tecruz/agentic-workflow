@@ -599,4 +599,120 @@ Describe 'verify.ps1 state model' {
         }
         finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
     }
+
+    # Workspace regression: module directories never ship a Gradle wrapper (it
+    # lives at the build root), so module checks must reference the root
+    # wrapper via a relative path instead of falling back to a global gradle.
+    It 'Workspace Gradle modules resolve the root wrapper via a relative path' {
+        $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vtest-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $tmp 'app') -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $tmp 'lib\core') -Force | Out-Null
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'build.gradle') -Value 'plugins { id "java" }'
+            Set-Content -LiteralPath (Join-Path $tmp 'settings.gradle') -Value "include ':app', ':lib:core'"
+            Set-Content -LiteralPath (Join-Path $tmp 'gradlew') -Value '#!/usr/bin/env sh'
+            Set-Content -LiteralPath (Join-Path $tmp 'gradlew.bat') -Value '@echo off'
+            Set-Content -LiteralPath (Join-Path $tmp 'app\build.gradle') -Value 'plugins { id "java" }'
+            Set-Content -LiteralPath (Join-Path $tmp 'lib\core\build.gradle') -Value 'plugins { id "java" }'
+            Push-Location $tmp
+            try { $out = & $verify -EmitChecks 2> $null; $code = $LASTEXITCODE } finally { Pop-Location }
+            $code | Should -Be 0
+            $appTest = $out | Where-Object { $_ -match 'app-gradle-test' } | Select-Object -First 1
+            $coreTest = $out | Where-Object { $_ -match 'lib-core-gradle-test' } | Select-Object -First 1
+            $appTest | Should -Not -BeNullOrEmpty
+            $coreTest | Should -Not -BeNullOrEmpty
+            # never the bare-gradle fallback while a wrapper exists
+            $appTest | Should -Not -Match "`tgradle`t"
+            $coreTest | Should -Not -Match "`tgradle`t"
+            if ($IsWindows) {
+                $appTest | Should -Match ([regex]::Escape('../gradlew.bat'))
+                $coreTest | Should -Match ([regex]::Escape('../../gradlew.bat'))
+            }
+            else {
+                $appTest | Should -Match ([regex]::Escape('../gradlew'))
+                $coreTest | Should -Match ([regex]::Escape('../../gradlew'))
+            }
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-DetectChecks appends CI run-step hints when workflows exist' {
+        $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vtest-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $tmp '.github\workflows') -Force | Out-Null
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'package.json') -Value '{"name":"x","scripts":{"test":"true"}}'
+            Set-Content -LiteralPath (Join-Path $tmp '.github\workflows\ci.yml') -Value @(
+                'name: CI',
+                'on: [push]',
+                'jobs:',
+                '  build:',
+                '    runs-on: ubuntu-latest',
+                '    steps:',
+                '      - uses: actions/checkout@v4',
+                '      - run: npm test',
+                '      - run: |',
+                '          echo multi',
+                '          echo line'
+            )
+            Push-Location $tmp
+            try { & $verify -DetectChecks *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
+            $code | Should -Be 0
+            $cand = Get-Content -Raw -LiteralPath (Join-Path $tmp '.agentic\checks.generated.tsv')
+            $cand | Should -Match ([regex]::Escape('# CI workflow hints'))
+            $cand | Should -Match ([regex]::Escape('#   .github/workflows/ci.yml:8 run: npm test'))
+            $cand | Should -Match ([regex]::Escape('run: (multi-line script; review manually)'))
+            # hints are comments: the verifier-written candidate still validates
+            Push-Location $tmp
+            try { & $verify -ValidateChecks '.agentic/checks.generated.tsv' *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
+            $code | Should -Be 0
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-DetectChecks omits the hint block when workflows are uses-only' {
+        $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vtest-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $tmp '.github\workflows') -Force | Out-Null
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'package.json') -Value '{"name":"x","scripts":{"test":"true"}}'
+            Set-Content -LiteralPath (Join-Path $tmp '.github\workflows\ci.yml') -Value @(
+                'name: CI',
+                'on: [push]',
+                'jobs:',
+                '  build:',
+                '    runs-on: ubuntu-latest',
+                '    steps:',
+                '      - uses: actions/checkout@v4'
+            )
+            Push-Location $tmp
+            try { & $verify -DetectChecks *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
+            $code | Should -Be 0
+            Get-Content -Raw -LiteralPath (Join-Path $tmp '.agentic\checks.generated.tsv') |
+                Should -Not -Match ([regex]::Escape('# CI workflow hints'))
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-DetectChecks matches uppercase workflow file extensions' {
+        $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('agentic-vtest-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $tmp '.github\workflows') -Force | Out-Null
+        try {
+            Set-Content -LiteralPath (Join-Path $tmp 'package.json') -Value '{"name":"x","scripts":{"test":"true"}}'
+            Set-Content -LiteralPath (Join-Path $tmp '.github\workflows\CI.YML') -Value @(
+                'name: CI',
+                'on: [push]',
+                'jobs:',
+                '  build:',
+                '    runs-on: ubuntu-latest',
+                '    steps:',
+                '      - run: npm test'
+            )
+            Push-Location $tmp
+            try { & $verify -DetectChecks *> $null; $code = $LASTEXITCODE } finally { Pop-Location }
+            $code | Should -Be 0
+            Get-Content -Raw -LiteralPath (Join-Path $tmp '.agentic\checks.generated.tsv') |
+                Should -Match ([regex]::Escape('#   .github/workflows/CI.YML:7 run: npm test'))
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
 }

@@ -32,6 +32,10 @@
 .PARAMETER EmitChecks
     Print the auto-detected checks.tsv and exit without running anything.
 
+.PARAMETER EmitCiHints
+    Print CI workflow run-step hint comments for the checks candidate and exit
+    without running anything.
+
 .EXAMPLE
     ./.agentic/scripts/verify.ps1
 .EXAMPLE
@@ -40,6 +44,7 @@
 
 param(
     [switch] $EmitChecks,
+    [switch] $EmitCiHints,
     [switch] $ExplainDetection,
     [switch] $DetectChecks,
     [string] $ValidateChecks,
@@ -465,11 +470,34 @@ function Get-GradleCommand {
     # Wrapper-enabled Gradle projects ship both platform scripts; the platform
     # script must be selected so the emitted contract runs under the shell that
     # will execute it (gradlew.bat under PowerShell on Windows).
-    if ($IsWindows -and (Test-Path -LiteralPath '.\gradlew.bat')) {
-        return '.\gradlew.bat'
+    # For a workspace module $Dir the wrapper is not inside the module (Gradle
+    # keeps a single wrapper at the build root), so the search walks the
+    # ancestors from $Dir up to the invocation root and emits the wrapper path
+    # relative to $Dir (e.g. ../gradlew.bat) — check executable resolution
+    # interprets separator-qualified paths against the check's working dir.
+    param([string] $Dir = '.')
+    $segments = @()
+    if (-not [string]::IsNullOrEmpty($Dir) -and $Dir -ne '.') {
+        $segments = @($Dir.Replace('\', '/').Trim('/').Split('/', [StringSplitOptions]::RemoveEmptyEntries))
     }
-    if (Test-Path -LiteralPath './gradlew') {
-        return './gradlew'
+    for ($up = 0; $up -le $segments.Count; $up++) {
+        if ($up -eq 0) {
+            $ancestor = $Dir
+            $rel = if ($segments.Count -eq 0) { '' } else { './' }
+        }
+        else {
+            $keep = $segments.Count - $up
+            $ancestor = if ($keep -le 0) { '.' } else { $segments[0..($keep - 1)] -join '/' }
+            $rel = '../' * $up
+        }
+        if ($IsWindows -and (Test-Path -LiteralPath (Join-Path $ancestor 'gradlew.bat'))) {
+            if ($segments.Count -eq 0) { return '.\gradlew.bat' }
+            return ($rel + 'gradlew.bat')
+        }
+        if (Test-Path -LiteralPath (Join-Path $ancestor 'gradlew')) {
+            if ($segments.Count -eq 0) { return './gradlew' }
+            return ($rel + 'gradlew')
+        }
     }
     return 'gradle'
 }
@@ -723,14 +751,13 @@ function Get-DetectedChecks {
         if ((Test-Path -LiteralPath (Join-Path $dir 'build.gradle')) -or (Test-Path -LiteralPath (Join-Path $dir 'build.gradle.kts'))) {
             Write-Log "Detected: Workspace Gradle project ($dir)"
             $isAndroid = (Test-AndroidModule $dir)
+            $gradleCmd = Get-GradleCommand -Dir $dir
             if ($isAndroid) {
-                if (Test-Path -LiteralPath (Join-Path $dir 'gradlew.bat')) { $gradleCmd = './gradlew.bat' } elseif (Test-Path -LiteralPath (Join-Path $dir 'gradlew')) { $gradleCmd = './gradlew' } else { $gradleCmd = 'gradle' }
                 $script:WorkspaceLines += "required`t${prefix}-android-unit`t${dir}`t${gradleCmd}`ttest"
                 $script:WorkspaceLines += "required`t${prefix}-android-lint`t${dir}`t${gradleCmd}`tlint"
                 $script:WorkspaceLines += "required`t${prefix}-android-build`t${dir}`t${gradleCmd}`tassembleDebug"
                 $script:WorkspaceLines += "optional`t${prefix}-android-device`t${dir}`t${gradleCmd}`tconnectedCheck"
             } else {
-                if (Test-Path -LiteralPath (Join-Path $dir 'gradlew.bat')) { $gradleCmd = './gradlew.bat' } elseif (Test-Path -LiteralPath (Join-Path $dir 'gradlew')) { $gradleCmd = './gradlew' } else { $gradleCmd = 'gradle' }
                 $script:WorkspaceLines += "required`t${prefix}-gradle-test`t${dir}`t${gradleCmd}`ttest"
                 $script:WorkspaceLines += "required`t${prefix}-gradle-lint`t${dir}`t${gradleCmd}`tcheck"
             }
@@ -1231,6 +1258,35 @@ function Test-ChecksTsvValidation {
 # before checks run, so every stream that is created always ends with exactly
 # one terminal verification_completed event.
 
+# Returns advisory comment lines extracted from .github/workflows/*.{yml,yaml}
+# `run:` steps. Review-only: every hint is a comment, so candidates stay valid
+# and nothing becomes a check without the human promotion step. Single-line
+# `run:` scalars are returned verbatim; block scalars collapse to a marker.
+# Returns nothing when no workflow run steps exist, keeping candidates
+# byte-identical for CI-less projects. Single-sourced here per language:
+# -EmitCiHints serves stdout consumers (the installers' confined candidate
+# writers), and the verifier's own -DetectChecks appends the same block.
+function Get-CiStepHints {
+    $wfdir = ".github/workflows"
+    if (-not (Test-Path -LiteralPath $wfdir -PathType Container)) { return @() }
+    $hints = @()
+    $files = @(Get-ChildItem -LiteralPath $wfdir -File -Filter '*.yml') + @(Get-ChildItem -LiteralPath $wfdir -File -Filter '*.yaml')
+    foreach ($f in $files) {
+        $n = 0
+        foreach ($raw in [System.IO.File]::ReadLines($f.FullName)) {
+            $n++
+            $line = $raw.TrimEnd("`r")
+            $m = [regex]::Match($line, '^[ \t]*(-[ \t]+)?run:[ \t]*(.*)$')
+            if (-not $m.Success) { continue }
+            $rest = $m.Groups[2].Value.Replace("`t", '    ').TrimEnd()
+            $value = if ([string]::IsNullOrEmpty($rest) -or $rest -match '^[>|]') { '(multi-line script; review manually)' } else { $rest }
+            $hints += "#   .github/workflows/$($f.Name):${n} run: $value"
+        }
+    }
+    if ($hints.Count -eq 0) { return @() }
+    return @('# CI workflow hints (.github/workflows) — review-only; promote lines by hand if wanted:') + $hints
+}
+
 $checksPath = ".agentic/checks.tsv"
 $checksDefined = $false
 if (Test-Path -LiteralPath $checksPath) {
@@ -1239,6 +1295,11 @@ if (Test-Path -LiteralPath $checksPath) {
 
 if ($EmitChecks) {
     Get-DetectedChecks
+    exit 0
+}
+
+if ($EmitCiHints) {
+    Get-CiStepHints
     exit 0
 }
 
@@ -1292,6 +1353,8 @@ if ($DetectChecks) {
         "# .agentic/checks.generated.tsv — candidate verification contract.",
         "# Auto-generated by detection workflow. Review assumptions and promote to .agentic/checks.tsv"
     ) + $checks
+    $ciHints = @(Get-CiStepHints)
+    if ($ciHints.Count -gt 0) { $content += $ciHints }
     [System.IO.File]::WriteAllLines($tmp, $content, [System.Text.UTF8Encoding]::new($false))
     if (Test-Path -LiteralPath $genFile) {
         if (Test-Path -LiteralPath $genFile -PathType Container) {

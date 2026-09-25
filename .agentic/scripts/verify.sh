@@ -30,6 +30,7 @@
 # Usage:
 #   ./.agentic/scripts/verify.sh                 # run from the project root
 #   ./.agentic/scripts/verify.sh --emit-checks   # print auto-detected checks.tsv
+#   ./.agentic/scripts/verify.sh --emit-ci-hints # print CI workflow run-step hint comments
 
 set -uo pipefail
 
@@ -67,7 +68,7 @@ while [ $# -gt 0 ]; do
             EVENTS_FORCE=1
             shift
             ;;
-        --emit-checks|--explain-detection|--detect-checks|--validate-checks)
+        --emit-checks|--emit-ci-hints|--explain-detection|--detect-checks|--validate-checks)
             break
             ;;
         --)
@@ -768,6 +769,38 @@ exclude_dir() {
 # tracking seen_packages/excluded_dirs for workspace deduplication. Relies on
 # output_lines, seen_packages, and excluded_dirs being visible in the caller's
 # scope (dynamic scope via Bash).
+# gradle_cmd_for_dir <dir>
+# Prints the Gradle executable for checks whose working directory is <dir>.
+# Gradle multi-module builds keep a single wrapper at the build root — never
+# inside modules — so the search walks from <dir> up to the invocation root
+# and emits the wrapper path relative to <dir> (./gradlew, ../gradlew, ...).
+# The check runner resolves separator-qualified executables against the
+# check's working directory, so the relative form stays valid at any depth.
+gradle_cmd_for_dir() {
+    local anc="$1"
+    local up=0
+    [ -z "$anc" ] && anc="."
+    while :; do
+        if [ -x "$anc/gradlew" ]; then
+            if [ "$up" -eq 0 ]; then
+                printf './gradlew\n'
+            else
+                local out="" i=0
+                while [ "$i" -lt "$up" ]; do out="../$out"; i=$((i + 1)); done
+                printf '%sgradlew\n' "$out"
+            fi
+            return 0
+        fi
+        [ "$anc" = "." ] && break
+        case "$anc" in
+            */*) anc="${anc%/*}" ;;
+            *) anc="." ;;
+        esac
+        up=$((up + 1))
+    done
+    printf 'gradle\n'
+}
+
 emit_checks_for_dir() {
     local dir="$1"
     dir="${dir%/}"
@@ -868,26 +901,16 @@ emit_checks_for_dir() {
         if is_android_module "$dir"; then
             is_android=1
         fi
+        local gradle_cmd
+        gradle_cmd="$(gradle_cmd_for_dir "$dir")"
         if [ "$is_android" -eq 1 ]; then
-            if [ -x "$dir/gradlew" ]; then
-                output_lines+=("required	${prefix}-android-unit	$dir	./gradlew	test")
-                output_lines+=("required	${prefix}-android-lint	$dir	./gradlew	lint")
-                output_lines+=("required	${prefix}-android-build	$dir	./gradlew	assembleDebug")
-                output_lines+=("optional	${prefix}-android-device	$dir	./gradlew	connectedCheck")
-            else
-                output_lines+=("required	${prefix}-android-unit	$dir	gradle	test")
-                output_lines+=("required	${prefix}-android-lint	$dir	gradle	lint")
-                output_lines+=("required	${prefix}-android-build	$dir	gradle	assembleDebug")
-                output_lines+=("optional	${prefix}-android-device	$dir	gradle	connectedCheck")
-            fi
+            output_lines+=("required	${prefix}-android-unit	$dir	$gradle_cmd	test")
+            output_lines+=("required	${prefix}-android-lint	$dir	$gradle_cmd	lint")
+            output_lines+=("required	${prefix}-android-build	$dir	$gradle_cmd	assembleDebug")
+            output_lines+=("optional	${prefix}-android-device	$dir	$gradle_cmd	connectedCheck")
         else
-            if [ -x "$dir/gradlew" ]; then
-                output_lines+=("required	${prefix}-gradle-test	$dir	./gradlew	test")
-                output_lines+=("required	${prefix}-gradle-lint	$dir	./gradlew	check")
-            else
-                output_lines+=("required	${prefix}-gradle-test	$dir	gradle	test")
-                output_lines+=("required	${prefix}-gradle-lint	$dir	gradle	check")
-            fi
+            output_lines+=("required	${prefix}-gradle-test	$dir	$gradle_cmd	test")
+            output_lines+=("required	${prefix}-gradle-lint	$dir	$gradle_cmd	check")
         fi
     fi
     if compgen -G "$dir/*.sln" >/dev/null 2>&1 || compgen -G "$dir/*.csproj" >/dev/null 2>&1; then
@@ -1444,6 +1467,47 @@ validate_checks_tsv() {
     done < "$file"
 }
 
+# Prints advisory comment lines extracted from .github/workflows/*.{yml,yaml}
+# `run:` steps. Review-only: every hint is a comment, so candidates stay valid
+# and nothing becomes a check without the human promotion step. Single-line
+# `run:` scalars are shown verbatim; block scalars collapse to a marker.
+# Prints nothing when no workflow run steps exist, keeping candidates
+# byte-identical for CI-less projects. Single-sourced here per language:
+# --emit-ci-hints serves stdout consumers (the installers' confined candidate
+# writers), and the verifier's own --detect-checks appends the same block.
+emit_ci_step_hints() {
+    local wfdir=".github/workflows"
+    [ -d "$wfdir" ] || return 0
+    local hints="" f n line rest value
+    local _ncg=0
+    shopt -q nocaseglob 2>/dev/null && _ncg=1
+    shopt -s nocaseglob
+    for f in "$wfdir"/*.yml "$wfdir"/*.yaml; do
+        [ -f "$f" ] || continue
+        n=0
+        while IFS= read -r line || [ -n "$line" ]; do
+            n=$((n + 1))
+            line="${line%$'\r'}"
+            if [[ "$line" =~ ^[[:blank:]]*(-[[:blank:]]+)?run:[[:blank:]]*(.*)$ ]]; then
+                rest="${BASH_REMATCH[2]}"
+                rest="${rest//$'\t'/    }"
+                rest="${rest%"${rest##*[![:blank:]]}"}"
+                if [ -z "$rest" ] || [[ "$rest" =~ ^[\>\|] ]]; then
+                    value="(multi-line script; review manually)"
+                else
+                    value="$rest"
+                fi
+                hints="${hints}#   ${f}:${n} run: ${value}"$'\n'
+            fi
+        done < "$f"
+    done
+    [ "$_ncg" -eq 0 ] && shopt -u nocaseglob
+    if [ -n "$hints" ]; then
+        printf '# CI workflow hints (.github/workflows) — review-only; promote lines by hand if wanted:\n'
+        printf '%s' "$hints"
+    fi
+}
+
 emit_checks() {
     detect
     exit 0
@@ -1503,6 +1567,7 @@ detect_checks_file() {
         echo "# .agentic/checks.generated.tsv — candidate verification contract."
         echo "# Auto-generated by detection workflow. Review assumptions and promote to .agentic/checks.tsv"
         printf '%s\n' "$checks"
+        emit_ci_step_hints
     } > "$tmp"
     if [ -e "$gen_file" ] && [ ! -f "$gen_file" ]; then
         echo "ERROR: generated candidate exists and is not a regular file: $gen_file" >&2
@@ -1543,6 +1608,10 @@ validate_checks_arg() {
 
 if [ "${1:-}" = "--emit-checks" ]; then
     emit_checks
+fi
+if [ "${1:-}" = "--emit-ci-hints" ]; then
+    emit_ci_step_hints
+    exit 0
 fi
 if [ "${1:-}" = "--explain-detection" ]; then
     explain_detection

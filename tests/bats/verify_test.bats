@@ -291,6 +291,69 @@ run_checks_in_tmp() {  # run_checks_in_tmp <line>...
     rm -rf "$TMPD"
 }
 
+@test "--detect-checks appends CI run-step hints when workflows exist" {
+    TMPD="$(mktemp -d)"
+    printf '{"name":"x","scripts":{"test":"true"}}\n' > "$TMPD/package.json"
+    mkdir -p "$TMPD/.github/workflows"
+    printf '%s\n' \
+        'name: CI' \
+        'on: [push]' \
+        'jobs:' \
+        '  build:' \
+        '    runs-on: ubuntu-latest' \
+        '    steps:' \
+        '      - uses: actions/checkout@v4' \
+        '      - run: npm test' \
+        '      - run: |' \
+        '          echo multi' \
+        '          echo line' \
+        > "$TMPD/.github/workflows/ci.yml"
+    bash -c "cd '$TMPD' && bash '$VERIFY' --detect-checks >/dev/null"
+    grep -qF '# CI workflow hints' "$TMPD/.agentic/checks.generated.tsv"
+    grep -qF '#   .github/workflows/ci.yml:8 run: npm test' "$TMPD/.agentic/checks.generated.tsv"
+    grep -qF 'run: (multi-line script; review manually)' "$TMPD/.agentic/checks.generated.tsv"
+    # hints are comments: the verifier-written candidate still validates
+    bash -c "cd '$TMPD' && bash '$VERIFY' --validate-checks .agentic/checks.generated.tsv >/dev/null"
+    rm -rf "$TMPD"
+}
+
+@test "--detect-checks omits the hint block when workflows are uses-only" {
+    TMPD="$(mktemp -d)"
+    printf '{"name":"x","scripts":{"test":"true"}}\n' > "$TMPD/package.json"
+    mkdir -p "$TMPD/.github/workflows"
+    printf '%s\n' \
+        'name: CI' \
+        'on: [push]' \
+        'jobs:' \
+        '  build:' \
+        '    runs-on: ubuntu-latest' \
+        '    steps:' \
+        '      - uses: actions/checkout@v4' \
+        > "$TMPD/.github/workflows/ci.yml"
+    bash -c "cd '$TMPD' && bash '$VERIFY' --detect-checks >/dev/null"
+    [ -f "$TMPD/.agentic/checks.generated.tsv" ]
+    ! grep -qF '# CI workflow hints' "$TMPD/.agentic/checks.generated.tsv"
+    rm -rf "$TMPD"
+}
+
+@test "--detect-checks matches uppercase workflow file extensions" {
+    TMPD="$(mktemp -d)"
+    printf '{"name":"x","scripts":{"test":"true"}}\n' > "$TMPD/package.json"
+    mkdir -p "$TMPD/.github/workflows"
+    printf '%s\n' \
+        'name: CI' \
+        'on: [push]' \
+        'jobs:' \
+        '  build:' \
+        '    runs-on: ubuntu-latest' \
+        '    steps:' \
+        '      - run: npm test' \
+        > "$TMPD/.github/workflows/CI.YML"
+    bash -c "cd '$TMPD' && bash '$VERIFY' --detect-checks >/dev/null"
+    grep -qF '#   .github/workflows/CI.YML:7 run: npm test' "$TMPD/.agentic/checks.generated.tsv"
+    rm -rf "$TMPD"
+}
+
 @test "--detect-checks removes a stale candidate when no stack is detected" {
     TMPD="$(mktemp -d)"
     printf '{"name":"x","scripts":{"test":"true"}}\n' > "$TMPD/package.json"
@@ -364,6 +427,26 @@ run_checks_in_tmp() {  # run_checks_in_tmp <line>...
     [ "$status" -eq 0 ]
     printf '%s' "$output" | grep -q $'\t\./gradlew\t'
     printf '%s' "$output" | grep -q $'android-unit'
+    rm -rf "$TMPD"
+}
+
+@test "workspace modules emit the root Gradle wrapper as a relative path" {
+    case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*) skip "unix wrapper detection requires a POSIX shell" ;;
+    esac
+    TMPD="$(mktemp -d)"
+    mkdir -p "$TMPD/app" "$TMPD/lib/core"
+    printf 'plugins { id "java" }\n' > "$TMPD/build.gradle"
+    printf "include ':app', ':lib:core'\n" > "$TMPD/settings.gradle"
+    printf '#!/bin/sh\n' > "$TMPD/gradlew" && chmod +x "$TMPD/gradlew"
+    printf 'plugins { id "java" }\n' > "$TMPD/app/build.gradle"
+    printf 'plugins { id "java" }\n' > "$TMPD/lib/core/build.gradle"
+    run bash -c "cd '$TMPD' && bash '$VERIFY' --emit-checks 2>/dev/null"
+    [ "$status" -eq 0 ]
+    # fixed-string matches: module checks must not use the bare-gradle fallback
+    printf '%s' "$output" | grep -qF $'required\tapp-gradle-test\tapp\t../gradlew\ttest'
+    printf '%s' "$output" | grep -qF $'required\tlib-core-gradle-test\tlib/core\t../../gradlew\ttest'
+    ! printf '%s' "$output" | grep -q $'\tgradle\ttest'
     rm -rf "$TMPD"
 }
 

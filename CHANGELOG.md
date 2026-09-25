@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **CI workflow run-step hints in the checks candidate.** When the adopting
+  project has GitHub Actions workflows (`.github/workflows/*.yml` / `.yaml`),
+  `--generate-checks` and `--detect-checks` append commented hint lines to
+  `.agentic/checks.generated.tsv` naming each single-line `run:` step with its
+  file and line number; block-scalar scripts collapse to
+  `(multi-line script; review manually)`. Hints are comments — the candidate
+  still validates, promotion still requires the explicit
+  `--accept-detected-checks` review step, and projects without workflows get
+  byte-identical candidates. Mirrored across `install.sh` / `install.ps1`.
+  (TASK-046)
+- **Architecture pointer seeding.** When the adopting project already
+  documents its architecture (`ARCHITECTURE.md` at the repository root, or
+  `docs/ARCHITECTURE.md`), a fresh install seeds `.agentic/ARCHITECTURE.md`
+  as a short pointer to the canonical doc instead of the blank fill-in
+  template, and the post-install hint says so. Existing seeds are
+  project-owned and never overwritten, so nothing changes for adopters who
+  already filled it in. Mirrored across `install.sh` / `install.ps1`; covered by four new
+  install regression tests per language (root doc, docs/ doc, no-doc
+  template path, existing-seed preservation). (TASK-045)
 - **Ecosystem Agent Skills frontmatter (hybrid interop).** Each registry
   skill (`.agentic/skills/*/SKILL.md`) now opens with a YAML frontmatter block
   compatible with the ecosystem Agent Skills format (`name`, `description`,
@@ -22,6 +41,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Verifier-emitted CI run-step hints (PR #27 follow-ups).** The verifier's
+  own `--detect-checks` (`-DetectChecks`) now appends the same commented
+  `# <file>:<line> run: <cmd>` hints the installer writes, so both candidate
+  writers agree for the same project. Emission is single-sourced per language
+  through the new read-only stdout mode `--emit-ci-hints` (`-EmitCiHints`),
+  which the installers' confined candidate writers delegate to instead of
+  keeping a private copy. Workflow file matching is now extension
+  case-insensitive in the bash twin (`nocaseglob`), matching PowerShell's
+  `-Filter` semantics (`CI.YML` et al.), and new regression tests pin the
+  uses-only-workflows negative case (no hint header). The TASK-045 entry's
+  continuation wrap is normalized. (TASK-047)
+- **Workspace-module Gradle checks resolve the root wrapper.** `verify.sh` /
+  `verify.ps1` emitted bare `gradle` for Gradle workspace modules (`app`,
+  `lib/core`, ...) because the wrapper probe only looked inside the module
+  directory, where Gradle builds never ship one; on hosts without a global
+  Gradle install every module check reported
+  `BLOCKED: executable 'gradle' was not found` even though the root wrapper
+  was present and the root-level checks were already using it. Module checks
+  now walk from the module directory up to the invocation root and emit the
+  first wrapper found as a path relative to the module (`../gradlew.bat` /
+  `../gradlew`, one `../` per depth level), which the check runner resolves
+  against the check's working directory. Module-local wrapper, root-level, and
+  no-wrapper contracts are unchanged. Covered by the new
+  `gradle-wrapper-multimodule` fixture (root wrapper + `app` + `lib/core`)
+  and one Bats + one Pester regression test. (TASK-044)
 - **CI badge URL in README.** The badge image used the legacy
   `/workflows/CI/badge.svg` endpoint, which now returns "no status" (the
   workflow-name URL form is no longer maintained); switched to the canonical
