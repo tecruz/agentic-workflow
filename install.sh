@@ -110,6 +110,7 @@ TOOLS_RAW="claude,gemini,aider"
 # Path (relative to the project root) of a pre-existing architecture doc that
 # the architecture seed pointed at; empty when the template was seeded.
 ARCH_POINTER=""
+BOOTSTRAP_SEEDED=0
 
 START_MARKER='<!-- @@AGENTIC-PROTOCOL-START@@ -->'
 END_MARKER='<!-- @@AGENTIC-PROTOCOL-END@@ -->'
@@ -208,6 +209,7 @@ MANAGED_FILES=(
     ".agentic/templates/SPEC.md"
     ".agentic/templates/PLAN.md"
     ".agentic/templates/TASKS.md"
+    ".agentic/templates/bootstrap-task.md"
     ".agentic/templates/checks.tsv"
     ".agentic/tasks/README.md"
     ".agentic/decisions/README.md"
@@ -315,7 +317,7 @@ legacy_v10_checksum() {
 # the manifest itself are deliberately absent: they are never legitimate
 # managed / merge / seed records.
 MERGE_PATHS=" AGENTS.md CLAUDE.md GEMINI.md "
-SEED_PATHS=" .agentic/ARCHITECTURE.md .agentic/STATUS.md .agentic/checks.tsv "
+SEED_PATHS=" .agentic/ARCHITECTURE.md .agentic/STATUS.md .agentic/checks.tsv .agentic/tasks/TASK-000-bootstrap.md "
 MANAGED_PATHS=""
 for _f in "${MANAGED_FILES[@]}"; do
     case " $MANAGED_PATHS " in
@@ -698,6 +700,19 @@ install_seed_checks() {
         return
     fi
     install_seed "$SOURCE_DIR/.agentic/templates/checks.tsv" "$rel"
+}
+
+# TASK-000 bootstrap: a fresh install seeds one project-owned task that turns
+# the remaining manual post-install steps (architecture record, checks
+# contract, CI decision) into the first task of the agentic loop itself.
+# Sourced from the managed .agentic/templates/bootstrap-task.md; afterwards it
+# is plain project content (same skip path as install_seed).
+install_seed_bootstrap_task() {
+    local rel=".agentic/tasks/TASK-000-bootstrap.md"
+    if [ ! -e "$TARGET_DIR/$rel" ] && [ "$PLAN" -eq 0 ]; then
+        BOOTSTRAP_SEEDED=1
+    fi
+    install_seed "$SOURCE_DIR/.agentic/templates/bootstrap-task.md" "$rel"
 }
 
 # .agentic/ARCHITECTURE.md is seeded from the framework template, unless the
@@ -1508,6 +1523,7 @@ for rel in "${SEED_FILES[@]}"; do
     fi
 done
 install_seed_checks
+install_seed_bootstrap_task
 for rel in "${MERGE_FILES[@]}"; do
     install_merge "$SOURCE_DIR/$rel" "$rel"
 done
@@ -1530,6 +1546,9 @@ fi
 echo ""
 check_partial
 echo "Done. Review any '.new' conflict candidates, then commit the installed files."
+if [ "$BOOTSTRAP_SEEDED" -eq 1 ]; then
+    echo "Bootstrap: seeded .agentic/tasks/TASK-000-bootstrap.md — hand it to your agent (or follow it yourself) to finish the post-install setup."
+fi
 if [ -n "$ARCH_POINTER" ]; then
     echo "Note: existing architecture doc detected — seeded .agentic/ARCHITECTURE.md as a pointer to '$ARCH_POINTER'."
     echo "Next: run ./.agentic/scripts/verify.sh."

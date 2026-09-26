@@ -233,6 +233,22 @@ keep me" ]
     grep -qF 'my own architecture notes' .agentic/ARCHITECTURE.md
 }
 
+@test "install seeds the TASK-000 bootstrap task from the managed template" {
+    bash "$INSTALL" . >/dev/null
+    [ -f .agentic/tasks/TASK-000-bootstrap.md ]
+    grep -qF 'Post-install bootstrap' .agentic/tasks/TASK-000-bootstrap.md
+    grep -qF 'checks contract' .agentic/tasks/TASK-000-bootstrap.md
+    grep -qF "$(printf '.agentic/tasks/TASK-000-bootstrap.md\tseed\t')" .agentic/install-manifest.tsv
+    grep -qF "$(printf '.agentic/templates/bootstrap-task.md\tmanaged\t')" .agentic/install-manifest.tsv
+}
+
+@test "an existing TASK-000 bootstrap task is never overwritten" {
+    mkdir -p .agentic/tasks
+    printf 'my completed bootstrap notes\n' > .agentic/tasks/TASK-000-bootstrap.md
+    bash "$INSTALL" . >/dev/null
+    grep -qF 'my completed bootstrap notes' .agentic/tasks/TASK-000-bootstrap.md
+}
+
 @test "a modified managed file produces a conflict candidate and is not clobbered" {
     bash "$INSTALL" . >/dev/null 2>&1
     printf '\n# custom\n' >> .agentic/WORKFLOW.md
@@ -1117,6 +1133,7 @@ SHIM
     [ ! -e "$BUNDLE/README.md" ]
     [ ! -e "$BUNDLE/dist" ]
     [ -f "$BUNDLE/.agentic/templates/checks.tsv" ]   # generic template travels
+    [ -f "$BUNDLE/.agentic/templates/bootstrap-task.md" ]   # bootstrap task template travels
     [ -f "$BUNDLE/.agentic/scripts/verify.sh" ]
     [ -f "$BUNDLE/LICENSE" ]
 }
@@ -1433,6 +1450,7 @@ SH
     [ ! -e "$BUNDLE/dist" ]
     [ ! -e "$BUNDLE/.agentic/decisions/ADR-"* ]
     [ -f "$BUNDLE/.agentic/templates/checks.tsv" ]
+    [ -f "$BUNDLE/.agentic/templates/bootstrap-task.md" ]
     [ -f "$BUNDLE/.agentic/scripts/verify.sh" ]
     [ -f "$BUNDLE/LICENSE" ]
 }
@@ -1459,6 +1477,7 @@ SH
     [ ! -e "$BUNDLE/CONTRIBUTING.md" ]
     [ ! -e "$BUNDLE/SECURITY.md" ]
     [ -f "$BUNDLE/.agentic/templates/checks.tsv" ]
+    [ -f "$BUNDLE/.agentic/templates/bootstrap-task.md" ]
     [ -f "$BUNDLE/.agentic/scripts/verify.sh" ]
 }
 
