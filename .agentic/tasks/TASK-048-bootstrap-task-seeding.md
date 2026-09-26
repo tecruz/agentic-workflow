@@ -3,7 +3,7 @@
 ## Status
 
 Status: done
-Updated: 2026-09-25
+Updated: 2026-09-27
 
 ## Risk profile
 
@@ -74,6 +74,7 @@ or safety-critical behavior.
 - docs/automating-verification.md (new)
 - CHANGELOG.md
 - .agentic/STATUS.md
+- .agentic/tasks/README.md (numbering exception for the TASK-000 seed)
 - .agentic/tasks/TASK-048-bootstrap-task-seeding.md (this file)
 
 ## Verification
@@ -118,6 +119,27 @@ or safety-critical behavior.
   `VALID: profile=standard` in both twins.
 - `shellcheck`: not installed on this host — optional leg skips by design.
 - All touched files audited LF-only (`.gitattributes` enforces `eol=lf`).
+
+### Review fixes (PR #28 self-review, 2026-09-27)
+
+Self-review of the opened PR caught two doc defects and fixed them before
+merge:
+
+- The seeded template's step 2 told adopters to "copy" the reviewed
+  candidate over `.agentic/checks.tsv`, bypassing the sanctioned
+  `--accept-detected-checks` validation-and-promotion gate and
+  contradicting the README lifecycle; it now prescribes the installer flag
+  (`--accept-detected-checks` / `-AcceptDetectedChecks`).
+- `.agentic/tasks/README.md` (managed, installed everywhere) said tasks
+  number from TASK-001 while the installer seeds TASK-000; it now carries
+  an explicit exception line.
+- Nits normalized: "fresh-install-only" hint wording corrected to the real
+  trigger (runs that seed the absent task, including `--update` on
+  pre-TASK-048 projects) in the CHANGELOG and STATUS.md; README first-task
+  phrasing now reads "hand it to your agent on its first session".
+- Re-verified post-fix: `validate-task.sh|.ps1` on the template and on this
+  task file VALID; `bats --filter 'bootstrap task'` 2/2 (WSL); Pester
+  `*bootstrap task*` 2/2; `validate-handoff.sh|.ps1` on this task VALID.
 
 ## Remaining risks
 

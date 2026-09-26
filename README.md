@@ -89,8 +89,8 @@ Update an existing install by re-running the installer; use `--replace-managed`
 1. **Commit the installed files.**
 2. **Let TASK-000 bootstrap the rest.** Fresh installs seed
    `.agentic/tasks/TASK-000-bootstrap.md`: a ready-made first task that turns
-   the remaining setup into the protocol's own loop. Hand it to your agent
-   (it picks it up on its first session) or follow it yourself. The manual
+   the remaining setup into the protocol's own loop. Hand it to your agent on
+   its first session, or follow it yourself. The manual
    equivalent of each step follows.
 3. **Architecture record.** `.agentic/ARCHITECTURE.md` is always seeded as
    exactly one of two things, never a duplicate: the fill-in template, or —

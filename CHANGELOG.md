@@ -17,8 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   first task of the agentic loop itself. The seed is project-owned (never
   overwritten; existing files take the standard skip path) and is registered
   in both installers' seed-path registries so prune/uninstall semantics are
-  unchanged; the installer's closing message points at the task on fresh
-  installs only and `--plan` remains byte-for-byte read-only. Mirrored across
+  unchanged; the installer's closing message points at the task only on runs
+  that actually seeded it (never on re-runs where it already exists) and
+  `--plan` remains byte-for-byte read-only. Mirrored across
   `install.sh` / `install.ps1`; two new install regression tests per language
   (seeded-with-manifest-records, existing-file preservation). The template
   ships in the distribution bundle via the existing `templates/*.md` glob —

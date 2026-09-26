@@ -54,7 +54,9 @@ or safety-critical behavior.
    candidate with `.agentic/scripts/verify.sh --detect-checks` (Linux/macOS)
    or `.agentic/scripts/verify.ps1 -DetectChecks` (Windows), review and edit
    `.agentic/checks.generated.tsv` until it matches the project's real
-   definition of done, then copy it over `.agentic/checks.tsv`.
+   definition of done, then re-run the installer with
+   `--accept-detected-checks` / `-AcceptDetectedChecks` to validate and
+   promote the exact reviewed file (never a fresh detection).
 3. Run the verifier from the project root and repair any failures with at
    most three evidence-based cycles; record the final command, exit code,
    and result.
