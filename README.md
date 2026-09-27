@@ -87,22 +87,31 @@ Update an existing install by re-running the installer; use `--replace-managed`
 ### What happens after install
 
 1. **Commit the installed files.**
-2. **Fill in `.agentic/ARCHITECTURE.md`** with your project's real architecture
-   — or skip this and let your agent do it during its first session.
-   If your project already documents its architecture (`ARCHITECTURE.md` or
-   `docs/ARCHITECTURE.md`), the installer instead seeds
-   `.agentic/ARCHITECTURE.md` as a pointer to that canonical file.
-3. **Define your checks contract.** Run the verifier once, review the detected
-   candidate, and accept it (`--detect-checks` → `--accept-detected-checks`, see
+2. **Let TASK-000 bootstrap the rest.** Fresh installs seed
+   `.agentic/tasks/TASK-000-bootstrap.md`: a ready-made first task that turns
+   the remaining setup into the protocol's own loop. Hand it to your agent on
+   its first session, or follow it yourself. The manual
+   equivalent of each step follows.
+3. **Architecture record.** `.agentic/ARCHITECTURE.md` is always seeded as
+   exactly one of two things, never a duplicate: the fill-in template, or —
+   when your project already has `ARCHITECTURE.md` or `docs/ARCHITECTURE.md` —
+   a stable pointer to that canonical file. If your architecture doc lives
+   somewhere else, edit the seeded file to point at it; its content is never
+   copied.
+4. **Checks contract.** Run the verifier once, review the detected candidate,
+   and accept it (`--detect-checks` → `--accept-detected-checks`, see
    [The checks candidate lifecycle](#the-checks-candidate-lifecycle)) — or
    write `.agentic/checks.tsv` by hand. This file is the authoritative
    definition of done; everything else is scaffolding around it.
-4. **Run the verifier locally and, optionally, in CI** (see
-   [Verify a project](#verify-a-project)).
+5. **Run the verifier locally and, optionally, in CI** (see
+   [Verify a project](#verify-a-project)). You can also wire verification
+   into agent lifecycle events so checks run automatically when the agent
+   finishes — see [Automating verification](docs/automating-verification.md).
 
 ### Your first task
 
-Ask your agent to do anything. Following `AGENTS.md`, it will:
+On a fresh install that is `TASK-000-bootstrap` (see above); after that, ask
+your agent to do anything. Following `AGENTS.md`, it will:
 
 - **DISCOVER** your repo — manifests, conventions, `.agentic/STATUS.md`.
 - **CLASSIFY RISK** — `standard` by default, escalating automatically to
@@ -489,6 +498,7 @@ CI on any mismatch. Both the Bats and Pester suites run on all three platforms;
 │   ├── pester/                    # Pester suites (verify.ps1 + install.ps1 + validate-task.ps1 + validate-skills.ps1)
 │   └── fixtures/                  # Fixture projects + smoke harnesses
 ├── docs/decisions/                # This repository's ADRs
+├── docs/automating-verification.md # Agent lifecycle-wiring examples (dev-repo only)
 └── .agentic/
     ├── VERSION                    # Protocol version
     ├── WORKFLOW.md                # The development loop, in detail
@@ -500,9 +510,9 @@ CI on any mismatch. Both the Bats and Pester suites run on all three platforms;
     ├── profiles/                  # Risk profiles (prototype, standard, high-assurance)
     ├── context/                   # Portable, on-demand specialist modules + INDEX
     ├── skills/                    # Portable, on-demand procedure skills + INDEX
-    ├── tasks/                     # One file per task
+    ├── tasks/                     # One file per task (fresh installs seed TASK-000 bootstrap)
     ├── decisions/                 # Immutable Architecture Decision Records
-    ├── templates/                 # Feature spec, bug report, refactor plan, chore, spike, verdict, task file
+    ├── templates/                 # Feature spec, bug report, refactor plan, chore, spike, verdict, task file, bootstrap-task seed
     ├── orchestration/             # Coordinator twins, README, runtime worktrees
     └── scripts/
         ├── verify.sh              # Verifier (Linux/macOS)
@@ -649,7 +659,10 @@ auto-detection is only a bootstrap for it. Each line is
 
 No. But calling `verify.sh` / `verify.ps1` from CI turns the honest-PASS
 invariant into a gate: `PASS` is impossible unless at least one required check
-actually ran, and `--format json` output is designed for CI consumption.
+actually ran, and `--format json` output is designed for CI consumption. To
+have your agent run verification automatically at the end of every session
+instead of by discipline, see
+[Automating verification](docs/automating-verification.md).
 
 **Does this work with my agent tool?**
 

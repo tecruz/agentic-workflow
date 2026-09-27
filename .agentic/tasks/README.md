@@ -10,7 +10,8 @@ TASK-NNN-short-description.md
 ```
 
 Number tasks sequentially (TASK-001, TASK-002, ...). Keep the description
-short and kebab-case.
+short and kebab-case. (Installer-seeded `TASK-000-bootstrap.md` precedes this
+sequence; your own tasks start at TASK-001.)
 
 ## Template
 

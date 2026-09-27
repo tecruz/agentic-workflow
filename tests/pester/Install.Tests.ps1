@@ -244,6 +244,32 @@ Describe 'install.ps1' {
         finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
     }
 
+    It 'fresh install seeds the TASK-000 bootstrap task from the managed template' {
+        $tmp = New-TestDir
+        try {
+            & $install -Target $tmp *> $null
+            $task = Get-Content -Raw -LiteralPath (Join-Path $tmp '.agentic\tasks\TASK-000-bootstrap.md')
+            $task | Should -Match 'Post-install bootstrap'
+            $task | Should -Match 'checks contract'
+            $manifest = Get-Content -Raw -LiteralPath (Join-Path $tmp '.agentic\install-manifest.tsv')
+            $manifest | Should -Match ([regex]::Escape(".agentic/tasks/TASK-000-bootstrap.md`tseed`t"))
+            $manifest | Should -Match ([regex]::Escape(".agentic/templates/bootstrap-task.md`tmanaged`t"))
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It 'an existing TASK-000 bootstrap task is never overwritten' {
+        $tmp = New-TestDir
+        try {
+            New-Item -ItemType Directory -Path (Join-Path $tmp '.agentic\tasks') -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $tmp '.agentic\tasks\TASK-000-bootstrap.md') -Value 'my completed bootstrap notes'
+            & $install -Target $tmp *> $null
+            (Get-Content -Raw -LiteralPath (Join-Path $tmp '.agentic\tasks\TASK-000-bootstrap.md')) |
+                Should -Match 'my completed bootstrap notes'
+        }
+        finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
     It 'a modified managed file produces a conflict candidate and is not clobbered' {
         $tmp = New-TestDir
         try {
@@ -1600,6 +1626,7 @@ Describe 'install.ps1' {
             Test-Path (Join-Path $bundleRoot 'CONTRIBUTING.md') | Should -Be $false
             Test-Path (Join-Path $bundleRoot 'SECURITY.md') | Should -Be $false
             Test-Path (Join-Path $bundleRoot '.agentic\templates\checks.tsv') | Should -Be $true
+            Test-Path (Join-Path $bundleRoot '.agentic\templates\bootstrap-task.md') | Should -Be $true
             Test-Path (Join-Path $bundleRoot '.agentic\scripts\verify.ps1') | Should -Be $true
             Test-Path (Join-Path $bundleRoot '.agentic\profiles\README.md') | Should -Be $true
             Test-Path (Join-Path $bundleRoot '.agentic\profiles\high-assurance.md') | Should -Be $true

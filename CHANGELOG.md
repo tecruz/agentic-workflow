@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Post-install bootstrap task (TASK-000).** Fresh installs now seed
+  `.agentic/tasks/TASK-000-bootstrap.md` from the new managed template
+  `.agentic/templates/bootstrap-task.md`, turning the remaining manual
+  post-install steps — filling in or pointing the architecture record,
+  reviewing and promoting the checks contract, deciding on CI — into the
+  first task of the agentic loop itself. The seed is project-owned (never
+  overwritten; existing files take the standard skip path) and is registered
+  in both installers' seed-path registries so prune/uninstall semantics are
+  unchanged; the installer's closing message points at the task only on runs
+  that actually seeded it (never on re-runs where it already exists) and
+  `--plan` remains byte-for-byte read-only. Mirrored across
+  `install.sh` / `install.ps1`; two new install regression tests per language
+  (seeded-with-manifest-records, existing-file preservation). The template
+  ships in the distribution bundle via the existing `templates/*.md` glob —
+  no bundle manifest change. (TASK-048)
+- **Automating-verification guide.** New dev-repo-only
+  `docs/automating-verification.md` covers the wiring layer the checks
+  contract does not provide: running the verifier automatically on agent
+  lifecycle events. Includes an OpenCode `session.idle` project-plugin
+  example, a Claude Code `Stop`-hook example, Aider `auto-test` config,
+  Copilot `copilot-setup-steps.yml` context, a plain Git `pre-push` fallback,
+  and pointers to the orchestration hooks. README Quick Start now states
+  plainly that the architecture seed is always template XOR pointer (never a
+  duplicate) and presents TASK-000 as the automated first task. (TASK-048)
+
 - **CI workflow run-step hints in the checks candidate.** When the adopting
   project has GitHub Actions workflows (`.github/workflows/*.yml` / `.yaml`),
   `--generate-checks` and `--detect-checks` append commented hint lines to

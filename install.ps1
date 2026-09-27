@@ -214,6 +214,7 @@ $ManagedFiles = @(
     ".agentic/templates/SPEC.md",
     ".agentic/templates/PLAN.md",
     ".agentic/templates/TASKS.md",
+    ".agentic/templates/bootstrap-task.md",
     ".agentic/templates/checks.tsv",
     ".agentic/tasks/README.md",
     ".agentic/decisions/README.md",
@@ -321,7 +322,7 @@ function Get-LegacyV10Checksum {
 # the manifest itself are deliberately absent: they are never legitimate
 # managed / merge / seed records.
 $MergePaths = @("AGENTS.md", "CLAUDE.md", "GEMINI.md")
-$SeedPaths = @(".agentic/ARCHITECTURE.md", ".agentic/STATUS.md", ".agentic/checks.tsv")
+$SeedPaths = @(".agentic/ARCHITECTURE.md", ".agentic/STATUS.md", ".agentic/checks.tsv", ".agentic/tasks/TASK-000-bootstrap.md")
 $ManagedPaths = @()
 foreach ($f in $ManagedFiles) {
     if ($f -notin $ManagedPaths) { $ManagedPaths += $f }
@@ -344,6 +345,9 @@ foreach ($p in $ManagedPaths) { $script:ManagedPathSet.Add($p) | Out-Null }
 # Path (relative to the project root) of a pre-existing architecture doc that
 # the architecture seed pointed at; $null when the template was seeded.
 $script:ArchPointer = $null
+# $true when this run freshly seeded the post-install bootstrap task; drives
+# the closing hint. Skipped seeds (project-owned) and -Plan leave it $false.
+$script:BootstrapTaskSeeded = $false
 
 # Returns the one legitimate category for a canonical manifest path, or $null
 # when the path is not a framework-managed path at all. Membership uses the
@@ -725,6 +729,19 @@ function Install-CheckList {
         return
     }
     Install-Seed -RelativePath $rel -SourcePath (Join-Path $SourceDir ".agentic/templates/checks.tsv")
+}
+
+# TASK-000 bootstrap: a fresh install seeds one project-owned task that turns
+# the remaining manual post-install steps (architecture record, checks
+# contract, CI decision) into the first task of the agentic loop itself.
+# Sourced from the managed .agentic/templates/bootstrap-task.md; afterwards it
+# is plain project content (same skip path as Install-Seed).
+function Install-BootstrapTaskSeed {
+    $rel = ".agentic/tasks/TASK-000-bootstrap.md"
+    if ((-not (Test-Path -LiteralPath (Join-Path $TargetDir $rel))) -and (-not $script:Plan)) {
+        $script:BootstrapTaskSeeded = $true
+    }
+    Install-Seed -RelativePath $rel -SourcePath (Join-Path $SourceDir ".agentic/templates/bootstrap-task.md")
 }
 
 # .agentic/ARCHITECTURE.md is seeded from the framework template, unless the
@@ -1566,6 +1583,7 @@ try {
         else { Install-Seed $rel }
     }
     Install-CheckList
+    Install-BootstrapTaskSeed
     foreach ($rel in $MergeFiles)   { Install-Merge $rel }
 
     # Migration step of an update: files recorded by a previous install that are
@@ -1586,6 +1604,9 @@ try {
     Write-Host ""
     Assert-NotPartial
     Write-Host "Done. Review any '.new' conflict candidates, then commit the installed files."
+    if ($script:BootstrapTaskSeeded) {
+        Write-Host "Bootstrap: seeded .agentic/tasks/TASK-000-bootstrap.md — hand it to your agent (or follow it yourself) to finish the post-install setup."
+    }
     if ($script:ArchPointer) {
         Write-Host "Note: existing architecture doc detected — seeded .agentic/ARCHITECTURE.md as a pointer to '$script:ArchPointer'."
         Write-Host "Next: run ./.agentic/scripts/verify.ps1."
