@@ -52,6 +52,32 @@ add no signal beyond the acceptance criteria. -->
 - [x] AG-1: Approved by Alice Example on 2026-08-18
 -->
 
+<!-- Optional deviation records (see .agentic/rules/06-completion-messages.md).
+Copy a section below into the task file only when it carries real content;
+both sections are optional and omitted by default.
+
+## Phase route
+
+- DISCOVER: EXECUTED
+- CLASSIFY RISK: EXECUTED
+- PLAN: EXECUTED
+- IMPLEMENT: SKIPPED - <rationale>
+- VERIFY: EXECUTED
+- HANDOFF: EXECUTED
+
+List each of the six loop phases exactly once as '- <PHASE>: EXECUTED' or
+'- <PHASE>: SKIPPED - <rationale>' (separators ' - ', ' – ', ' — ' accepted).
+HANDOFF may never be SKIPPED; VERIFY may be SKIPPED only on prototype tasks.
+
+## Waived gates
+
+- WG-1: <what was waived> - waived by <approver> on YYYY-MM-DD - <rationale>
+
+Identifiers WG-N must be unique; approver and rationale must be substantive.
+Waivers are forbidden on high-assurance tasks — leave the gate unresolved
+instead. An empty '## Waived gates' section is invalid: omit it.
+-->
+
 ## Context modules
 
 - None selected

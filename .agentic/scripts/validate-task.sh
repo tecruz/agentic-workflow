@@ -28,6 +28,14 @@
 #   - a task marked `done` has no unresolved evidence and no unchecked gates
 #   - an optional `## Goal conditions` section, when present, holds only
 #     canonical `- Exit 0 when: <command>` bullets (one per exit-0 end state)
+#   - an optional `## Phase route` section, when present, records each of the
+#     six loop phases exactly once as `- <PHASE>: EXECUTED` or
+#     `- <PHASE>: SKIPPED - <rationale>`; HANDOFF is never skippable and
+#     VERIFY may be skipped only on prototype tasks
+#   - an optional `## Waived gates` section, when present, records waived
+#     expectations as canonical `- WG-N: <what> - waived by <approver> on
+#     YYYY-MM-DD - <rationale>` entries; waivers are forbidden on
+#     high-assurance tasks
 #
 # Result values: passed | satisfied | n/a are resolved; pending | partial |
 # blocked | missing | not-run are unresolved and block a completed task. `n/a`
@@ -1140,6 +1148,127 @@ if has_section "approval gates"; then
     fi
     if [ "$COMPLETED" -eq 1 ] && [ "$unchecked" -gt 0 ]; then
         fail_blocked "APPROVAL_UNRESOLVED" "## Approval gates" "" "task is marked complete but an approval gate remains unchecked."
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Phase route: optional explicit record of which loop phases ran. When the
+# '## Phase route' section exists, every non-blank line must be a canonical
+# '- <PHASE>: EXECUTED' or '- <PHASE>: SKIPPED - <rationale>' entry (dash
+# separators '-', en dash, em dash accepted) and the six loop phases must each
+# be declared exactly once. HANDOFF is never skippable; VERIFY may be skipped
+# only on prototype tasks. A deviation (SKIPPED) must carry a substantive
+# rationale: an unrecorded deviation is worse than a recorded one.
+# ---------------------------------------------------------------------------
+if has_section "phase route"; then
+    route_seen=""
+    em_dash="$(printf '\342\200\224')"
+    en_dash="$(printf '\342\200\223')"
+    while IFS= read -r rl || [ -n "$rl" ]; do
+        # Normalize: collapse whitespace and fold unicode dashes to '-', so the
+        # canonical grammar below is locale- and byte-independent.
+        rl_n="$(printf '%s' "$rl" | lower | sed -e "s/$em_dash/-/g" -e "s/$en_dash/-/g" | sed -E -e 's/[[:space:]]+/ /g' -e 's/^ //' -e 's/ $//')"
+        [ -n "$rl_n" ] || continue
+        phase=""
+        outcome=""
+        suffix=""
+        if printf '%s' "$rl_n" | grep -qE '^[-*+] (discover|classify risk|plan|implement|verify|handoff):'; then
+            phase="$(printf '%s\n' "$rl_n" | sed -nE 's/^[-*+] (discover|classify risk|plan|implement|verify|handoff):(.*)$/\1/p')"
+            pbody="$(printf '%s\n' "$rl_n" | sed -nE 's/^[-*+] (discover|classify risk|plan|implement|verify|handoff):(.*)$/\2/p' | sed -E 's/^ //; s/ $//')"
+            case "$pbody" in
+                executed) outcome="executed" ;;
+                skipped) outcome="skipped" ;;
+                skipped\ -\ *) outcome="skipped"; suffix="${pbody#skipped - }" ;;
+                skipped\ -) outcome="skipped"; suffix="" ;;
+                *) outcome="" ;;
+            esac
+        fi
+        if [ -z "$outcome" ]; then
+            fail_invalid "PHASE_ROUTE_INVALID" "## Phase route" "" "malformed phase entry in '## Phase route': entries must be '- <PHASE>: EXECUTED' or '- <PHASE>: SKIPPED - <rationale>' where <PHASE> is one of DISCOVER, CLASSIFY RISK, PLAN, IMPLEMENT, VERIFY, HANDOFF."
+        fi
+        case " $route_seen " in
+            *" $phase "*) fail_invalid "PHASE_ROUTE_INVALID" "## Phase route" "$phase" "phase is declared more than once in '## Phase route'." ;;
+        esac
+        route_seen="$route_seen $phase"
+        if [ "$outcome" = "skipped" ]; then
+            if [ -z "$suffix" ] || ! has_meaningful_char "$suffix"; then
+                fail_invalid "PHASE_ROUTE_INVALID" "## Phase route" "$phase" "SKIPPED entry in '## Phase route' must record a substantive rationale after a dash separator."
+            fi
+            if [ "$phase" = "handoff" ]; then
+                fail_invalid "PHASE_SKIP_FORBIDDEN" "## Phase route" "handoff" "HANDOFF may never be SKIPPED."
+            fi
+            if [ "$phase" = "verify" ] && [ "$PROFILE" != "prototype" ]; then
+                fail_invalid "PHASE_SKIP_FORBIDDEN" "## Phase route" "verify" "VERIFY may be SKIPPED only on prototype tasks."
+            fi
+        fi
+    done <<< "$(section_content "phase route" || true)"
+    for p in discover "classify risk" plan implement verify handoff; do
+        case " $route_seen " in
+            *" $p "*) ;;
+            *) fail_invalid "PHASE_ROUTE_INVALID" "## Phase route" "$p" "phase route must cover all six phases (DISCOVER, CLASSIFY RISK, PLAN, IMPLEMENT, VERIFY, HANDOFF); missing: $p." ;;
+        esac
+    done
+fi
+
+# ---------------------------------------------------------------------------
+# Waived gates: optional record of approval/evidence expectations that were
+# deliberately waived. When the '## Waived gates' section exists, every
+# non-blank line must be a canonical
+# '- WG-N: <what was waived> - waived by <approver> on YYYY-MM-DD - <rationale>'
+# entry with a unique WG-N identifier, a meaningful non-placeholder approver,
+# a valid ISO date, and a substantive rationale. Waivers are records, not
+# approvals: they never satisfy an AG-N gate or an evidence row. They are
+# forbidden on high-assurance tasks, where every gate must be resolved.
+# ---------------------------------------------------------------------------
+if has_section "waived gates"; then
+    wg_count=0
+    wg_seen=""
+    em_dash="$(printf '\342\200\224')"
+    en_dash="$(printf '\342\200\223')"
+    while IFS= read -r wl || [ -n "$wl" ]; do
+        wl_n="$(printf '%s' "$wl" | lower | sed -e "s/$em_dash/-/g" -e "s/$en_dash/-/g" | sed -E -e 's/[[:space:]]+/ /g' -e 's/^ //' -e 's/ $//')"
+        [ -n "$wl_n" ] || continue
+        if ! printf '%s' "$wl_n" | grep -qE '^[-*+] wg-[0-9]+ *:'; then
+            fail_invalid "WAIVER_INVALID" "## Waived gates" "" "malformed waiver entry in '## Waived gates': entries must be '- WG-N: <what was waived> - waived by <approver> on YYYY-MM-DD - <rationale>'."
+        fi
+        wgid="$(printf '%s\n' "$wl_n" | sed -nE 's/^[-*+] (wg-[0-9]+) *: *.*$/\1/p')"
+        wbody="$(printf '%s\n' "$wl_n" | sed -nE 's/^[-*+] (wg-[0-9]+) *: *(.*)$/\2/p')"
+        # Full-line grammar (post-normalization, single spaces):
+        # '<what> - waived by <approver> on <date> - <rationale>'.
+        if ! printf '%s' "$wbody" | grep -qE '^[^ ].* - waived by [^ ].* on [0-9]{4}-[0-9]{2}-[0-9]{2} - [^ ]'; then
+            fail_invalid "WAIVER_INVALID" "## Waived gates" "$wgid" "malformed waiver entry in '## Waived gates': entries must be '- WG-N: <what was waived> - waived by <approver> on YYYY-MM-DD - <rationale>'."
+        fi
+        # Split at the FIRST ' - waived by ' and the FIRST ' on <date> - '
+        # markers (longest-suffix / shortest-prefix glob splits); later dashes
+        # belong to the rationale. The approver may not contain ' on <date> - '.
+        wwhat="${wbody%% - waived by *}"
+        wrest="${wbody#* - waived by }"
+        wapprover="${wrest%% on [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] - *}"
+        wdated="${wrest#"$wapprover"}"
+        wdated="${wdated# on }"
+        wdate="${wdated%% - *}"
+        wrationale="${wdated#* - }"
+        if [ -z "$wwhat" ] || ! has_meaningful_char "$wwhat"; then
+            fail_invalid "WAIVER_INVALID" "## Waived gates" "$wgid" "waiver gate must describe what was waived."
+        fi
+        case " $wg_seen " in
+            *" $wgid "*) fail_invalid "WAIVER_INVALID" "## Waived gates" "$wgid" "waiver gate is declared more than once." ;;
+        esac
+        wg_seen="$wg_seen $wgid"
+        wg_count=$(( wg_count + 1 ))
+        if [ -z "$wapprover" ] || printf '%s' "$wapprover" | grep -qE '<|>|tbd|pending|unknown|n/a' || ! has_meaningful_char "$wapprover"; then
+            fail_invalid "WAIVER_INVALID" "## Waived gates" "$wgid" "waiver gate must record a meaningful approver."
+        fi
+        validate_date "$wdate" || fail_invalid "WAIVER_INVALID" "## Waived gates" "$wgid" "waiver gate has an invalid ISO date."
+        if [ -z "$wrationale" ] || ! has_meaningful_char "$wrationale"; then
+            fail_invalid "WAIVER_INVALID" "## Waived gates" "$wgid" "waiver gate must record a substantive rationale."
+        fi
+    done <<< "$(section_content "waived gates" || true)"
+    if [ "$wg_count" -eq 0 ]; then
+        fail_invalid "WAIVER_INVALID" "## Waived gates" "" "'## Waived gates' must contain at least one 'WG-N' entry; omit the section when nothing was waived."
+    fi
+    if [ "$PROFILE" = "high-assurance" ]; then
+        fail_invalid "WAIVER_FORBIDDEN" "## Waived gates" "" "waived gates are forbidden on profile 'high-assurance'; leave the gate unresolved instead of waiving it."
     fi
 fi
 

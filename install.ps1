@@ -196,6 +196,7 @@ $ManagedFiles = @(
     ".agentic/rules/03-testing-verification.md",
     ".agentic/rules/04-git-conventions.md",
     ".agentic/rules/05-security-safety.md",
+    ".agentic/rules/06-completion-messages.md",
     ".agentic/profiles/README.md",
     ".agentic/profiles/prototype.md",
     ".agentic/profiles/standard.md",

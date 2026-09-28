@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Explicit deviation recording in the task contract.** Two optional
+  task-file sections plus a completion protocol make process deviations
+  auditable instead of silent. `## Phase route` records each of the six loop
+  phases exactly once as `- <PHASE>: EXECUTED` or `- <PHASE>: SKIPPED -
+  <rationale>` (HANDOFF never skippable; VERIFY skippable only on prototype
+  tasks); `## Waived gates` records canonical
+  `- WG-N: <what> - waived by <approver> on YYYY-MM-DD - <rationale>` rows
+  (forbidden on high-assurance tasks). Both validators enforce the sections
+  with byte-identical exit codes and messages; the four new diagnostic codes
+  (`PHASE_ROUTE_INVALID`, `PHASE_SKIP_FORBIDDEN`, `WAIVER_INVALID`,
+  `WAIVER_FORBIDDEN`) are admitted by `task-validation-result-v1`, and
+  `.agentic/rules/06-completion-messages.md` defines the two-option
+  completion protocol (`done` / `blocked`) and the no-emergent-deviation
+  rule. Documented in the task template, profiles README, WORKFLOW handoff
+  reporting, and `AGENTS.md`; covered by 16 new fixtures with mirrored
+  Bats/Pester rows and parity golden expectations. (TASK-048)
 - **CI workflow run-step hints in the checks candidate.** When the adopting
   project has GitHub Actions workflows (`.github/workflows/*.yml` / `.yaml`),
   `--generate-checks` and `--detect-checks` append commented hint lines to

@@ -103,6 +103,15 @@ numbered-criterion-invalid.md	1	INVALID: acceptance criteria must contain only c
 numbered-requirement-invalid.md	1	INVALID: high-assurance requirements must contain only canonical 'R-N: <description>' list entries; identifiers may not appear in prose or non-canonical lines.
 plus-bullet-malformed-gate-invalid.md	1	INVALID: malformed approval entry in '## Approval gates': entries must be '- [ ] AG-N: <requirement>' or '- [x] AG-N: Approved by <approver> on YYYY-MM-DD'.
 plus-bullet-unchecked-gate-blocked.md	2	BLOCKED: task is marked complete but an approval gate remains unchecked.
+phase-route-duplicate-phase.md	1	INVALID: phase is declared more than once in '## Phase route'.
+phase-route-handoff-skip-forbidden.md	1	INVALID: HANDOFF may never be SKIPPED.
+phase-route-malformed.md	1	INVALID: malformed phase entry in '## Phase route': entries must be '- <PHASE>: EXECUTED' or '- <PHASE>: SKIPPED - <rationale>' where <PHASE> is one of DISCOVER, CLASSIFY RISK, PLAN, IMPLEMENT, VERIFY, HANDOFF.
+phase-route-missing-phase.md	1	INVALID: phase route must cover all six phases (DISCOVER, CLASSIFY RISK, PLAN, IMPLEMENT, VERIFY, HANDOFF); missing: verify.
+phase-route-skip-no-rationale.md	1	INVALID: SKIPPED entry in '## Phase route' must record a substantive rationale after a dash separator.
+phase-route-skip-valid.md	0	VALID: profile=standard
+phase-route-valid.md	0	VALID: profile=standard
+phase-route-verify-skip-prototype-valid.md	0	VALID: profile=prototype
+phase-route-verify-skip-standard-forbidden.md	1	INVALID: VERIFY may be SKIPPED only on prototype tasks.
 profile-outside-risk-profile-invalid.md	1	INVALID: Profile: must be declared inside '## Risk profile'.
 prototype-checked-gate-valid.md	0	VALID: profile=prototype
 prototype-declaration-only-in-prose-invalid.md	1	INVALID: prototype handoff must state 'Production readiness: not established' exactly once.
@@ -161,4 +170,11 @@ updated-outside-status-invalid.md	1	INVALID: Updated: must be declared inside '#
 uppercase-profile-status-valid.md	0	VALID: profile=standard
 valid-criterion-plus-unnumbered-bullet-invalid.md	1	INVALID: every acceptance criterion list entry must begin with exactly one 'AC-N:' identifier; explanatory prose belongs in a separate Notes section.
 valid-requirement-plus-unnumbered-bullet-invalid.md	1	INVALID: every high-assurance requirement list entry must begin with exactly one 'R-N:' identifier; explanatory prose belongs in a separate Notes section.
+waived-gates-bad-approver.md	1	INVALID: waiver gate must record a meaningful approver.
+waived-gates-bad-date.md	1	INVALID: waiver gate has an invalid ISO date.
+waived-gates-duplicate.md	1	INVALID: waiver gate is declared more than once.
+waived-gates-empty.md	1	INVALID: '## Waived gates' must contain at least one 'WG-N' entry; omit the section when nothing was waived.
+waived-gates-high-assurance-forbidden.md	1	INVALID: waived gates are forbidden on profile 'high-assurance'; leave the gate unresolved instead of waiving it.
+waived-gates-malformed.md	1	INVALID: malformed waiver entry in '## Waived gates': entries must be '- WG-N: <what was waived> - waived by <approver> on YYYY-MM-DD - <rationale>'.
+waived-gates-valid.md	0	VALID: profile=standard
 zero-width-only-content-blocked.md	2	BLOCKED: completed task verification under '### Final' is still a placeholder (TBD, TODO, Pending, or similar).

@@ -128,8 +128,13 @@ Before planning, classify the task's risk profile per `.agentic/profiles/README.
    - Pre-existing failures and whether they were distinguished from new ones.
    - Environment or dependency blockers.
    - Remaining risks and open questions.
+   - Recorded deviations: phases skipped under `## Phase route` and gates
+     waived under `## Waived gates` (or `deviations: none`).
    - Whether any commit was made.
    - The risk profile's handoff evidence (see the matching file in `.agentic/profiles/`).
+   - Close the report with the canonical two-option completion line from
+     `.agentic/rules/06-completion-messages.md`: `TASK-<ID>: done` or
+     `TASK-<ID>: blocked - <reason>`.
 4. **Commit Only When Permitted**:
    - Create commits only when explicitly requested or allowed by documented project policy.
    - Otherwise leave a clean working-tree diff for review. If committing, follow Conventional Commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`) and keep commits atomic.

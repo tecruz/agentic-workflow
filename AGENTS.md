@@ -29,7 +29,7 @@ DISCOVER → CLASSIFY RISK → PLAN → IMPLEMENT → VERIFY → HANDOFF
 3. **Plan**: Decompose the request into atomic, verifiable steps. Create or update a task file in `.agentic/tasks/` using `.agentic/templates/task.md`, declaring the profile and its required evidence. Ask before destructive or ambiguous actions.
 4. **Implement**: Make minimal, style-matching changes per `.agentic/rules/`. Comments explain *why*, not *what*.
 5. **Verify**: Run the project's checks via `.agentic/scripts/verify.sh` / `verify.ps1` (see Section 7). Attempt at most three evidence-based repair cycles; then stop, preserve the latest useful state, and report the blocker. Never weaken a failing test merely to go green.
-6. **Handoff**: Mark the task `done` under `## Status`, then validate it with `.agentic/scripts/validate-handoff.sh` / `validate-handoff.ps1` — the single public gate that runs all three production validators in handoff mode (`validate-task --handoff`, `validate-context --handoff`, and `validate-skills --handoff`). Report files changed, verification commands run with exit codes and results, pre-existing failures, environment blockers, remaining risks, whether any commit was made, and the profile's handoff evidence. Commit only when explicitly requested or permitted by documented project policy.
+6. **Handoff**: Mark the task `done` under `## Status`, then validate it with `.agentic/scripts/validate-handoff.sh` / `validate-handoff.ps1` — the single public gate that runs all three production validators in handoff mode (`validate-task --handoff`, `validate-context --handoff`, and `validate-skills --handoff`). Report files changed, verification commands run with exit codes and results, pre-existing failures, environment blockers, remaining risks, whether any commit was made, and the profile's handoff evidence. Close the report with the canonical two-option completion line defined in `.agentic/rules/06-completion-messages.md` (`TASK-<ID>: done` or `TASK-<ID>: blocked - <reason>`), including any recorded deviations. Commit only when explicitly requested or permitted by documented project policy.
 
 ---
 
@@ -67,6 +67,7 @@ Detailed guidelines are located in `.agentic/rules/`:
 - **`03-testing-verification.md`**: unit/integration testing, bounded self-healing, test integrity.
 - **`04-git-conventions.md`**: atomic commits, Conventional Commits format, secret hygiene.
 - **`05-security-safety.md`**: input validation, secret protection, command execution bounds.
+- **`06-completion-messages.md`**: the two-option completion protocol (`done` / `blocked`) and the no-emergent-deviation rule.
 
 Task templates (feature specs, bug reports, refactor plans, task files): `.agentic/templates/`.
 

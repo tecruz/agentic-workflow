@@ -975,3 +975,82 @@ EOF
     run bash "$VALIDATE" --format json --run-goals "$FIXTURES/goal-run-pass.md" >/dev/null 2>&1
     [ "$status" -eq 1 ]
 }
+@test "VALID (0) for a task recording every phase as executed" {
+    classify phase-route-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "VALID (0) for a task with an executed/skipped phase mix and skip rationales" {
+    classify phase-route-skip-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "INVALID (1) for a malformed phase route entry" {
+    classify phase-route-malformed.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when the phase route omits a phase" {
+    classify phase-route-missing-phase.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when a phase is declared twice in the phase route" {
+    classify phase-route-duplicate-phase.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a SKIPPED phase entry without a rationale" {
+    classify phase-route-skip-no-rationale.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when HANDOFF is recorded as skipped" {
+    classify phase-route-handoff-skip-forbidden.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when VERIFY is recorded as skipped on a standard task" {
+    classify phase-route-verify-skip-standard-forbidden.md
+    [ "$status" -eq 1 ]
+}
+
+@test "VALID (0) when VERIFY is recorded as skipped on a prototype task" {
+    classify phase-route-verify-skip-prototype-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "VALID (0) for canonical waived-gate entries" {
+    classify waived-gates-valid.md
+    [ "$status" -eq 0 ]
+}
+
+@test "INVALID (1) for a malformed waived-gate entry" {
+    classify waived-gates-malformed.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when a waived-gate id is declared twice" {
+    classify waived-gates-duplicate.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a placeholder waiver approver" {
+    classify waived-gates-bad-approver.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a waiver with an invalid ISO date" {
+    classify waived-gates-bad-date.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) for a waived gates section without any WG entry" {
+    classify waived-gates-empty.md
+    [ "$status" -eq 1 ]
+}
+
+@test "INVALID (1) when a high-assurance task waives a gate" {
+    classify waived-gates-high-assurance-forbidden.md
+    [ "$status" -eq 1 ]
+}

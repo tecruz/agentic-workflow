@@ -56,6 +56,7 @@
 - [x] TASK-045 — Architecture pointer seeding: fresh installs detect a pre-existing `ARCHITECTURE.md` (root) or `docs/ARCHITECTURE.md` and seed `.agentic/ARCHITECTURE.md` as a pointer to it instead of the blank template, with an adapted post-install hint; existing seeds untouched; 4 new Bats + 4 new Pester install tests (see `.agentic/tasks/TASK-045-architecture-pointer-seed.md`)
 - [x] TASK-046 — CI workflow run-step hints in the checks candidate: `--generate-checks`/`--detect-checks` append commented `# <file>:<line> run: <cmd>` hints extracted from `.github/workflows/*.yml|yaml` (block scalars collapse to a review marker); hints never parse as checks and promotion still requires `--accept-detected-checks`; byte-identical candidates for CI-less projects; 2 new Bats + 2 new Pester tests (see `.agentic/tasks/TASK-046-ci-hints-in-checks-candidate.md`)
 - [x] TASK-047 — PR #27 review follow-ups: the verifier's own `--detect-checks` now appends the same commented CI run-step hints the installer emits (single-sourced via the read-only `--emit-ci-hints`/`-EmitCiHints` stdout mode the installers delegate to); workflow extension matching is case-insensitive in both twins; uses-only-workflows negative case pinned by new Bats+Pester tests; TASK-045 CHANGELOG wrap normalized; plan-mode pointer-note concern verified non-applicable (plan exits before the tail message) (see `.agentic/tasks/TASK-047-pr27-review-followups.md`)
+- [x] TASK-048 — Explicit deviation recording: optional `## Phase route` (all six loop phases exactly once as `EXECUTED` or `SKIPPED - <rationale>`; HANDOFF never skippable, VERIFY skippable only on prototype) and `## Waived gates` (`WG-N` rows, forbidden on high-assurance) sections validated by both task twins with four new diagnostic codes and schema enums, `rules/06-completion-messages.md` two-option completion protocol registered as managed, 16 fixtures + 16 parity rows (180 total) + mirrored Bats/Pester coverage, ADR-0017 (see `.agentic/tasks/TASK-048-deviation-recording.md`)
 
 ## Recent Decisions
 
@@ -69,6 +70,7 @@
 - ADR-0013 — Deeper Android and Kotlin detection (see `docs/decisions/ADR-0013-deeper-android-kotlin-detection.md`)
 - ADR-0014 — Skills as a first-class category (see `docs/decisions/ADR-0014-skills-as-first-class-category.md`)
 - ADR-0015 — Nx, Turborepo, and Bazel workspace detection (see `docs/decisions/ADR-0015-nx-turborepo-bazel-detection.md`)
+- ADR-0017 — Explicit deviation recording: phase route, waived gates, completion protocol (see `docs/decisions/ADR-0017-explicit-deviation-recording.md`)
 
 ## Notes
 

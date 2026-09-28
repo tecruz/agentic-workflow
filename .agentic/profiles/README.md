@@ -118,6 +118,33 @@ statements never count as approval. `None identified` is permitted only for
 non-high-assurance profiles; high-assurance tasks must declare explicit
 `AG-N` gates.
 
+## Deviation records
+
+Two optional sections record deviations from the default process; both are
+omitted when nothing deviated.
+
+**Phase route** — one entry per loop phase:
+
+```text
+- DISCOVER: EXECUTED
+- IMPLEMENT: SKIPPED - <rationale>
+```
+
+All six phases (DISCOVER, CLASSIFY RISK, PLAN, IMPLEMENT, VERIFY, HANDOFF)
+must appear exactly once when the section is present, as `EXECUTED` or
+`SKIPPED` with a substantive rationale. `HANDOFF` may never be `SKIPPED` on
+any profile; `VERIFY` may be `SKIPPED` only on `prototype` tasks.
+
+**Waived gates** — an expectation waived with a named owner:
+
+```text
+- WG-1: <what was waived> - waived by <approver> on YYYY-MM-DD - <rationale>
+```
+
+Identifiers `WG-N` are unique; approver and rationale must be substantive.
+Waivers are **forbidden on `high-assurance` tasks** — leave the approval gate
+unresolved instead (BLOCKED, exit `2`, never a waiver).
+
 ## Validation
 
 `.agentic/scripts/validate-task.sh` / `validate-task.ps1` check a task file's
@@ -134,6 +161,10 @@ non-high-assurance profiles; high-assurance tasks must declare explicit
 - Prototype tasks declare `Production readiness: not established` and
   `No production deployment or irreversible operation: confirmed` in their
   `## Handoff` section.
+- An optional `## Phase route` covers all six phases exactly once with no
+  forbidden skip, and an optional `## Waived gates` carries unique `WG-N`
+  rows with a real approver, ISO date, and rationale — never on
+  `high-assurance`.
 
 The validator never judges whether the prose is intellectually sufficient.
 That belongs to human or behavioral evaluation.

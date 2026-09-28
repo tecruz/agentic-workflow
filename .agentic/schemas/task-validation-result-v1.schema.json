@@ -36,9 +36,13 @@
               "EVIDENCE_MAPPING_INVALID",
               "APPROVAL_INVALID",
               "APPROVAL_UNRESOLVED",
-              "PROTOTYPE_DECLARATION_INVALID",
-              "EVIDENCE_UNRESOLVED",
-              "STATUS_NOT_DONE"
+               "PROTOTYPE_DECLARATION_INVALID",
+               "EVIDENCE_UNRESOLVED",
+               "STATUS_NOT_DONE",
+               "PHASE_ROUTE_INVALID",
+               "PHASE_SKIP_FORBIDDEN",
+               "WAIVER_INVALID",
+               "WAIVER_FORBIDDEN"
             ]
           },
           "section": { "type": ["string", "null"] },

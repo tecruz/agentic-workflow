@@ -32,6 +32,14 @@
         operation occurred and that production readiness was not established
       - approvals use structured records: `- [x] AG-N: Approved by <x> on <date>`
       - a task marked `done` has no unresolved evidence and no unchecked gates
+      - an optional `## Phase route` section, when present, records each of the
+        six loop phases exactly once as `- <PHASE>: EXECUTED` or
+        `- <PHASE>: SKIPPED - <rationale>`; HANDOFF is never skippable and
+        VERIFY may be skipped only on prototype tasks
+      - an optional `## Waived gates` section, when present, records waived
+        expectations as canonical `- WG-N: <what> - waived by <approver> on
+        YYYY-MM-DD - <rationale>` entries; waivers are forbidden on
+        high-assurance tasks
 
     Result values: passed | satisfied | n/a are resolved; pending | partial |
     blocked | missing | not-run are unresolved and block a completed task.
@@ -937,6 +945,117 @@ if ($SECTIONS -contains 'approval gates') {
     }
     if ($Completed -and $unchecked -gt 0) {
         Write-Blocked "APPROVAL_UNRESOLVED" '## Approval gates' '' "task is marked complete but an approval gate remains unchecked."
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Phase route: optional explicit record of which loop phases ran. When the
+# '## Phase route' section exists, every non-blank line must be a canonical
+# '- <PHASE>: EXECUTED' or '- <PHASE>: SKIPPED - <rationale>' entry (dash
+# separators '-', en dash, em dash accepted) and the six loop phases must each
+# be declared exactly once. HANDOFF is never skippable; VERIFY may be skipped
+# only on prototype tasks. A deviation (SKIPPED) must carry a substantive
+# rationale: an unrecorded deviation is worse than a recorded one.
+# ---------------------------------------------------------------------------
+if ($SECTIONS -contains 'phase route') {
+    $routeSeen = [System.Collections.Generic.HashSet[string]]::new()
+    $phasesCanon = @('discover', 'classify risk', 'plan', 'implement', 'verify', 'handoff')
+    foreach ($rawLine in (Get-SectionContent 'phase route')) {
+        $rlN = ($rawLine.ToLowerInvariant() -replace "`u{2014}|`u{2013}", '-' -replace '\s+', ' ').Trim()
+        if (-not $rlN) { continue }
+        $phase = ''
+        $outcome = ''
+        $suffix = ''
+        $m = [regex]::Match($rlN, '^[-*+] (discover|classify risk|plan|implement|verify|handoff):(.*)$')
+        if ($m.Success) {
+            $phase = $m.Groups[1].Value
+            $pbody = $m.Groups[2].Value.Trim()
+            if ($pbody -eq 'executed') { $outcome = 'executed' }
+            elseif ($pbody -eq 'skipped') { $outcome = 'skipped' }
+            elseif ($pbody -eq 'skipped -') { $outcome = 'skipped'; $suffix = '' }
+            elseif ($pbody -match '^skipped - (.*)$') { $outcome = 'skipped'; $suffix = $Matches[1] }
+        }
+        if (-not $outcome) {
+            Write-Invalid "PHASE_ROUTE_INVALID" '## Phase route' '' "malformed phase entry in '## Phase route': entries must be '- <PHASE>: EXECUTED' or '- <PHASE>: SKIPPED - <rationale>' where <PHASE> is one of DISCOVER, CLASSIFY RISK, PLAN, IMPLEMENT, VERIFY, HANDOFF."
+        }
+        if (-not $routeSeen.Add($phase)) {
+            Write-Invalid "PHASE_ROUTE_INVALID" '## Phase route' $phase "phase is declared more than once in '## Phase route'."
+        }
+        if ($outcome -eq 'skipped') {
+            if (-not $suffix -or -not (Test-MeaningfulChar $suffix)) {
+                Write-Invalid "PHASE_ROUTE_INVALID" '## Phase route' $phase "SKIPPED entry in '## Phase route' must record a substantive rationale after a dash separator."
+            }
+            if ($phase -eq 'handoff') {
+                Write-Invalid "PHASE_SKIP_FORBIDDEN" '## Phase route' 'handoff' "HANDOFF may never be SKIPPED."
+            }
+            if ($phase -eq 'verify' -and $ProfileName -ne 'prototype') {
+                Write-Invalid "PHASE_SKIP_FORBIDDEN" '## Phase route' 'verify' "VERIFY may be SKIPPED only on prototype tasks."
+            }
+        }
+    }
+    foreach ($p in $phasesCanon) {
+        if (-not $routeSeen.Contains($p)) {
+            Write-Invalid "PHASE_ROUTE_INVALID" '## Phase route' $p "phase route must cover all six phases (DISCOVER, CLASSIFY RISK, PLAN, IMPLEMENT, VERIFY, HANDOFF); missing: $p."
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Waived gates: optional record of approval/evidence expectations that were
+# deliberately waived. When the '## Waived gates' section exists, every
+# non-blank line must be a canonical
+# '- WG-N: <what was waived> - waived by <approver> on YYYY-MM-DD - <rationale>'
+# entry with a unique WG-N identifier, a meaningful non-placeholder approver,
+# a valid ISO date, and a substantive rationale. Waivers are records, not
+# approvals: they never satisfy an AG-N gate or an evidence row. They are
+# forbidden on high-assurance tasks, where every gate must be resolved.
+# ---------------------------------------------------------------------------
+if ($SECTIONS -contains 'waived gates') {
+    $wgCount = 0
+    $wgSeen = [System.Collections.Generic.HashSet[string]]::new()
+    foreach ($rawLine in (Get-SectionContent 'waived gates')) {
+        $wlN = ($rawLine.ToLowerInvariant() -replace "`u{2014}|`u{2013}", '-' -replace '\s+', ' ').Trim()
+        if (-not $wlN) { continue }
+        $m = [regex]::Match($wlN, '^[-*+] (wg-\d+) *: *(.*)$')
+        if (-not $m.Success) {
+            Write-Invalid "WAIVER_INVALID" '## Waived gates' '' "malformed waiver entry in '## Waived gates': entries must be '- WG-N: <what was waived> - waived by <approver> on YYYY-MM-DD - <rationale>'."
+        }
+        $wgid = $m.Groups[1].Value
+        $wbody = $m.Groups[2].Value.Trim()
+        # '<what> - waived by <approver> on <date> - <rationale>' (lazy groups
+        # split at the FIRST markers, mirroring the Bash longest-suffix and
+        # shortest-prefix glob splits; the approver may not contain
+        # ' on <date> - ').
+        $gm = [regex]::Match($wbody, '^(\S.*?) - waived by (\S.*?) on (\d{4}-\d{2}-\d{2}) - (\S.*)$')
+        if (-not $gm.Success) {
+            Write-Invalid "WAIVER_INVALID" '## Waived gates' $wgid "malformed waiver entry in '## Waived gates': entries must be '- WG-N: <what was waived> - waived by <approver> on YYYY-MM-DD - <rationale>'."
+        }
+        $wwhat = $gm.Groups[1].Value
+        $wapprover = $gm.Groups[2].Value
+        $wdate = $gm.Groups[3].Value
+        $wrationale = $gm.Groups[4].Value
+        if (-not $wwhat -or -not (Test-MeaningfulChar $wwhat)) {
+            Write-Invalid "WAIVER_INVALID" '## Waived gates' $wgid "waiver gate must describe what was waived."
+        }
+        if (-not $wgSeen.Add($wgid)) {
+            Write-Invalid "WAIVER_INVALID" '## Waived gates' $wgid "waiver gate is declared more than once."
+        }
+        $wgCount++
+        if (-not $wapprover -or $wapprover -match '<|>|tbd|pending|unknown|n/a' -or -not (Test-MeaningfulChar $wapprover)) {
+            Write-Invalid "WAIVER_INVALID" '## Waived gates' $wgid "waiver gate must record a meaningful approver."
+        }
+        if (-not (Test-IsoDate $wdate)) {
+            Write-Invalid "WAIVER_INVALID" '## Waived gates' $wgid "waiver gate has an invalid ISO date."
+        }
+        if (-not $wrationale -or -not (Test-MeaningfulChar $wrationale)) {
+            Write-Invalid "WAIVER_INVALID" '## Waived gates' $wgid "waiver gate must record a substantive rationale."
+        }
+    }
+    if ($wgCount -eq 0) {
+        Write-Invalid "WAIVER_INVALID" '## Waived gates' '' "'## Waived gates' must contain at least one 'WG-N' entry; omit the section when nothing was waived."
+    }
+    if ($ProfileName -eq 'high-assurance') {
+        Write-Invalid "WAIVER_FORBIDDEN" '## Waived gates' '' "waived gates are forbidden on profile 'high-assurance'; leave the gate unresolved instead of waiving it."
     }
 }
 

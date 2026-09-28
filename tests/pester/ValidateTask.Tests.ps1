@@ -679,4 +679,68 @@ Describe 'validate-task.ps1 risk-profile validator' {
         & $validate -Format Json -RunGoals (Join-Path $fixtures 'goal-run-pass.md') *> $null
         $LASTEXITCODE | Should -Be 1
     }
+
+    It 'VALID (0) for a task recording every phase as executed' {
+        Invoke-Validator 'phase-route-valid.md' | Should -Be 0
+    }
+
+    It 'VALID (0) for a task with an executed/skipped phase mix and skip rationales' {
+        Invoke-Validator 'phase-route-skip-valid.md' | Should -Be 0
+    }
+
+    It 'INVALID (1) for a malformed phase route entry' {
+        Invoke-Validator 'phase-route-malformed.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when the phase route omits a phase' {
+        Invoke-Validator 'phase-route-missing-phase.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when a phase is declared twice in the phase route' {
+        Invoke-Validator 'phase-route-duplicate-phase.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) for a SKIPPED phase entry without a rationale' {
+        Invoke-Validator 'phase-route-skip-no-rationale.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when HANDOFF is recorded as skipped' {
+        Invoke-Validator 'phase-route-handoff-skip-forbidden.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when VERIFY is recorded as skipped on a standard task' {
+        Invoke-Validator 'phase-route-verify-skip-standard-forbidden.md' | Should -Be 1
+    }
+
+    It 'VALID (0) when VERIFY is recorded as skipped on a prototype task' {
+        Invoke-Validator 'phase-route-verify-skip-prototype-valid.md' | Should -Be 0
+    }
+
+    It 'VALID (0) for canonical waived-gate entries' {
+        Invoke-Validator 'waived-gates-valid.md' | Should -Be 0
+    }
+
+    It 'INVALID (1) for a malformed waived-gate entry' {
+        Invoke-Validator 'waived-gates-malformed.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when a waived-gate id is declared twice' {
+        Invoke-Validator 'waived-gates-duplicate.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) for a placeholder waiver approver' {
+        Invoke-Validator 'waived-gates-bad-approver.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) for a waiver with an invalid ISO date' {
+        Invoke-Validator 'waived-gates-bad-date.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) for a waived gates section without any WG entry' {
+        Invoke-Validator 'waived-gates-empty.md' | Should -Be 1
+    }
+
+    It 'INVALID (1) when a high-assurance task waives a gate' {
+        Invoke-Validator 'waived-gates-high-assurance-forbidden.md' | Should -Be 1
+    }
 }
