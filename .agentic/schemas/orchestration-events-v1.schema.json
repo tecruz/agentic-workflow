@@ -2,10 +2,11 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://tecruz.github.io/agentic-workflow/schemas/orchestration-events-v1.schema.json",
   "title": "OrchestrationEvent",
-  "description": "Schema for a single JSONL event object emitted by coordinator.sh --events / coordinator.ps1 -Events. Each line of the event stream is one JSON object validated against exactly one of the four event definitions below.",
+  "description": "Schema for a single JSONL event object emitted by coordinator.sh --events / coordinator.ps1 -Events. Each line of the event stream is one JSON object validated against exactly one of the five event definitions below.",
   "oneOf": [
     { "$ref": "#/definitions/orchestration_started" },
     { "$ref": "#/definitions/worker_started" },
+    { "$ref": "#/definitions/skeleton_checkpoint" },
     { "$ref": "#/definitions/worker_completed" },
     { "$ref": "#/definitions/orchestration_completed" }
   ],
@@ -54,6 +55,24 @@
         }
       ]
     },
+    "skeleton_checkpoint": {
+      "allOf": [
+        { "$ref": "#/definitions/event_name" },
+        {
+          "comment": "Emitted only when the walking-skeleton integrated check passes (--skeleton/-Skeleton runs); check_exit_code is therefore constant 0. A failing check is reported through worker_completed with reason_code SKELETON_CHECK_FAILED.",
+          "required": ["worker_id", "working_directory", "check_exit_code"],
+          "properties": {
+            "event": { "const": "skeleton_checkpoint" },
+            "worker_id": { "type": "string" },
+            "working_directory": { "type": "string" },
+            "check_exit_code": { "const": 0 },
+            "trace_id": { "type": "string" },
+            "span_id": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
     "worker_completed": {
       "allOf": [
         { "$ref": "#/definitions/event_name" },
@@ -66,7 +85,7 @@
             "exit_code": { "type": ["integer", "null"] },
             "duration_ms": { "type": "integer", "minimum": 0 },
             "working_directory": { "type": "string" },
-            "reason_code": { "enum": ["WORKER_FAILED", "WORKER_BLOCKED", "TOOLING_UNAVAILABLE", "REVIEW_FAILED", null] },
+            "reason_code": { "enum": ["WORKER_FAILED", "WORKER_BLOCKED", "TOOLING_UNAVAILABLE", "REVIEW_FAILED", "SKELETON_CHECK_FAILED", null] },
             "trace_id": { "type": "string" },
             "span_id": { "type": "string" }
           },
@@ -86,7 +105,7 @@
           "then": {
             "properties": {
               "exit_code": { "type": "integer", "minimum": 1 },
-              "reason_code": { "enum": ["WORKER_FAILED", "REVIEW_FAILED"] }
+              "reason_code": { "enum": ["WORKER_FAILED", "REVIEW_FAILED", "SKELETON_CHECK_FAILED"] }
             }
           }
         },

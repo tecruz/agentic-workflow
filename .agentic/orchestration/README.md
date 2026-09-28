@@ -10,20 +10,22 @@ Provides optional, isolated multi-agent task orchestration built on top of the o
 4. **Controlled Writes**: Remote writes and spawning require explicit approval gates.
 5. **Deterministic Hooks**: Lifecycle hooks (`pre-spawn`, `post-worker`, `post-review`) run outside the model's judgment as guardrails.
 6. **Review Stage**: Optional `--review` runs `validate-task`, `validate-context`, and `validate-skills` on the worktree's task file after the worker completes, catching contract violations before handoff.
+7. **Walking Skeleton Checkpoint**: Optional `--skeleton` requires a canonical `## Walking skeleton` section (`Slice`, `Integrated check`, `Skeleton approval`), blocks pending approvals before `--push`/`--cleanup`, and runs the recorded integrated check as a final gate after worker and review stages.
 
 ## How It Works
 
 The orchestration flow follows a deterministic pipeline:
 
-1. **Task file parse**: The coordinator reads the task file (`.agentic/tasks/TASK-XXX.md`), extracts its ID, validates required approval gates, and checks for an existing lock file.
+1. **Task file parse**: The coordinator reads the task file (`.agentic/tasks/TASK-XXX.md`), extracts its ID, validates required approval gates, and checks for an existing lock file. When `--skeleton` is set, the canonical `## Walking skeleton` section is also parsed at this stage: a missing or malformed section (or a pending skeleton approval combined with `--push`/`--cleanup`) blocks with exit 2 before any lock, worktree, or worker exists.
 2. **Worktree creation**: A `git worktree` is created at `.agentic/orchestration/worktrees/<task-id>` on branch `orchestration/<task-id>`. If the worktree already exists (from a previous run), the coordinator reuses it. A lock file is written with the current PID.
 3. **Pre-spawn hook**: If `--hooks` is set and a `pre-spawn` script exists, it runs with the task file and worktree path as arguments.
 4. **Worker spawn**: The coordinator forks a subprocess running the command specified by `--worker` (or `AGENTIC_WORKER_CMD`). In sandbox mode (`--sandbox docker|podman`), the worker runs inside a container with the worktree mounted at `/work`. Otherwise it runs directly in the worktree.
 5. **Post-worker hook**: If `--hooks` is set and a `post-worker` script exists, it runs after the worker completes.
-6. **Event stream**: While the worker runs, stdout/stderr are captured. On completion, the coordinator emits a JSONL event stream (`orchestration-events-v1`) with `orchestration_started`, `worker_started`, `worker_completed`, and `orchestration_completed` events. When `--traceparent` is supplied, each event carries `trace_id` and `span_id` fields for W3C Trace Context propagation.
+6. **Event stream**: While the worker runs, stdout/stderr are captured. On completion, the coordinator emits a JSONL event stream (`orchestration-events-v1`) with `orchestration_started`, `worker_started`, `worker_completed`, and `orchestration_completed` events (plus `skeleton_checkpoint` when `--skeleton` is used and the integrated check passes). When `--traceparent` is supplied, each event carries `trace_id` and `span_id` fields for W3C Trace Context propagation.
 7. **Review stage** (opt-in): If `--review` is set and the worker passed, the coordinator runs `validate-task --handoff`, `validate-context --handoff`, and `validate-skills --handoff` on the worktree's task file. A review failure marks the orchestration as FAIL with reason `REVIEW_FAILED`.
 8. **Post-review hook**: If `--hooks` is set and a `post-review` script exists, it runs after the review stage.
-9. **Cleanup**: If `--cleanup` is passed and the worker exits successfully (code 0), the worktree and branch are removed. On failure, the worktree is preserved for inspection. The lock file is always removed on exit.
+9. **Walking skeleton checkpoint** (opt-in): If `--skeleton` is set and worker and review stages passed, the coordinator runs the task file's recorded `Integrated check` command inside the worktree (under the container sandbox when `--sandbox` is active). A passing check emits a `skeleton_checkpoint` event before `worker_completed`; a failing check marks the orchestration as FAIL with reason `SKELETON_CHECK_FAILED`.
+10. **Cleanup**: If `--cleanup` is passed and the worker exits successfully (code 0), the worktree and branch are removed. On failure, the worktree is preserved for inspection. The lock file is always removed on exit.
 
 ## Usage
 
@@ -48,6 +50,9 @@ bash .agentic/orchestration/coordinator.sh --approve --sandbox docker --sandbox-
 
 # Review stage (validates task/context/skills contracts after worker)
 bash .agentic/orchestration/coordinator.sh --approve --review --worker "make test" .agentic/tasks/TASK-009.md
+
+# Walking skeleton checkpoint (requires canonical ## Walking skeleton section)
+bash .agentic/orchestration/coordinator.sh --approve --skeleton --worker "make test" .agentic/tasks/TASK-009.md
 
 # Deterministic hooks (pre-spawn, post-worker, post-review)
 bash .agentic/orchestration/coordinator.sh --approve --hooks .agentic/hooks/ --worker "make test" .agentic/tasks/TASK-009.md
@@ -74,9 +79,24 @@ pwsh -File .agentic/orchestration/coordinator.ps1 -Approve -Sandbox docker -Work
 
 # Review + hooks + tracing
 pwsh -File .agentic/orchestration/coordinator.ps1 -Approve -Review -Hooks .agentic/hooks/ -Traceparent "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01" -Worker "npm test" .agentic/tasks/TASK-009.md
+
+# Walking skeleton checkpoint
+pwsh -File .agentic/orchestration/coordinator.ps1 -Approve -Skeleton -Worker "npm test" .agentic/tasks/TASK-009.md
 ```
 
 Approval gates are read from the task file's `## Approval gates` section. A checked `AG-N` gate plus `--approve` (or `-Approve`) is required to spawn; `--push` (`-Push`) is additionally required for remote writes. When `None identified` is declared, the flag alone suffices. Unchecked or malformed gates block with exit 2 and create no worktree.
+
+With `--skeleton` (`-Skeleton`), the task file must also carry a canonical section; a missing or malformed section blocks with exit 2:
+
+```markdown
+## Walking skeleton
+
+- Slice: minimal end-to-end path
+- Integrated check: npm test
+- Skeleton approval: approved by Reviewer on 2026-09-27
+```
+
+`Skeleton approval` is either `pending` or `approved by <approver> on YYYY-MM-DD`; a pending value blocks `--push`/`--cleanup` (`-Push`/`-Cleanup`) with `SKELETON_APPROVAL_PENDING` and otherwise still runs the integrated check after the worker.
 
 Events and JSON results never contain raw command lines, arguments, environment, or absolute user-home paths; working directories are project-relative (or basename outside the project).
 
@@ -131,6 +151,9 @@ Each task gets its own worktree and lock file. The lock prevents the same task f
 | **Lock contention (concurrent tasks)** | If two coordinator processes attempt the same task ID, the second sees an existing lock file and exits with code 2 (BLOCKED). | Wait for the first process to finish. The lock is per-task-ID, not global — different tasks do not contend. |
 | **Stale worktree (PID gone)** | On startup, the coordinator detects a lock file whose PID no longer exists, removes the stale lock, and proceeds. | No action needed; the coordinator self-heals. If the worktree itself is orphaned, run `git worktree prune`. |
 | **Approval gate blocking** | A task file has unchecked or missing gates. The coordinator refuses to spawn and exits with code 2. | Edit the task file, check the required `AG-N` gate, and re-run. |
+| **Skeleton section missing/malformed** | `--skeleton` is set but the task file's `## Walking skeleton` section is absent, duplicated, or does not follow the canonical three-entry form. The coordinator blocks with exit 2 before creating a worktree. | Add the canonical section (one `Slice`, one `Integrated check`, one `Skeleton approval`) to the task file and re-run. |
+| **Skeleton approval pending** | `--skeleton` combined with `--push`/`--cleanup` while `Skeleton approval` is `pending`. The coordinator blocks with exit 2 and `SKELETON_APPROVAL_PENDING`. | Record `- Skeleton approval: approved by <approver> on YYYY-MM-DD`, then re-run. |
+| **Skeleton check failure (SKELETON_CHECK_FAILED)** | The recorded `Integrated check` command exits non-zero inside the worktree. The orchestration is marked FAIL (exit 1); no `skeleton_checkpoint` event is emitted and the worktree is preserved. | Inspect the check output, fix the implementation or the recorded command, and re-run. |
 | **Sandbox unavailable** | `--sandbox docker|podman` is set but the runtime is not installed. The coordinator exits BLOCKED (code 2) with `reason_code: TOOLING_UNAVAILABLE`; no worker is started. | Install the container runtime, or remove `--sandbox` to use worktree-only isolation. |
 
 ## Troubleshooting

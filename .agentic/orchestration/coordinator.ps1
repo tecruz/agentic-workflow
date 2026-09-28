@@ -45,6 +45,11 @@
     Run task validators (validate-task/context/skills) after the worker completes;
     fails the run on validation errors.
 
+.PARAMETER Skeleton
+    Require a canonical '## Walking skeleton' section in the task file; gate
+    pending approvals before -Push/-Cleanup and run the recorded integrated
+    check after worker and review stages pass.
+
 .PARAMETER Hooks
     Directory of hook scripts invoked at lifecycle events:
     pre-spawn, post-worker, post-review. Each hook receives
@@ -74,6 +79,7 @@ param(
     [string] $Sandbox = "none",
     [string] $SandboxImage = "",
     [switch] $Review,
+    [switch] $Skeleton,
     [string] $Hooks = "",
     [string] $Traceparent = "",
     [switch] $Help
@@ -101,6 +107,8 @@ Options:
   -Sandbox <type>      Worker sandbox mode: none (default), docker, podman
   -SandboxImage <img>  Custom container image for sandbox mode
   -Review              Run task validators after worker completes
+  -Skeleton            Require a canonical '## Walking skeleton' section; gate
+                        pending approvals and run the integrated check
   -Hooks <dir>         Hook scripts directory (pre-spawn, post-worker, post-review)
   -Traceparent <tp>    W3C Trace Context parent (falls back to TRACEPARENT env var)
   -Help                Show this help
@@ -353,6 +361,13 @@ function Emit-WorkerCompleted {
     Write-Event ($obj | ConvertTo-Json -Compress)
 }
 
+function Emit-SkeletonCheckpoint {
+    param([string]$WorkerId, [string]$CwdRel)
+    $obj = [ordered]@{ event = "skeleton_checkpoint"; worker_id = $WorkerId; working_directory = $CwdRel; check_exit_code = 0 }
+    if (-not [string]::IsNullOrWhiteSpace($TraceId)) { $obj.trace_id = $TraceId; $obj.span_id = $SpanId }
+    Write-Event ($obj | ConvertTo-Json -Compress)
+}
+
 function Emit-OrchestrationCompleted {
     param([string]$Result, [int]$ExitCode)
     $obj = [ordered]@{ event = "orchestration_completed"; result = $Result; exit_code = $ExitCode }
@@ -495,6 +510,103 @@ if ($needsApproval -or $Push) {
 }
 if (-not [string]::IsNullOrWhiteSpace($Worker) -or $Push) {
     if (-not $Approve) { Fail-WithResult "BLOCKED" 2 "spawning workers requires -Approve." }
+}
+
+# Walking skeleton inspection (opt-in -Skeleton): parse the canonical section
+# before any lock, worktree, or worker so missing, malformed, and pending states
+# block early.
+$SkeletonCheckCmd = ""
+$SkeletonApproval = ""
+if ($Skeleton) {
+    $skeletonContent = ""
+    $inSkeleton = $false
+    $inFence = $false
+    $inComment = $false
+    foreach ($rawLine in Get-Content -LiteralPath $TaskFile) {
+        $line = $rawLine.TrimEnd("`r")
+        if ($inComment) {
+            if ($line.Contains('-->')) { $inComment = $false }
+            continue
+        }
+        if ($line.Contains('<!--')) {
+            if ($line.Contains('-->')) { continue } else { $inComment = $true; continue }
+        }
+        if ($inFence) {
+            if ($line.StartsWith('```')) { $inFence = $false }
+            continue
+        }
+        if ($line.StartsWith('```')) { $inFence = $true; continue }
+        if ($line -match '^##\s+') {
+            $heading = $line.Substring(3).Trim().ToLowerInvariant() -replace '\s+', ' '
+            if ($heading -eq "walking skeleton") { $inSkeleton = $true }
+            else { if ($inSkeleton) { break } }
+            continue
+        }
+        if ($inSkeleton) { $skeletonContent += "$line`n" }
+    }
+
+    $skSlice = 0
+    $skCheck = 0
+    $skAppro = 0
+    $skMalformed = 0
+    $skSliceVal = ""
+    $skCheckVal = ""
+    $skApproVal = ""
+    foreach ($skLine in ($skeletonContent -split "`n")) {
+        $skTrim = $skLine.Trim()
+        if ([string]::IsNullOrWhiteSpace($skTrim)) { continue }
+        if ($skTrim -notmatch '^[-*+]') { $skMalformed = 1; continue }
+        $skBody = $skTrim -replace '^[-*+]\s+', ''
+        if ($skBody.StartsWith('Slice: ')) {
+            if ($skSlice -eq 1) { $skMalformed = 1 }
+            $skSlice = 1
+            $skSliceVal = $skBody.Substring(7)
+        } elseif ($skBody.StartsWith('Integrated check: ')) {
+            if ($skCheck -eq 1) { $skMalformed = 1 }
+            $skCheck = 1
+            $skCheckVal = $skBody.Substring(18)
+        } elseif ($skBody.StartsWith('Skeleton approval: ')) {
+            if ($skAppro -eq 1) { $skMalformed = 1 }
+            $skAppro = 1
+            $skApproVal = $skBody.Substring(19)
+        } else {
+            $skMalformed = 1
+        }
+    }
+
+    if ($skSlice -ne 1 -or $skCheck -ne 1 -or $skAppro -ne 1 -or $skMalformed -ne 0) {
+        Fail-WithResult "BLOCKED" 2 "walking skeleton section is missing or malformed; require exactly one '- Slice:', '- Integrated check:', and '- Skeleton approval: pending | approved by <approver> on YYYY-MM-DD'."
+    }
+    if ($skSliceVal -notmatch '[a-zA-Z0-9]') {
+        Fail-WithResult "BLOCKED" 2 "walking skeleton '- Slice:' must record a substantive value."
+    }
+    if ($skCheckVal -notmatch '[a-zA-Z0-9]') {
+        Fail-WithResult "BLOCKED" 2 "walking skeleton '- Integrated check:' must record a substantive command."
+    }
+    $SkeletonCheckCmd = $skCheckVal
+    if ($skApproVal -eq "pending") {
+        $SkeletonApproval = "pending"
+    } elseif ($skApproVal.StartsWith("approved by ") -and $skApproVal.Contains(" on ")) {
+        $skRest = $skApproVal.Substring(12)
+        $skIdx = $skRest.LastIndexOf(" on ")
+        $skApprover = $skRest.Substring(0, $skIdx)
+        $skDate = $skRest.Substring($skIdx + 4)
+        if ($skApprover -notmatch '[a-zA-Z0-9]') {
+            Fail-WithResult "BLOCKED" 2 "walking skeleton approval must record a meaningful approver."
+        }
+        if ($skApprover -match '(?i)(<|>|tbd|unknown|n/a)') {
+            Fail-WithResult "BLOCKED" 2 "walking skeleton approval must record a meaningful approver."
+        }
+        if ($skDate -notmatch '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$') {
+            Fail-WithResult "BLOCKED" 2 "walking skeleton approval has an invalid ISO date."
+        }
+        $SkeletonApproval = "approved"
+    } else {
+        Fail-WithResult "BLOCKED" 2 "walking skeleton '- Skeleton approval:' must be 'pending' or 'approved by <approver> on YYYY-MM-DD'."
+    }
+    if ($SkeletonApproval -eq "pending" -and ($Push -or $Cleanup)) {
+        Fail-WithResult "BLOCKED" 2 "SKELETON_APPROVAL_PENDING: skeleton approval is pending; record '- Skeleton approval: approved by <approver> on YYYY-MM-DD' before -Push or -Cleanup."
+    }
 }
 
 # Check git
@@ -815,6 +927,41 @@ if (-not [string]::IsNullOrWhiteSpace($Hooks) -and (Test-Path -LiteralPath $Hook
             $workersJson = '{"worker_id":' + (ConvertTo-Json $taskId -Compress) + ',"status":"FAIL","exit_code":1,"duration_ms":' + $durationMs + ',"reason_code":"REVIEW_FAILED"}'
             $summaryJson = '{"workers_defined":1,"workers_run":1,"passed":0,"failed":1,"blocked":0}'
         }
+    }
+}
+
+# --- Walking skeleton checkpoint (runs only when -Skeleton and worker+review passed) ---
+if ($Skeleton -and $result -eq "PASS") {
+    Write-Log "Running walking skeleton integrated check..."
+    $skCheckOk = $false
+    $skCheckExit = 0
+    if ($Sandbox -ne "none") {
+        $skImage = if ([string]::IsNullOrWhiteSpace($SandboxImage)) { "ubuntu:24.04" } else { $SandboxImage }
+        $skTraceArg = if (-not [string]::IsNullOrWhiteSpace($TraceId)) { "TRACEPARENT=00-$TraceId-$SpanId-$TraceFlags" } else { $null }
+        try {
+            Push-Location $worktreeAbs
+            if ($skTraceArg) { & $Sandbox run --rm -e $skTraceArg -v "${PWD}:/work" -w /work $skImage bash -c $SkeletonCheckCmd 2>&1 | Write-WorkerOutput }
+            else { & $Sandbox run --rm -v "${PWD}:/work" -w /work $skImage bash -c $SkeletonCheckCmd 2>&1 | Write-WorkerOutput }
+            if ($LASTEXITCODE -eq 0) { $skCheckOk = $true }; $skCheckExit = $LASTEXITCODE
+        } catch { $skCheckExit = 1 } finally { Pop-Location }
+    } else {
+        try {
+            Push-Location $worktreeAbs
+            bash -c $SkeletonCheckCmd 2>&1 | Write-WorkerOutput
+            if ($LASTEXITCODE -eq 0) { $skCheckOk = $true }; $skCheckExit = $LASTEXITCODE
+        } catch { $skCheckExit = 1 } finally { Pop-Location }
+    }
+    if ($skCheckOk) { $skCheckExit = 0 } elseif ($skCheckExit -eq 0) { $skCheckExit = 1 }
+    if ($skCheckExit -ne 0) {
+        $status = "FAIL"; $reason = "SKELETON_CHECK_FAILED"; $workerExit = 1; $result = "FAIL"; $exitCode = 1
+        $workersJson = '{"worker_id":' + (ConvertTo-Json $taskId -Compress) + ',"status":"FAIL","exit_code":1,"duration_ms":' + $durationMs + ',"reason_code":"SKELETON_CHECK_FAILED"}'
+        $summaryJson = '{"workers_defined":1,"workers_run":1,"passed":0,"failed":1,"blocked":0}'
+        Write-Log "Walking skeleton integrated check failed; marking orchestration as FAIL."
+    } else {
+        if (-not [string]::IsNullOrWhiteSpace($Events)) {
+            try { Emit-SkeletonCheckpoint $taskId $cwdRel } catch { Write-Diag "ERROR: failed to write skeleton_checkpoint event."; Remove-Item -LiteralPath $lockFile -Force -ErrorAction SilentlyContinue; exit 1 }
+        }
+        Write-Log "Walking skeleton checkpoint passed."
     }
 }
 

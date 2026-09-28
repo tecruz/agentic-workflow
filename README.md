@@ -607,11 +607,29 @@ Tasks declare gates in their `## Approval gates` section:
 
 Spawning requires `--approve` + a checked gate (`[x] AG-N:`). Use `None identified` for no gates.
 
+#### Walking Skeleton Checkpoint
+
+`--skeleton` (`-Skeleton`) requires a canonical section and runs its recorded
+integrated check as a final gate after worker and review stages:
+
+```markdown
+## Walking skeleton
+
+- Slice: minimal end-to-end path
+- Integrated check: npm test
+- Skeleton approval: approved by Reviewer on 2026-09-27
+```
+
+A missing/malformed section blocks with exit 2; a `pending` approval blocks
+`--push`/`--cleanup` with `SKELETON_APPROVAL_PENDING`; a failing check marks the
+run FAIL with `SKELETON_CHECK_FAILED`.
+
 ### Events
 
 Enable JSONL event stream with `--events .agentic/runs/run.jsonl`. Events:
 - `orchestration_started`
 - `worker_started` / `worker_completed`
+- `skeleton_checkpoint` (with `--skeleton`, when the integrated check passes)
 - `orchestration_completed`
 
 ---

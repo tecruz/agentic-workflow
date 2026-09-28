@@ -78,6 +78,17 @@ Waivers are forbidden on high-assurance tasks — leave the gate unresolved
 instead. An empty '## Waived gates' section is invalid: omit it.
 -->
 
+<!-- Optional walking-skeleton checkpoint (coordinator --skeleton / -Skeleton).
+Add the section only when orchestrating this task with the skeleton flag; it
+must carry exactly one of each entry, or the coordinator blocks with exit 2.
+
+## Walking skeleton
+
+- Slice: minimal end-to-end path
+- Integrated check: <command that proves the slice works, e.g. npm test>
+- Skeleton approval: pending | approved by <approver> on YYYY-MM-DD
+-->
+
 ## Context modules
 
 - None selected

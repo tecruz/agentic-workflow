@@ -75,6 +75,19 @@ make_git_repo() {
     git -C "$dir" commit --allow-empty -m "init" -q
 }
 
+add_skeleton_section() {
+    # add_skeleton_section <dir> <name> <approval> <check-command>
+    local dir="$1" name="$2" approval="$3" check="$4"
+    cat >> "$dir/.agentic/tasks/$name" <<EOF
+
+## Walking skeleton
+
+- Slice: minimal end-to-end path
+- Integrated check: $check
+- Skeleton approval: $approval
+EOF
+}
+
 @test "coordinator --help exits 0" {
     run bash "$COORD" --help
     [ "$status" -eq 0 ]
@@ -336,5 +349,113 @@ with open(sys.argv[2]) as f:
         validate(instance=json.loads(line), schema=schema)
 PYEOF
 
+    rm -rf "$TMPD"
+}
+
+@test "--skeleton blocks missing Walking skeleton section" {
+    have git || skip "git not available"
+    TMPD="$(mktemp -d)"
+    make_git_repo "$TMPD"
+    setup_task_file "$TMPD" "TASK-914.md" "- None identified"
+    run bash -c "cd '$TMPD' && bash '$COORD' --skeleton --approve --worker 'echo hi' .agentic/tasks/TASK-914.md 2>&1"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"walking skeleton section is missing or malformed"* ]]
+    [ ! -d "$TMPD/.agentic/orchestration/worktrees/TASK-914" ]
+    rm -rf "$TMPD"
+}
+
+@test "--skeleton blocks malformed Skeleton approval value" {
+    have git || skip "git not available"
+    TMPD="$(mktemp -d)"
+    make_git_repo "$TMPD"
+    setup_task_file "$TMPD" "TASK-915.md" "- None identified"
+    add_skeleton_section "$TMPD" "TASK-915.md" "maybe" "true"
+    run bash -c "cd '$TMPD' && bash '$COORD' --skeleton --approve --worker 'echo hi' .agentic/tasks/TASK-915.md 2>&1"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"'- Skeleton approval:' must be 'pending' or 'approved by <approver> on YYYY-MM-DD'"* ]]
+    [ ! -d "$TMPD/.agentic/orchestration/worktrees/TASK-915" ]
+    rm -rf "$TMPD"
+}
+
+@test "--skeleton blocks pending approval with --push" {
+    have git || skip "git not available"
+    TMPD="$(mktemp -d)"
+    make_git_repo "$TMPD"
+    setup_task_file "$TMPD" "TASK-916.md" "- None identified"
+    add_skeleton_section "$TMPD" "TASK-916.md" "pending" "true"
+    run bash -c "cd '$TMPD' && bash '$COORD' --skeleton --approve --push --worker 'echo hi' .agentic/tasks/TASK-916.md 2>&1"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"SKELETON_APPROVAL_PENDING"* ]]
+    [ ! -d "$TMPD/.agentic/orchestration/worktrees/TASK-916" ]
+    rm -rf "$TMPD"
+}
+
+@test "--skeleton blocks pending approval with --cleanup" {
+    have git || skip "git not available"
+    TMPD="$(mktemp -d)"
+    make_git_repo "$TMPD"
+    setup_task_file "$TMPD" "TASK-917.md" "- None identified"
+    add_skeleton_section "$TMPD" "TASK-917.md" "pending" "true"
+    run bash -c "cd '$TMPD' && bash '$COORD' --skeleton --approve --cleanup --worker 'echo hi' .agentic/tasks/TASK-917.md 2>&1"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"SKELETON_APPROVAL_PENDING"* ]]
+    [ ! -d "$TMPD/.agentic/orchestration/worktrees/TASK-917" ]
+    rm -rf "$TMPD"
+}
+
+@test "--skeleton emits skeleton_checkpoint before worker_completed when the check passes" {
+    have git || skip "git not available"
+    have python3 || skip "python3 not available"
+    TMPD="$(mktemp -d)"
+    make_git_repo "$TMPD"
+    setup_task_file "$TMPD" "TASK-918.md" "- None identified"
+    add_skeleton_section "$TMPD" "TASK-918.md" "approved by Tester on 2026-09-28" "true"
+    run bash -c "cd '$TMPD' && bash '$COORD' --skeleton --approve --worker 'echo hi' --events .agentic/runs/sk.jsonl .agentic/tasks/TASK-918.md 2>&1"
+    [ "$status" -eq 0 ]
+    [ -f "$TMPD/.agentic/runs/sk.jsonl" ]
+    grep -q 'skeleton_checkpoint' "$TMPD/.agentic/runs/sk.jsonl"
+    sk_line="$(grep -n 'skeleton_checkpoint' "$TMPD/.agentic/runs/sk.jsonl" | head -n 1 | cut -d: -f1)"
+    wc_line="$(grep -n 'worker_completed' "$TMPD/.agentic/runs/sk.jsonl" | head -n 1 | cut -d: -f1)"
+    [ "$sk_line" -lt "$wc_line" ]
+    tail -n 1 "$TMPD/.agentic/runs/sk.jsonl" | grep -q '"result":"PASS"'
+    if python3 -c "import jsonschema" 2>/dev/null; then
+        python3 - "$SCHEMA_EVENTS" "$TMPD/.agentic/runs/sk.jsonl" <<'PYEOF'
+import json, sys
+from jsonschema import validate
+with open(sys.argv[1]) as f:
+    schema = json.load(f)
+with open(sys.argv[2]) as f:
+    for line in f:
+        validate(instance=json.loads(line), schema=schema)
+PYEOF
+    fi
+    rm -rf "$TMPD"
+}
+
+@test "--skeleton approved approval allows --cleanup after a passing check" {
+    have git || skip "git not available"
+    TMPD="$(mktemp -d)"
+    make_git_repo "$TMPD"
+    setup_task_file "$TMPD" "TASK-920.md" "- None identified"
+    add_skeleton_section "$TMPD" "TASK-920.md" "approved by Tester on 2026-09-28" "true"
+    run bash -c "cd '$TMPD' && bash '$COORD' --skeleton --approve --cleanup --worker 'echo hi' .agentic/tasks/TASK-920.md 2>&1"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"checkpoint passed"* ]]
+    [ ! -d "$TMPD/.agentic/orchestration/worktrees/TASK-920" ]
+    rm -rf "$TMPD"
+}
+
+@test "--skeleton fails the run with SKELETON_CHECK_FAILED when the check fails" {
+    have git || skip "git not available"
+    TMPD="$(mktemp -d)"
+    make_git_repo "$TMPD"
+    setup_task_file "$TMPD" "TASK-919.md" "- None identified"
+    add_skeleton_section "$TMPD" "TASK-919.md" "approved by Tester on 2026-09-28" "false"
+    run bash -c "cd '$TMPD' && bash '$COORD' --skeleton --approve --worker 'echo hi' --events .agentic/runs/skf.jsonl .agentic/tasks/TASK-919.md 2>&1"
+    [ "$status" -eq 1 ]
+    grep -q 'worker_completed' "$TMPD/.agentic/runs/skf.jsonl"
+    grep -q '"reason_code":"SKELETON_CHECK_FAILED"' "$TMPD/.agentic/runs/skf.jsonl"
+    ! grep -q 'skeleton_checkpoint' "$TMPD/.agentic/runs/skf.jsonl"
+    tail -n 1 "$TMPD/.agentic/runs/skf.jsonl" | grep -q '"result":"FAIL"'
     rm -rf "$TMPD"
 }

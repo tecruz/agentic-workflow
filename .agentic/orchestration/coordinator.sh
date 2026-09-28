@@ -25,6 +25,10 @@
 #                         Falls back to AGENTIC_WORKER_SANDBOX_IMAGE env var.
 #   --review              Run task validators (validate-task/context/skills) after
 #                         the worker completes; fails the run on validation errors.
+#   --skeleton            Require a canonical '## Walking skeleton' section in the
+#                         task file, refuse --push/--cleanup while its approval is
+#                         pending, and run its integrated check inside the worktree
+#                         after a passing worker and review stage.
 #   --hooks <dir>         Directory of hook scripts invoked at lifecycle events:
 #                         pre-spawn, post-worker, post-review. Each hook receives
 #                         the task file path as $1 and the worktree as $2.
@@ -62,6 +66,9 @@ PROJECT_ROOT=""
 SANDBOX="none"
 SANDBOX_IMAGE=""
 REVIEW=0
+SKELETON=0
+SKELETON_CHECK_CMD=""
+SKELETON_APPROVAL=""
 HOOKS_DIR=""
 TRACE_ID=""
 SPAN_ID=""
@@ -90,6 +97,9 @@ Options:
   --sandbox-image <img> Custom container image for sandbox mode
                         (falls back to AGENTIC_WORKER_SANDBOX_IMAGE env var)
   --review              Run task validators after worker completes
+  --skeleton            Require a canonical '## Walking skeleton' section; gate
+                        --push/--cleanup on its approval and run its integrated
+                        check after a passing worker and review stage
   --hooks <dir>         Hook scripts directory (pre-spawn, post-worker, post-review)
   --traceparent <tp>    W3C Trace Context parent (falls back to TRACEPARENT env var)
   -h, --help            Show this help
@@ -335,6 +345,19 @@ emit_worker_completed() {
     write_event "$payload"
 }
 
+emit_skeleton_checkpoint() {
+    local worker_id="$1" cwd_rel="$2"
+    local esc_id esc_cwd
+    esc_id="$(json_escape "$worker_id")"
+    esc_cwd="$(json_escape "$cwd_rel")"
+    local trace_json=""
+    if [ -n "$TRACE_ID" ]; then
+        trace_json=",\"trace_id\":\"$(json_escape "$TRACE_ID")\",\"span_id\":\"$(json_escape "$SPAN_ID")\""
+    fi
+    local payload="{\"event\":\"skeleton_checkpoint\",\"worker_id\":\"$esc_id\",\"working_directory\":\"$esc_cwd\",\"check_exit_code\":0${trace_json}}"
+    write_event "$payload"
+}
+
 emit_orchestration_completed() {
     local result="$1" exit_code="$2"
     local trace_json=""
@@ -480,6 +503,10 @@ while [ $# -gt 0 ]; do
             ;;
         --review)
             REVIEW=1
+            shift
+            ;;
+        --skeleton)
+            SKELETON=1
             shift
             ;;
         --hooks)
@@ -783,6 +810,133 @@ if [ -n "$WORKER_CMD" ] || [ "$PUSH" -eq 1 ]; then
     if [ "$APPROVE" -ne 1 ]; then
         # If has_none, we still require the flag per design "flag is still required"
         fail_with_result "BLOCKED" 2 "spawning workers requires --approve." "APPROVAL_UNRESOLVED"
+    fi
+fi
+
+# Walking skeleton inspection (opt-in --skeleton): parse the canonical section
+# before any lock, worktree, or worker so missing, malformed, and pending states
+# block early.
+if [ "$SKELETON" -eq 1 ]; then
+    skeleton_content=""
+    in_skeleton=0
+    in_fence=0
+    in_comment=0
+    while IFS= read -r line || [ -n "$line" ]; do
+        line_nocr="${line%$'\r'}"
+        if [ "$in_comment" -eq 1 ]; then
+            case "$line_nocr" in
+                *'-->'*) in_comment=0 ;;
+            esac
+            continue
+        fi
+        case "$line_nocr" in
+            *'<!--'*)
+                case "$line_nocr" in
+                    *'-->'*) continue ;;
+                    *) in_comment=1; continue ;;
+                esac
+                ;;
+        esac
+        if [ "$in_fence" -eq 1 ]; then
+            case "$line_nocr" in
+                '```'*) in_fence=0 ;;
+            esac
+            continue
+        fi
+        case "$line_nocr" in
+            '```'*) in_fence=1; continue ;;
+        esac
+        case "$line_nocr" in
+            '## '*)
+                norm="$(printf '%s' "${line_nocr#'## '}" | tr '[:upper:]' '[:lower:]' | tr -s '[:space:]' ' ' | sed -e 's/^ //' -e 's/ $//')"
+                if [ "$norm" = "walking skeleton" ]; then
+                    in_skeleton=1
+                else
+                    if [ "$in_skeleton" -eq 1 ]; then
+                        break
+                    fi
+                fi
+                continue
+                ;;
+        esac
+        if [ "$in_skeleton" -eq 1 ]; then
+            skeleton_content="${skeleton_content}${line_nocr}
+"
+        fi
+    done < "$TASK_FILE"
+
+    sk_slice=0
+    sk_check=0
+    sk_appro=0
+    sk_malformed=0
+    sk_slice_val=""
+    sk_check_val=""
+    sk_appro_val=""
+    while IFS= read -r sk_line || [ -n "$sk_line" ]; do
+        sk_trim="$(printf '%s' "$sk_line" | sed -E 's/^[[:space:]]+|[[:space:]]+$//')"
+        [ -z "$sk_trim" ] && continue
+        case "$sk_trim" in
+            [-*+]*) ;;
+            *) sk_malformed=1; continue ;;
+        esac
+        sk_body="$(printf '%s' "$sk_trim" | sed -E 's/^[-*+][[:space:]]+//')"
+        case "$sk_body" in
+            'Slice: '*)
+                [ "$sk_slice" -eq 1 ] && sk_malformed=1
+                sk_slice=1
+                sk_slice_val="${sk_body#Slice: }"
+                ;;
+            'Integrated check: '*)
+                [ "$sk_check" -eq 1 ] && sk_malformed=1
+                sk_check=1
+                sk_check_val="${sk_body#Integrated check: }"
+                ;;
+            'Skeleton approval: '*)
+                [ "$sk_appro" -eq 1 ] && sk_malformed=1
+                sk_appro=1
+                sk_appro_val="${sk_body#Skeleton approval: }"
+                ;;
+            *)
+                sk_malformed=1
+                ;;
+        esac
+    done <<< "$skeleton_content"
+
+    if [ "$sk_slice" -ne 1 ] || [ "$sk_check" -ne 1 ] || [ "$sk_appro" -ne 1 ] || [ "$sk_malformed" -eq 1 ]; then
+        fail_with_result "BLOCKED" 2 "walking skeleton section is missing or malformed; require exactly one '- Slice:', '- Integrated check:', and '- Skeleton approval: pending | approved by <approver> on YYYY-MM-DD'." "WORKER_BLOCKED"
+    fi
+    if ! printf '%s' "$sk_slice_val" | grep -qE '[[:alnum:]]'; then
+        fail_with_result "BLOCKED" 2 "walking skeleton '- Slice:' must record a substantive value." "WORKER_BLOCKED"
+    fi
+    if ! printf '%s' "$sk_check_val" | grep -qE '[[:alnum:]]'; then
+        fail_with_result "BLOCKED" 2 "walking skeleton '- Integrated check:' must record a substantive command." "WORKER_BLOCKED"
+    fi
+    SKELETON_CHECK_CMD="$sk_check_val"
+    case "$sk_appro_val" in
+        pending)
+            SKELETON_APPROVAL="pending"
+            ;;
+        approved\ by\ *" on "*)
+            _sk_rest="${sk_appro_val#approved by }"
+            _sk_approver="${_sk_rest% on *}"
+            _sk_date="${_sk_rest##* on }"
+            if ! printf '%s' "$_sk_approver" | grep -qE '[[:alnum:]]'; then
+                fail_with_result "BLOCKED" 2 "walking skeleton approval must record a meaningful approver." "WORKER_BLOCKED"
+            fi
+            if printf '%s' "$_sk_approver" | grep -qiE '<|>|tbd|unknown|n/a'; then
+                fail_with_result "BLOCKED" 2 "walking skeleton approval must record a meaningful approver." "WORKER_BLOCKED"
+            fi
+            if ! printf '%s' "$_sk_date" | grep -qE '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$'; then
+                fail_with_result "BLOCKED" 2 "walking skeleton approval has an invalid ISO date." "WORKER_BLOCKED"
+            fi
+            SKELETON_APPROVAL="approved"
+            ;;
+        *)
+            fail_with_result "BLOCKED" 2 "walking skeleton '- Skeleton approval:' must be 'pending' or 'approved by <approver> on YYYY-MM-DD'." "WORKER_BLOCKED"
+            ;;
+    esac
+    if [ "$SKELETON_APPROVAL" = "pending" ] && { [ "$PUSH" -eq 1 ] || [ "$CLEANUP" -eq 1 ]; }; then
+        fail_with_result "BLOCKED" 2 "SKELETON_APPROVAL_PENDING: skeleton approval is pending; record '- Skeleton approval: approved by <approver> on YYYY-MM-DD' before --push or --cleanup." "WORKER_BLOCKED"
     fi
 fi
 
@@ -1197,6 +1351,68 @@ if [ -n "$HOOKS_DIR" ] && [ -d "$HOOKS_DIR" ] && [ -x "$HOOKS_DIR/post-review" ]
         exit_code=1
         workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"FAIL\",\"exit_code\":1,\"duration_ms\":$duration_ms,\"reason_code\":\"REVIEW_FAILED\"}"
         summary_json="{\"workers_defined\":1,\"workers_run\":1,\"passed\":0,\"failed\":1,\"blocked\":0}"
+    fi
+fi
+
+# --- Walking skeleton checkpoint (runs only when --skeleton and worker+review passed) ---
+if [ "$SKELETON" -eq 1 ] && [ "$result" = "PASS" ]; then
+    log "Running walking skeleton integrated check..."
+    sk_check_exit=0
+    sk_check_ok=0
+    if [ "$SANDBOX" != "none" ]; then
+        _sk_image="${SANDBOX_IMAGE:-ubuntu:24.04}"
+        _sk_trace_arg=""
+        if [ -n "$TRACE_ID" ]; then
+            _sk_trace_arg="TRACEPARENT=00-${TRACE_ID}-${SPAN_ID}-${TRACE_FLAGS}"
+        fi
+        if [ "$FORMAT" = "json" ]; then
+            if [ -n "$_sk_trace_arg" ]; then
+                (cd "$WORKTREE_ABS" && "$container_runtime" run --rm -e "$_sk_trace_arg" -v "$(pwd):/work" -w /work "$_sk_image" bash -c "$SKELETON_CHECK_CMD") >&2 && sk_check_ok=1
+            else
+                (cd "$WORKTREE_ABS" && "$container_runtime" run --rm -v "$(pwd):/work" -w /work "$_sk_image" bash -c "$SKELETON_CHECK_CMD") >&2 && sk_check_ok=1
+            fi
+            sk_check_exit=$?
+        else
+            if [ -n "$_sk_trace_arg" ]; then
+                (cd "$WORKTREE_ABS" && "$container_runtime" run --rm -e "$_sk_trace_arg" -v "$(pwd):/work" -w /work "$_sk_image" bash -c "$SKELETON_CHECK_CMD") && sk_check_ok=1
+            else
+                (cd "$WORKTREE_ABS" && "$container_runtime" run --rm -v "$(pwd):/work" -w /work "$_sk_image" bash -c "$SKELETON_CHECK_CMD") && sk_check_ok=1
+            fi
+            sk_check_exit=$?
+        fi
+    else
+        if [ "$FORMAT" = "json" ]; then
+            (cd "$WORKTREE_ABS" && bash -c "$SKELETON_CHECK_CMD") >&2 && sk_check_ok=1
+            sk_check_exit=$?
+        else
+            (cd "$WORKTREE_ABS" && bash -c "$SKELETON_CHECK_CMD") && sk_check_ok=1
+            sk_check_exit=$?
+        fi
+    fi
+    if [ "$sk_check_ok" -eq 1 ]; then
+        sk_check_exit=0
+    else
+        [ "$sk_check_exit" -eq 0 ] && sk_check_exit=1
+    fi
+    if [ "$sk_check_exit" -ne 0 ]; then
+        status="FAIL"
+        reason_code="SKELETON_CHECK_FAILED"
+        worker_exit=1
+        exit_code_str="1"
+        result="FAIL"
+        exit_code=1
+        workers_json="{\"worker_id\":\"$(json_escape "$worker_id")\",\"status\":\"FAIL\",\"exit_code\":1,\"duration_ms\":$duration_ms,\"reason_code\":\"SKELETON_CHECK_FAILED\"}"
+        summary_json="{\"workers_defined\":1,\"workers_run\":1,\"passed\":0,\"failed\":1,\"blocked\":0}"
+        log "Walking skeleton integrated check failed; marking orchestration as FAIL."
+    else
+        if [ -n "$EVENTS_FILE" ]; then
+            emit_skeleton_checkpoint "$worker_id" "$cwd_rel" || {
+                echo "ERROR: failed to write skeleton_checkpoint event." >&2
+                rm -f "$LOCK_FILE" 2>/dev/null || true
+                exit 1
+            }
+        fi
+        log "Walking skeleton checkpoint passed."
     fi
 fi
 

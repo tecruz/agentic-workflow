@@ -78,6 +78,12 @@ $Approval
             git -C $Dir commit --allow-empty -m "init" -q 2>$null
         }
 
+        function Add-SkeletonSection {
+            param([string]$Dir, [string]$Name, [string]$Approval, [string]$Check)
+            $add = "`n## Walking skeleton`n`n- Slice: minimal end-to-end path`n- Integrated check: $Check`n- Skeleton approval: $Approval`n"
+            Add-Content -LiteralPath (Join-Path $Dir ".agentic\tasks\$Name") -Value $add
+        }
+
         function Invoke-Coord {
             param([string]$Dir, [Parameter(ValueFromRemainingArguments=$true)][string[]]$Args)
             Push-Location $Dir
@@ -197,6 +203,104 @@ $Approval
             $manifest = Get-Content -Raw (Join-Path $tmp '.agentic\install-manifest.tsv')
             $manifest -match "\.agentic/orchestration/coordinator\.ps1`tmanaged" | Should -Be $true
             $manifest -match "\.agentic/schemas/orchestration-result-v1\.schema\.json`tmanaged" | Should -Be $true
+        } finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-Skeleton blocks missing Walking skeleton section' {
+        $tmp = New-TestDir
+        try {
+            Init-GitRepo $tmp
+            New-TaskFile $tmp 'TASK-914.md' '- None identified'
+            $r = Invoke-Coord $tmp @('-Skeleton', '-Approve', '-Worker', 'echo hi', '.agentic/tasks/TASK-914.md')
+            $r.Code | Should -Be 2
+            $r.Output | Should -Match 'walking skeleton section is missing or malformed'
+            Test-Path (Join-Path $tmp '.agentic\orchestration\worktrees\TASK-914') | Should -Be $false
+        } finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-Skeleton blocks malformed Skeleton approval value' {
+        $tmp = New-TestDir
+        try {
+            Init-GitRepo $tmp
+            New-TaskFile $tmp 'TASK-915.md' '- None identified'
+            Add-SkeletonSection $tmp 'TASK-915.md' 'maybe' 'true'
+            $r = Invoke-Coord $tmp @('-Skeleton', '-Approve', '-Worker', 'echo hi', '.agentic/tasks/TASK-915.md')
+            $r.Code | Should -Be 2
+            $r.Output | Should -Match "must be 'pending' or 'approved by <approver> on YYYY-MM-DD'"
+            Test-Path (Join-Path $tmp '.agentic\orchestration\worktrees\TASK-915') | Should -Be $false
+        } finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-Skeleton blocks pending approval with -Push' {
+        $tmp = New-TestDir
+        try {
+            Init-GitRepo $tmp
+            New-TaskFile $tmp 'TASK-916.md' '- None identified'
+            Add-SkeletonSection $tmp 'TASK-916.md' 'pending' 'true'
+            $r = Invoke-Coord $tmp @('-Skeleton', '-Approve', '-Push', '-Worker', 'echo hi', '.agentic/tasks/TASK-916.md')
+            $r.Code | Should -Be 2
+            $r.Output | Should -Match 'SKELETON_APPROVAL_PENDING'
+            Test-Path (Join-Path $tmp '.agentic\orchestration\worktrees\TASK-916') | Should -Be $false
+        } finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-Skeleton blocks pending approval with -Cleanup' {
+        $tmp = New-TestDir
+        try {
+            Init-GitRepo $tmp
+            New-TaskFile $tmp 'TASK-917.md' '- None identified'
+            Add-SkeletonSection $tmp 'TASK-917.md' 'pending' 'true'
+            $r = Invoke-Coord $tmp @('-Skeleton', '-Approve', '-Cleanup', '-Worker', 'echo hi', '.agentic/tasks/TASK-917.md')
+            $r.Code | Should -Be 2
+            $r.Output | Should -Match 'SKELETON_APPROVAL_PENDING'
+            Test-Path (Join-Path $tmp '.agentic\orchestration\worktrees\TASK-917') | Should -Be $false
+        } finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-Skeleton emits skeleton_checkpoint before worker_completed when the check passes' {
+        $tmp = New-TestDir
+        try {
+            Init-GitRepo $tmp
+            New-TaskFile $tmp 'TASK-918.md' '- None identified'
+            Add-SkeletonSection $tmp 'TASK-918.md' 'approved by Tester on 2026-09-28' 'true'
+            $r = Invoke-Coord $tmp @('-Skeleton', '-Approve', '-Worker', 'echo hi', '-Events', '.agentic/runs/sk.jsonl', '.agentic/tasks/TASK-918.md')
+            $r.Code | Should -Be 0
+            $eventsPath = Join-Path $tmp '.agentic\runs\sk.jsonl'
+            Test-Path -LiteralPath $eventsPath | Should -Be $true
+            $lines = Get-Content -LiteralPath $eventsPath
+            $skIdx = [array]::FindIndex($lines, [Predicate[string]]{ param($l) $l -match 'skeleton_checkpoint' })
+            $wcIdx = [array]::FindIndex($lines, [Predicate[string]]{ param($l) $l -match 'worker_completed' })
+            $skIdx | Should -BeGreaterOrEqual 0
+            $wcIdx | Should -BeGreaterThan $skIdx
+            $lines[-1] | Should -Match '"result":"PASS"'
+        } finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-Skeleton approved approval allows -Cleanup after a passing check' {
+        $tmp = New-TestDir
+        try {
+            Init-GitRepo $tmp
+            New-TaskFile $tmp 'TASK-920.md' '- None identified'
+            Add-SkeletonSection $tmp 'TASK-920.md' 'approved by Tester on 2026-09-28' 'true'
+            $r = Invoke-Coord $tmp @('-Skeleton', '-Approve', '-Cleanup', '-Worker', 'echo hi', '.agentic/tasks/TASK-920.md')
+            $r.Code | Should -Be 0
+            $r.Output | Should -Match 'checkpoint passed'
+            Test-Path (Join-Path $tmp '.agentic\orchestration\worktrees\TASK-920') | Should -Be $false
+        } finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+
+    It '-Skeleton fails the run with SKELETON_CHECK_FAILED when the check fails' {
+        $tmp = New-TestDir
+        try {
+            Init-GitRepo $tmp
+            New-TaskFile $tmp 'TASK-919.md' '- None identified'
+            Add-SkeletonSection $tmp 'TASK-919.md' 'approved by Tester on 2026-09-28' 'false'
+            $r = Invoke-Coord $tmp @('-Skeleton', '-Approve', '-Worker', 'echo hi', '-Events', '.agentic/runs/skf.jsonl', '.agentic/tasks/TASK-919.md')
+            $r.Code | Should -Be 1
+            $eventsPath = Join-Path $tmp '.agentic\runs\skf.jsonl'
+            Get-Content -LiteralPath $eventsPath -Raw | Should -Match '"reason_code":"SKELETON_CHECK_FAILED"'
+            (Get-Content -LiteralPath $eventsPath -Raw) | Should -Not -Match 'skeleton_checkpoint'
+            (Get-Content -LiteralPath $eventsPath)[-1] | Should -Match '"result":"FAIL"'
         } finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
     }
 }

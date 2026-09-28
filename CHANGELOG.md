@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Walking-skeleton checkpoint in orchestration.** The optional
+  `--skeleton` / `-Skeleton` flag makes the coordinator enforce a canonical
+  `## Walking skeleton` task section (`- Slice:`, `- Integrated check:`,
+  `- Skeleton approval: pending | approved by <approver> on YYYY-MM-DD`).
+  Missing, malformed, or non-substantive sections block with exit 2 before
+  any lock, worktree, or worker; a pending approval combined with
+  `--push`/`--cleanup` (`-Push`/`-Cleanup`) blocks with
+  `SKELETON_APPROVAL_PENDING`. After worker and review stages pass, the
+  recorded integrated check runs in the worktree (sandbox-aware) — success
+  emits a `skeleton_checkpoint` JSONL event (emitted only on success, so
+  `check_exit_code` is `const: 0`) before `worker_completed`, failure marks
+  the run FAIL with `SKELETON_CHECK_FAILED` in the result and events.
+  `orchestration-events-v1` (five definitions) and `orchestration-result-v1`
+  admit the new code; documented in the orchestration README, root README,
+  task template, and ADR-0018; covered by six mirrored Bats/Pester tests.
+  Runs without the flag are byte-identical to the previous contract.
+  (TASK-049)
 - **Explicit deviation recording in the task contract.** Two optional
   task-file sections plus a completion protocol make process deviations
   auditable instead of silent. `## Phase route` records each of the six loop
